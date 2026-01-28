@@ -1146,6 +1146,10 @@ interface ConversationTurn {
     toolProgress?: ToolProgress[];
     /** Document index from Vectorless (smart parsing) */
     documentIndex?: DocumentIndex;
+    /** Error message if turn failed */
+    error?: string;
+    /** Whether turn is still loading */
+    isLoading?: boolean;
 }
 /**
  * Minimal message format for AI SDK multi-turn conversations.

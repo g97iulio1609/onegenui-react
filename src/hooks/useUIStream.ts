@@ -112,6 +112,7 @@ export function useUIStream({
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const sendingRef = useRef(false); // Guard against concurrent sends
 
   const clear = useCallback(() => {
     setTree(null);
@@ -178,9 +179,17 @@ export function useUIStream({
       context?: Record<string, unknown>,
       attachments?: any[],
     ) => {
+      // Prevent concurrent sends
+      if (sendingRef.current) {
+        console.warn("[useUIStream] Ignoring concurrent send request");
+        return;
+      }
+      sendingRef.current = true;
+
       // Abort any existing request
       abortControllerRef.current?.abort();
       abortControllerRef.current = new AbortController();
+      const signal = abortControllerRef.current.signal;
 
       setIsStreaming(true);
       setError(null);
@@ -190,9 +199,10 @@ export function useUIStream({
         ? JSON.parse(JSON.stringify(treeRef.current))
         : { root: "", elements: {} };
 
-      // If no tree existed, initialize it
+      // If no tree existed, initialize it and sync ref immediately
       if (!treeRef.current) {
         setTree(currentTree);
+        treeRef.current = currentTree; // Sync ref immediately to prevent race conditions
       }
 
       // OPTIMISTIC UI: Create the turn immediately so user message is visible
@@ -207,8 +217,13 @@ export function useUIStream({
         timestamp: Date.now(),
         isProactive,
         attachments,
+        isLoading: true, // Mark as loading during streaming
       };
       setConversation((prev) => [...prev, pendingTurn]);
+
+      // Batch processing variables - declared outside try for cleanup in catch
+      let patchBuffer: JsonPatch[] = [];
+      let patchFlushTimer: ReturnType<typeof setTimeout> | null = null;
 
       try {
         const hasTreeContext =
@@ -322,10 +337,6 @@ export function useUIStream({
         const currentToolProgress: ToolProgress[] = [];
         const currentPersistedAttachments: PersistedAttachment[] = [];
         let currentDocumentIndex: DocumentIndex | undefined = undefined;
-
-        // Batch processing for order-independent tree building
-        let patchBuffer: JsonPatch[] = [];
-        let patchFlushTimer: ReturnType<typeof setTimeout> | null = null;
 
         // Helper to update the pending turn
         const updateTurnData = () => {
@@ -605,7 +616,8 @@ export function useUIStream({
           }
         }
 
-        // Final setTree with fresh reference
+        // Final setTree with fresh reference and sync ref
+        treeRef.current = currentTree;
         setTree({ ...currentTree });
 
         // Clear flush timer if pending
@@ -618,10 +630,14 @@ export function useUIStream({
         if (patchBuffer.length > 0) {
           currentTree = applyPatchesBatch(currentTree, patchBuffer, turnId);
           patchBuffer = [];
+          treeRef.current = currentTree;
           setTree({ ...currentTree });
         }
 
-        // Finalize
+        // Check abort before final state updates
+        if (signal.aborted) return;
+
+        // Finalize - mark loading complete
         setConversation((prev) =>
           prev.map((t) =>
             t.id === turnId
@@ -632,6 +648,7 @@ export function useUIStream({
                   suggestions: [...currentSuggestions],
                   treeSnapshot: JSON.parse(JSON.stringify(currentTree)),
                   documentIndex: currentDocumentIndex ?? t.documentIndex,
+                  isLoading: false, // Loading complete
                 } as ConversationTurn)
               : t,
           ),
@@ -639,6 +656,13 @@ export function useUIStream({
 
         onComplete?.(currentTree);
       } catch (err) {
+        // Clear buffer and timer on any error
+        if (patchFlushTimer) {
+          clearTimeout(patchFlushTimer);
+          patchFlushTimer = null;
+        }
+        patchBuffer = [];
+
         if ((err as Error).name === "AbortError") {
           setConversation((prev) => prev.filter((t) => t.id !== turnId));
           return;
@@ -646,8 +670,19 @@ export function useUIStream({
         const error = err instanceof Error ? err : new Error(String(err));
         setError(error);
         onError?.(error);
-        setConversation((prev) => prev.filter((t) => t.id !== turnId));
+        // Mark turn as failed instead of removing it
+        setConversation((prev) =>
+          prev.map((t) =>
+            t.id === turnId
+              ? ({
+                  ...t,
+                  error: error.message,
+                } as ConversationTurn)
+              : t,
+          ),
+        );
       } finally {
+        sendingRef.current = false;
         setIsStreaming(false);
       }
     },

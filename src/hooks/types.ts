@@ -176,6 +176,10 @@ export interface ConversationTurn {
   toolProgress?: ToolProgress[];
   /** Document index from Vectorless (smart parsing) */
   documentIndex?: DocumentIndex;
+  /** Error message if turn failed */
+  error?: string;
+  /** Whether turn is still loading */
+  isLoading?: boolean;
 }
 
 /**

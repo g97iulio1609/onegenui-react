@@ -5736,6 +5736,7 @@ function useUIStream({
   const [isStreaming, setIsStreaming] = (0, import_react29.useState)(false);
   const [error, setError] = (0, import_react29.useState)(null);
   const abortControllerRef = (0, import_react29.useRef)(null);
+  const sendingRef = (0, import_react29.useRef)(false);
   const clear = (0, import_react29.useCallback)(() => {
     setTree(null);
     setConversation([]);
@@ -5789,13 +5790,20 @@ function useUIStream({
   );
   const send = (0, import_react29.useCallback)(
     async (prompt, context, attachments) => {
+      if (sendingRef.current) {
+        console.warn("[useUIStream] Ignoring concurrent send request");
+        return;
+      }
+      sendingRef.current = true;
       abortControllerRef.current?.abort();
       abortControllerRef.current = new AbortController();
+      const signal = abortControllerRef.current.signal;
       setIsStreaming(true);
       setError(null);
       let currentTree = treeRef.current ? JSON.parse(JSON.stringify(treeRef.current)) : { root: "", elements: {} };
       if (!treeRef.current) {
         setTree(currentTree);
+        treeRef.current = currentTree;
       }
       const isProactive = context?.hideUserMessage === true;
       const turnId = `turn-${Date.now()}`;
@@ -5807,9 +5815,13 @@ function useUIStream({
         // Will be set on completion
         timestamp: Date.now(),
         isProactive,
-        attachments
+        attachments,
+        isLoading: true
+        // Mark as loading during streaming
       };
       setConversation((prev) => [...prev, pendingTurn]);
+      let patchBuffer = [];
+      let patchFlushTimer = null;
       try {
         const hasTreeContext = context && typeof context === "object" && "tree" in context;
         const conversationMessages = buildConversationMessages(conversation);
@@ -5897,8 +5909,6 @@ function useUIStream({
         const currentToolProgress = [];
         const currentPersistedAttachments = [];
         let currentDocumentIndex = void 0;
-        let patchBuffer = [];
-        let patchFlushTimer = null;
         const updateTurnData = () => {
           setConversation(
             (prev) => prev.map(
@@ -6102,6 +6112,7 @@ function useUIStream({
             }
           }
         }
+        treeRef.current = currentTree;
         setTree({ ...currentTree });
         if (patchFlushTimer) {
           clearTimeout(patchFlushTimer);
@@ -6110,8 +6121,10 @@ function useUIStream({
         if (patchBuffer.length > 0) {
           currentTree = applyPatchesBatch(currentTree, patchBuffer, turnId);
           patchBuffer = [];
+          treeRef.current = currentTree;
           setTree({ ...currentTree });
         }
+        if (signal.aborted) return;
         setConversation(
           (prev) => prev.map(
             (t) => t.id === turnId ? {
@@ -6120,12 +6133,19 @@ function useUIStream({
               questions: [...currentQuestions],
               suggestions: [...currentSuggestions],
               treeSnapshot: JSON.parse(JSON.stringify(currentTree)),
-              documentIndex: currentDocumentIndex ?? t.documentIndex
+              documentIndex: currentDocumentIndex ?? t.documentIndex,
+              isLoading: false
+              // Loading complete
             } : t
           )
         );
         onComplete?.(currentTree);
       } catch (err) {
+        if (patchFlushTimer) {
+          clearTimeout(patchFlushTimer);
+          patchFlushTimer = null;
+        }
+        patchBuffer = [];
         if (err.name === "AbortError") {
           setConversation((prev) => prev.filter((t) => t.id !== turnId));
           return;
@@ -6133,8 +6153,16 @@ function useUIStream({
         const error2 = err instanceof Error ? err : new Error(String(err));
         setError(error2);
         onError?.(error2);
-        setConversation((prev) => prev.filter((t) => t.id !== turnId));
+        setConversation(
+          (prev) => prev.map(
+            (t) => t.id === turnId ? {
+              ...t,
+              error: error2.message
+            } : t
+          )
+        );
       } finally {
+        sendingRef.current = false;
         setIsStreaming(false);
       }
     },
