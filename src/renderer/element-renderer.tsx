@@ -1,0 +1,188 @@
+"use client";
+
+import React, { type ReactNode } from "react";
+import type { UIElement, UITree } from "@onegenui/core";
+import { useIsVisible } from "../contexts/visibility";
+import { useActions } from "../contexts/actions";
+import { useMarkdown } from "../contexts/markdown";
+import { ResizableWrapper } from "../components/ResizableWrapper";
+import { SelectionWrapper } from "../components/SelectionWrapper";
+import type { ComponentRegistry, ComponentRenderer } from "./types";
+
+interface ElementRendererProps {
+  element: UIElement;
+  tree: UITree;
+  registry: ComponentRegistry;
+  loading?: boolean;
+  fallback?: ComponentRenderer;
+  selectable?: boolean;
+  onElementSelect?: (element: UIElement) => void;
+  selectionDelayMs: number;
+  selectedKey?: string | null;
+  onResize?: (
+    elementKey: string,
+    size: { width: number; height: number },
+  ) => void;
+}
+
+/**
+ * Memoization comparator: structural sharing in patch-utils.ts means only
+ * modified elements get new references. This enables O(1) equality checks.
+ */
+function elementRendererPropsAreEqual(
+  prevProps: ElementRendererProps,
+  nextProps: ElementRendererProps,
+): boolean {
+  if (prevProps.element !== nextProps.element) {
+    return false;
+  }
+
+  const wasSelected = prevProps.selectedKey === prevProps.element.key;
+  const isSelected = nextProps.selectedKey === nextProps.element.key;
+  if (wasSelected !== isSelected) {
+    return false;
+  }
+
+  if (prevProps.loading !== nextProps.loading) {
+    return false;
+  }
+
+  if (prevProps.tree !== nextProps.tree) {
+    const children = prevProps.element.children;
+    if (children) {
+      for (const childKey of children) {
+        if (
+          prevProps.tree.elements[childKey] !==
+          nextProps.tree.elements[childKey]
+        ) {
+          return false;
+        }
+      }
+    }
+  }
+
+  return true;
+}
+
+export const ElementRenderer = React.memo(function ElementRenderer({
+  element,
+  tree,
+  registry,
+  loading,
+  fallback,
+  selectable,
+  onElementSelect,
+  selectionDelayMs,
+  selectedKey,
+  onResize,
+}: ElementRendererProps) {
+  const isVisible = useIsVisible(element.visible);
+  const { execute } = useActions();
+
+  if (!isVisible) {
+    return null;
+  }
+
+  if (
+    element.type === "__placeholder__" ||
+    (element._meta as any)?.isPlaceholder
+  ) {
+    return (
+      <div
+        key={element.key}
+        className="w-full h-16 bg-muted/10 animate-pulse rounded-lg my-2 border border-border/20"
+        data-placeholder-for={element.key}
+      />
+    );
+  }
+
+  const { renderText } = useMarkdown();
+
+  const Component = registry[element.type] ?? fallback;
+
+  if (!Component) {
+    console.warn(`No renderer for component type: ${element.type}`);
+    return null;
+  }
+
+  const children = element.children?.map((childKey, index) => {
+    const childElement = tree.elements[childKey];
+    if (!childElement) {
+      if (loading) {
+        return (
+          <div
+            key={`${childKey}-skeleton`}
+            className="w-full h-12 bg-muted/10 animate-pulse rounded-md my-1"
+          />
+        );
+      }
+      return null;
+    }
+    return (
+      <ElementRenderer
+        key={`${childKey}-${index}`}
+        element={childElement}
+        tree={tree}
+        registry={registry}
+        loading={loading}
+        fallback={fallback}
+        selectable={selectable}
+        onElementSelect={onElementSelect}
+        selectionDelayMs={selectionDelayMs}
+        selectedKey={selectedKey}
+        onResize={onResize}
+      />
+    );
+  });
+
+  const isResizable = element.layout?.resizable !== false;
+
+  const content = (
+    <Component
+      element={element}
+      onAction={execute}
+      loading={loading}
+      renderText={renderText}
+    >
+      {children}
+    </Component>
+  );
+
+  if (selectable && onElementSelect) {
+    const selectionContent = (
+      <SelectionWrapper
+        element={element}
+        enabled={selectable}
+        onSelect={onElementSelect}
+        delayMs={selectionDelayMs}
+        isSelected={selectedKey === element.key}
+      >
+        {content}
+      </SelectionWrapper>
+    );
+
+    if (isResizable) {
+      return (
+        <ResizableWrapper
+          element={element}
+          onResize={onResize}
+          showHandles={selectedKey === element.key}
+        >
+          {selectionContent}
+        </ResizableWrapper>
+      );
+    }
+
+    return selectionContent;
+  }
+
+  if (isResizable) {
+    return (
+      <ResizableWrapper element={element} onResize={onResize}>
+        {content}
+      </ResizableWrapper>
+    );
+  }
+
+  return content;
+}, elementRendererPropsAreEqual);

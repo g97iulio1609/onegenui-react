@@ -1,0 +1,71 @@
+{
+  "name": "@onegenui/react",
+  "version": "0.2.0",
+  "license": "Apache-2.0",
+  "description": "React renderer for @onegenui/core. JSON becomes React components.",
+  "keywords": [
+    "json",
+    "ui",
+    "react",
+    "ai",
+    "generative-ui",
+    "llm",
+    "renderer",
+    "streaming",
+    "components"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/g97iulio1609/Oneui-generate.git",
+    "directory": "packages/react"
+  },
+  "homepage": "https://github.com/g97iulio1609/Oneui-generate#readme",
+  "bugs": {
+    "url": "https://github.com/g97iulio1609/Oneui-generate/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@onegenui/core": "workspace:*",
+    "@onegenui/utils": "workspace:^",
+    "ai": "^6.0.39",
+    "clsx": "^2.1.1",
+    "immer": "^11.1.3",
+    "katex": "^0.16.27",
+    "react-markdown": "^10.1.0",
+    "rehype-katex": "^7.0.1",
+    "remark-math": "^6.0.0",
+    "tailwind-merge": "^3.4.0",
+    "zustand": "^5.0.10"
+  },
+  "devDependencies": {
+    "@repo/typescript-config": "workspace:*",
+    "@types/react": "19.2.3",
+    "@types/react-dom": "19.1.6",
+    "tsup": "^8.0.2",
+    "typescript": "^5.4.5"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}
