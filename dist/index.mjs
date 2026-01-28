@@ -5947,6 +5947,11 @@ function useUIStream({
                   currentToolProgress.push(progress);
                   updateTurnData();
                   const ctx = toolProgressRef.current;
+                  console.debug("[useUIStream] Tool progress received:", {
+                    toolName: progress.toolName,
+                    status: progress.status,
+                    hasContext: !!ctx
+                  });
                   if (ctx) {
                     ctx.addProgress({
                       toolCallId: progress.toolCallId,

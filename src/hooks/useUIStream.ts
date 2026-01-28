@@ -508,6 +508,11 @@ export function useUIStream({
                   // Also update global tool progress context (if provider exists)
                   // Use ref to get current context inside async callback
                   const ctx = toolProgressRef.current;
+                  console.debug("[useUIStream] Tool progress received:", {
+                    toolName: progress.toolName,
+                    status: progress.status,
+                    hasContext: !!ctx,
+                  });
                   if (ctx) {
                     ctx.addProgress({
                       toolCallId: progress.toolCallId,
