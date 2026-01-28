@@ -17,7 +17,6 @@ import type {
 } from "./types";
 import { buildConversationMessages, isFileAttachment, isLibraryAttachment } from "./types";
 import type { DocumentIndex } from "@onegenui/core";
-import { useToolProgressOptional } from "../contexts/tool-progress";
 import { useStore } from "../store";
 import {
   removeElementFromTree,
@@ -46,12 +45,8 @@ export function useUIStream({
   const [conversation, setConversation] = useState<ConversationTurn[]>([]);
   const treeRef = useRef<UITree | null>(null);
 
-  // Global tool progress context (optional)
-  const toolProgressContext = useToolProgressOptional();
-  const toolProgressRef = useRef(toolProgressContext);
-  useEffect(() => {
-    toolProgressRef.current = toolProgressContext;
-  }, [toolProgressContext]);
+  // Tool progress actions from Zustand store (direct store access for reliability)
+  const addProgressEvent = useStore((s) => s.addProgressEvent);
 
   // Plan execution actions from Zustand store
   const setPlanCreated = useStore((s) => s.setPlanCreated);
@@ -64,6 +59,11 @@ export function useUIStream({
   const resetPlanExecution = useStore((s) => s.resetPlanExecution);
 
   // Keep refs for async callbacks
+  const addProgressRef = useRef(addProgressEvent);
+  useEffect(() => {
+    addProgressRef.current = addProgressEvent;
+  }, [addProgressEvent]);
+
   const planStoreRef = useRef({
     setPlanCreated,
     setStepStarted,
@@ -417,17 +417,14 @@ export function useUIStream({
                     currentToolProgress.push(progress);
                     updateTurnData();
 
-                    // Update global tool progress context
-                    const ctx = toolProgressRef.current;
-                    if (ctx) {
-                      ctx.addProgress({
-                        toolCallId: progress.toolCallId,
-                        toolName: progress.toolName,
-                        status: progress.status,
-                        message: progress.message,
-                        data: progress.data,
-                      });
-                    }
+                    // Update global tool progress store directly
+                    addProgressRef.current({
+                      toolCallId: progress.toolCallId,
+                      toolName: progress.toolName,
+                      status: progress.status,
+                      message: progress.message,
+                      data: progress.data,
+                    });
                   } else if (path) {
                     // Tree mutation patch - accumulate in buffer for batch processing
                     patchBuffer.push({
@@ -505,23 +502,18 @@ export function useUIStream({
                   currentToolProgress.push(progress);
                   updateTurnData();
 
-                  // Also update global tool progress context (if provider exists)
-                  // Use ref to get current context inside async callback
-                  const ctx = toolProgressRef.current;
+                  // Update global tool progress store directly
                   console.debug("[useUIStream] Tool progress received:", {
                     toolName: progress.toolName,
                     status: progress.status,
-                    hasContext: !!ctx,
                   });
-                  if (ctx) {
-                    ctx.addProgress({
-                      toolCallId: progress.toolCallId,
-                      toolName: progress.toolName,
-                      status: progress.status,
-                      message: progress.message,
-                      data: progress.data,
-                    });
-                  }
+                  addProgressRef.current({
+                    toolCallId: progress.toolCallId,
+                    toolName: progress.toolName,
+                    status: progress.status,
+                    message: progress.message,
+                    data: progress.data,
+                  });
                 } else if (payload?.type === "document-index-ui") {
                   // Document index from Vectorless smart parsing
                   // Supports multi-document: aggregates subsequent documents

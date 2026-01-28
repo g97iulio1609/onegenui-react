@@ -5680,11 +5680,7 @@ function useUIStream({
   const [tree, setTree] = (0, import_react29.useState)(null);
   const [conversation, setConversation] = (0, import_react29.useState)([]);
   const treeRef = (0, import_react29.useRef)(null);
-  const toolProgressContext = useToolProgressOptional();
-  const toolProgressRef = (0, import_react29.useRef)(toolProgressContext);
-  (0, import_react29.useEffect)(() => {
-    toolProgressRef.current = toolProgressContext;
-  }, [toolProgressContext]);
+  const addProgressEvent = useStore((s) => s.addProgressEvent);
   const setPlanCreated = useStore((s) => s.setPlanCreated);
   const setStepStarted = useStore((s) => s.setStepStarted);
   const setStepDone = useStore((s) => s.setStepDone);
@@ -5693,6 +5689,10 @@ function useUIStream({
   const setLevelStarted = useStore((s) => s.setLevelStarted);
   const setOrchestrationDone = useStore((s) => s.setOrchestrationDone);
   const resetPlanExecution = useStore((s) => s.resetPlanExecution);
+  const addProgressRef = (0, import_react29.useRef)(addProgressEvent);
+  (0, import_react29.useEffect)(() => {
+    addProgressRef.current = addProgressEvent;
+  }, [addProgressEvent]);
   const planStoreRef = (0, import_react29.useRef)({
     setPlanCreated,
     setStepStarted,
@@ -5965,16 +5965,13 @@ function useUIStream({
                     };
                     currentToolProgress.push(progress);
                     updateTurnData();
-                    const ctx = toolProgressRef.current;
-                    if (ctx) {
-                      ctx.addProgress({
-                        toolCallId: progress.toolCallId,
-                        toolName: progress.toolName,
-                        status: progress.status,
-                        message: progress.message,
-                        data: progress.data
-                      });
-                    }
+                    addProgressRef.current({
+                      toolCallId: progress.toolCallId,
+                      toolName: progress.toolName,
+                      status: progress.status,
+                      message: progress.message,
+                      data: progress.data
+                    });
                   } else if (path) {
                     patchBuffer.push({
                       op,
@@ -6028,21 +6025,17 @@ function useUIStream({
                   };
                   currentToolProgress.push(progress);
                   updateTurnData();
-                  const ctx = toolProgressRef.current;
                   console.debug("[useUIStream] Tool progress received:", {
                     toolName: progress.toolName,
-                    status: progress.status,
-                    hasContext: !!ctx
+                    status: progress.status
                   });
-                  if (ctx) {
-                    ctx.addProgress({
-                      toolCallId: progress.toolCallId,
-                      toolName: progress.toolName,
-                      status: progress.status,
-                      message: progress.message,
-                      data: progress.data
-                    });
-                  }
+                  addProgressRef.current({
+                    toolCallId: progress.toolCallId,
+                    toolName: progress.toolName,
+                    status: progress.status,
+                    message: progress.message,
+                    data: progress.data
+                  });
                 } else if (payload?.type === "document-index-ui") {
                   const uiComponent = payload.uiComponent;
                   if (uiComponent?.props) {
