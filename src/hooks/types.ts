@@ -117,11 +117,11 @@ export interface LibraryAttachment {
 export type Attachment = FileAttachment | LibraryAttachment;
 
 export function isLibraryAttachment(a: Attachment): a is LibraryAttachment {
-  return a.type === "library-document";
+  return a.type === "library-document" && "documentId" in a;
 }
 
 export function isFileAttachment(a: Attachment): a is FileAttachment {
-  return a.type !== "library-document";
+  return a.type !== "library-document" && "file" in a && a.file instanceof File;
 }
 
 /**

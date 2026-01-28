@@ -3132,10 +3132,10 @@ var import_react16 = require("react");
 
 // src/hooks/types.ts
 function isLibraryAttachment(a) {
-  return a.type === "library-document";
+  return a.type === "library-document" && "documentId" in a;
 }
 function isFileAttachment(a) {
-  return a.type !== "library-document";
+  return a.type !== "library-document" && "file" in a && a.file instanceof File;
 }
 function buildConversationMessages(turns) {
   const messages = [];
@@ -5815,14 +5815,17 @@ function useUIStream({
         const conversationMessages = buildConversationMessages(conversation);
         let body;
         const headers = {};
-        if (attachments && attachments.length > 0) {
+        const fileAttachments = attachments?.filter(isFileAttachment) ?? [];
+        const libraryAttachments = attachments?.filter(isLibraryAttachment) ?? [];
+        if (fileAttachments.length > 0) {
           console.debug("[useUIStream] Uploading attachments:", {
-            count: attachments.length,
-            files: attachments.map((att) => ({
+            count: fileAttachments.length,
+            files: fileAttachments.map((att) => ({
               name: att.file.name,
               type: att.file.type,
               size: att.file.size
-            }))
+            })),
+            libraryDocs: libraryAttachments.map((att) => att.documentId)
           });
           const formData = new FormData();
           formData.append("prompt", prompt);
@@ -5835,10 +5838,30 @@ function useUIStream({
           if (conversationMessages.length > 0) {
             formData.append("messages", JSON.stringify(conversationMessages));
           }
-          attachments.forEach((att) => {
+          fileAttachments.forEach((att) => {
             formData.append("files", att.file);
           });
+          if (libraryAttachments.length > 0) {
+            formData.append(
+              "libraryDocumentIds",
+              JSON.stringify(libraryAttachments.map((a) => a.documentId))
+            );
+          }
           body = formData;
+        } else if (libraryAttachments.length > 0) {
+          const bodyPayload = {
+            prompt,
+            context,
+            libraryDocumentIds: libraryAttachments.map((a) => a.documentId)
+          };
+          if (!hasTreeContext) {
+            bodyPayload.currentTree = currentTree;
+          }
+          if (conversationMessages.length > 0) {
+            bodyPayload.messages = conversationMessages;
+          }
+          body = JSON.stringify(bodyPayload);
+          headers["Content-Type"] = "application/json";
         } else {
           const bodyPayload = { prompt, context };
           if (!hasTreeContext) {

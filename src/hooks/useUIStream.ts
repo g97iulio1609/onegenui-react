@@ -13,8 +13,9 @@ import type {
   ToolProgress,
   PersistedAttachment,
   ConversationMessage,
+  Attachment,
 } from "./types";
-import { buildConversationMessages } from "./types";
+import { buildConversationMessages, isFileAttachment, isLibraryAttachment } from "./types";
 import type { DocumentIndex } from "@onegenui/core";
 import { useToolProgressOptional } from "../contexts/tool-progress";
 import { useStore } from "../store";
@@ -220,15 +221,20 @@ export function useUIStream({
         let body: string | FormData;
         const headers: Record<string, string> = {};
 
-        if (attachments && attachments.length > 0) {
+        // Separate file attachments from library attachments
+        const fileAttachments = attachments?.filter(isFileAttachment) ?? [];
+        const libraryAttachments = attachments?.filter(isLibraryAttachment) ?? [];
+
+        if (fileAttachments.length > 0) {
           // Use FormData for file uploads
           console.debug("[useUIStream] Uploading attachments:", {
-            count: attachments.length,
-            files: attachments.map((att) => ({
+            count: fileAttachments.length,
+            files: fileAttachments.map((att) => ({
               name: att.file.name,
               type: att.file.type,
               size: att.file.size,
             })),
+            libraryDocs: libraryAttachments.map((att) => att.documentId),
           });
           const formData = new FormData();
           formData.append("prompt", prompt);
@@ -243,12 +249,35 @@ export function useUIStream({
             formData.append("messages", JSON.stringify(conversationMessages));
           }
 
-          attachments.forEach((att) => {
+          fileAttachments.forEach((att) => {
             formData.append("files", att.file);
           });
 
+          // Include library document IDs
+          if (libraryAttachments.length > 0) {
+            formData.append(
+              "libraryDocumentIds",
+              JSON.stringify(libraryAttachments.map((a) => a.documentId)),
+            );
+          }
+
           body = formData;
           // Don't set Content-Type header for FormData, browser sets it with boundary
+        } else if (libraryAttachments.length > 0) {
+          // Only library documents, use JSON
+          const bodyPayload: Record<string, unknown> = {
+            prompt,
+            context,
+            libraryDocumentIds: libraryAttachments.map((a) => a.documentId),
+          };
+          if (!hasTreeContext) {
+            bodyPayload.currentTree = currentTree;
+          }
+          if (conversationMessages.length > 0) {
+            bodyPayload.messages = conversationMessages;
+          }
+          body = JSON.stringify(bodyPayload);
+          headers["Content-Type"] = "application/json";
         } else {
           // Use JSON for text-only requests
           const bodyPayload: Record<string, unknown> = { prompt, context };
