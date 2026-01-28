@@ -376,6 +376,29 @@ export function useUIStream({
                     if (Array.isArray(suggestions))
                       currentSuggestions.push(...suggestions);
                     updateTurnData();
+                  } else if (op === "tool-progress") {
+                    // Tool progress via op format (from SSE)
+                    const progress: ToolProgress = {
+                      toolName: payload.toolName as string,
+                      toolCallId: payload.toolCallId as string,
+                      status: payload.status as ToolProgress["status"],
+                      message: payload.message as string | undefined,
+                      data: payload.data,
+                    };
+                    currentToolProgress.push(progress);
+                    updateTurnData();
+
+                    // Update global tool progress context
+                    const ctx = toolProgressRef.current;
+                    if (ctx) {
+                      ctx.addProgress({
+                        toolCallId: progress.toolCallId,
+                        toolName: progress.toolName,
+                        status: progress.status,
+                        message: progress.message,
+                        data: progress.data,
+                      });
+                    }
                   } else if (path) {
                     // Tree mutation patch - accumulate in buffer for batch processing
                     patchBuffer.push({

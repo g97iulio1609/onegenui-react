@@ -5850,6 +5850,26 @@ function useUIStream({
                     if (Array.isArray(suggestions))
                       currentSuggestions.push(...suggestions);
                     updateTurnData();
+                  } else if (op === "tool-progress") {
+                    const progress = {
+                      toolName: payload.toolName,
+                      toolCallId: payload.toolCallId,
+                      status: payload.status,
+                      message: payload.message,
+                      data: payload.data
+                    };
+                    currentToolProgress.push(progress);
+                    updateTurnData();
+                    const ctx = toolProgressRef.current;
+                    if (ctx) {
+                      ctx.addProgress({
+                        toolCallId: progress.toolCallId,
+                        toolName: progress.toolName,
+                        status: progress.status,
+                        message: progress.message,
+                        data: progress.data
+                      });
+                    }
                   } else if (path) {
                     patchBuffer.push({
                       op,
