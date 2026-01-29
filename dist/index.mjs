@@ -5740,6 +5740,10 @@ function useUIStream({
   const [localTree, setLocalTree] = useState9(null);
   const [conversation, setConversation] = useState9([]);
   const treeRef = useRef13(null);
+  const storeSetUITreeRef = useRef13(storeSetUITree);
+  useEffect14(() => {
+    storeSetUITreeRef.current = storeSetUITree;
+  }, [storeSetUITree]);
   const tree = storeTree ?? localTree;
   const setTree = useCallback21((newTree) => {
     if (typeof newTree === "function") {
@@ -5747,13 +5751,13 @@ function useUIStream({
       const updatedTree = newTree(currentTree);
       treeRef.current = updatedTree;
       setLocalTree(updatedTree);
-      storeSetUITree(updatedTree);
+      storeSetUITreeRef.current(updatedTree);
     } else {
       treeRef.current = newTree;
       setLocalTree(newTree);
-      storeSetUITree(newTree);
+      storeSetUITreeRef.current(newTree);
     }
-  }, [storeSetUITree]);
+  }, []);
   const addProgressEvent = useStore((s) => s.addProgressEvent);
   const setPlanCreated = useStore((s) => s.setPlanCreated);
   const setStepStarted = useStore((s) => s.setStepStarted);
@@ -5770,15 +5774,17 @@ function useUIStream({
   const storeRef = useRef13({
     setUITree: storeSetUITree,
     bumpTreeVersion: storeBumpTreeVersion,
-    setTreeStreaming: storeSetTreeStreaming
+    setTreeStreaming: storeSetTreeStreaming,
+    clearUITree: storeClearUITree
   });
   useEffect14(() => {
     storeRef.current = {
       setUITree: storeSetUITree,
       bumpTreeVersion: storeBumpTreeVersion,
-      setTreeStreaming: storeSetTreeStreaming
+      setTreeStreaming: storeSetTreeStreaming,
+      clearUITree: storeClearUITree
     };
-  }, [storeSetUITree, storeBumpTreeVersion, storeSetTreeStreaming]);
+  }, [storeSetUITree, storeBumpTreeVersion, storeSetTreeStreaming, storeClearUITree]);
   const planStoreRef = useRef13({
     setPlanCreated,
     setStepStarted,
@@ -5829,8 +5835,8 @@ function useUIStream({
     treeRef.current = null;
     setError(null);
     resetPlanExecution();
-    storeClearUITree();
-  }, [resetPlanExecution, setTree, storeClearUITree]);
+    storeRef.current.clearUITree();
+  }, [resetPlanExecution, setTree]);
   const loadSession = useCallback21(
     (session) => {
       setTree(session.tree);

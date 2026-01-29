@@ -5822,6 +5822,10 @@ function useUIStream({
   const [localTree, setLocalTree] = (0, import_react29.useState)(null);
   const [conversation, setConversation] = (0, import_react29.useState)([]);
   const treeRef = (0, import_react29.useRef)(null);
+  const storeSetUITreeRef = (0, import_react29.useRef)(storeSetUITree);
+  (0, import_react29.useEffect)(() => {
+    storeSetUITreeRef.current = storeSetUITree;
+  }, [storeSetUITree]);
   const tree = storeTree ?? localTree;
   const setTree = (0, import_react29.useCallback)((newTree) => {
     if (typeof newTree === "function") {
@@ -5829,13 +5833,13 @@ function useUIStream({
       const updatedTree = newTree(currentTree);
       treeRef.current = updatedTree;
       setLocalTree(updatedTree);
-      storeSetUITree(updatedTree);
+      storeSetUITreeRef.current(updatedTree);
     } else {
       treeRef.current = newTree;
       setLocalTree(newTree);
-      storeSetUITree(newTree);
+      storeSetUITreeRef.current(newTree);
     }
-  }, [storeSetUITree]);
+  }, []);
   const addProgressEvent = useStore((s) => s.addProgressEvent);
   const setPlanCreated = useStore((s) => s.setPlanCreated);
   const setStepStarted = useStore((s) => s.setStepStarted);
@@ -5852,15 +5856,17 @@ function useUIStream({
   const storeRef = (0, import_react29.useRef)({
     setUITree: storeSetUITree,
     bumpTreeVersion: storeBumpTreeVersion,
-    setTreeStreaming: storeSetTreeStreaming
+    setTreeStreaming: storeSetTreeStreaming,
+    clearUITree: storeClearUITree
   });
   (0, import_react29.useEffect)(() => {
     storeRef.current = {
       setUITree: storeSetUITree,
       bumpTreeVersion: storeBumpTreeVersion,
-      setTreeStreaming: storeSetTreeStreaming
+      setTreeStreaming: storeSetTreeStreaming,
+      clearUITree: storeClearUITree
     };
-  }, [storeSetUITree, storeBumpTreeVersion, storeSetTreeStreaming]);
+  }, [storeSetUITree, storeBumpTreeVersion, storeSetTreeStreaming, storeClearUITree]);
   const planStoreRef = (0, import_react29.useRef)({
     setPlanCreated,
     setStepStarted,
@@ -5911,8 +5917,8 @@ function useUIStream({
     treeRef.current = null;
     setError(null);
     resetPlanExecution();
-    storeClearUITree();
-  }, [resetPlanExecution, setTree, storeClearUITree]);
+    storeRef.current.clearUITree();
+  }, [resetPlanExecution, setTree]);
   const loadSession = (0, import_react29.useCallback)(
     (session) => {
       setTree(session.tree);

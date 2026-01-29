@@ -106,28 +106,34 @@ export function useUIStream({
   const storeBumpTreeVersion = useStore((s) => s.bumpTreeVersion);
   
   // Keep a local tree state that shadows the store for compatibility
-  // This ensures existing code paths work while store provides reactivity
   const [localTree, setLocalTree] = useState<UITree | null>(null);
   const [conversation, setConversation] = useState<ConversationTurn[]>([]);
   const treeRef = useRef<UITree | null>(null);
   
-  // Sync local tree with store tree
+  // Keep store setters in refs to avoid calling during render
+  const storeSetUITreeRef = useRef(storeSetUITree);
+  useEffect(() => {
+    storeSetUITreeRef.current = storeSetUITree;
+  }, [storeSetUITree]);
+  
+  // Sync local tree with store tree (read only, no setState during render)
   const tree = storeTree ?? localTree;
   
-  // Wrapper to update both store and local state
+  // Wrapper to update both store and local state - uses refs to avoid render issues
   const setTree = useCallback((newTree: UITree | null | ((prev: UITree | null) => UITree | null)) => {
     if (typeof newTree === "function") {
       const currentTree = treeRef.current;
       const updatedTree = newTree(currentTree);
       treeRef.current = updatedTree;
       setLocalTree(updatedTree);
-      storeSetUITree(updatedTree);
+      // Use ref to avoid calling store during render
+      storeSetUITreeRef.current(updatedTree);
     } else {
       treeRef.current = newTree;
       setLocalTree(newTree);
-      storeSetUITree(newTree);
+      storeSetUITreeRef.current(newTree);
     }
-  }, [storeSetUITree]);
+  }, []);
 
   // Tool progress actions from Zustand store (direct store access for reliability)
   const addProgressEvent = useStore((s) => s.addProgressEvent);
@@ -153,14 +159,16 @@ export function useUIStream({
     setUITree: storeSetUITree,
     bumpTreeVersion: storeBumpTreeVersion,
     setTreeStreaming: storeSetTreeStreaming,
+    clearUITree: storeClearUITree,
   });
   useEffect(() => {
     storeRef.current = {
       setUITree: storeSetUITree,
       bumpTreeVersion: storeBumpTreeVersion,
       setTreeStreaming: storeSetTreeStreaming,
+      clearUITree: storeClearUITree,
     };
-  }, [storeSetUITree, storeBumpTreeVersion, storeSetTreeStreaming]);
+  }, [storeSetUITree, storeBumpTreeVersion, storeSetTreeStreaming, storeClearUITree]);
 
   const planStoreRef = useRef({
     setPlanCreated,
@@ -218,8 +226,8 @@ export function useUIStream({
     treeRef.current = null;
     setError(null);
     resetPlanExecution();
-    storeClearUITree();
-  }, [resetPlanExecution, setTree, storeClearUITree]);
+    storeRef.current.clearUITree();
+  }, [resetPlanExecution, setTree]);
 
   const loadSession = useCallback(
     (session: { tree: UITree; conversation: ConversationTurn[] }) => {
