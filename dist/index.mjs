@@ -4930,6 +4930,12 @@ function elementRendererPropsAreEqual(prevProps, nextProps) {
     return false;
   }
   if (prevProps.tree !== nextProps.tree) {
+    const elementKey = prevProps.element.key;
+    const prevElement = prevProps.tree.elements[elementKey];
+    const nextElement = nextProps.tree.elements[elementKey];
+    if (prevElement !== nextElement) {
+      return false;
+    }
     const children = prevProps.element.children;
     if (children) {
       for (const childKey of children) {

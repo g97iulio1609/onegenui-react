@@ -33,6 +33,7 @@ function elementRendererPropsAreEqual(
   prevProps: ElementRendererProps,
   nextProps: ElementRendererProps,
 ): boolean {
+  // Element reference check (structural sharing)
   if (prevProps.element !== nextProps.element) {
     return false;
   }
@@ -47,7 +48,19 @@ function elementRendererPropsAreEqual(
     return false;
   }
 
+  // CRITICAL: When tree changes, check if THIS element changed in the new tree
+  // This catches cases where element props (like hotels array) are modified
   if (prevProps.tree !== nextProps.tree) {
+    const elementKey = prevProps.element.key;
+    const prevElement = prevProps.tree.elements[elementKey];
+    const nextElement = nextProps.tree.elements[elementKey];
+    
+    // If this element changed in the tree, re-render
+    if (prevElement !== nextElement) {
+      return false;
+    }
+    
+    // Also check children
     const children = prevProps.element.children;
     if (children) {
       for (const childKey of children) {
