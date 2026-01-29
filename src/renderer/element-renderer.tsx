@@ -43,7 +43,9 @@ function hasDescendantChanged(
   const nextElement = nextTree.elements[elementKey];
 
   // Element itself changed
-  if (prevElement !== nextElement) return true;
+  if (prevElement !== nextElement) {
+    return true;
+  }
 
   // Check all children recursively
   const children = prevElement?.children;

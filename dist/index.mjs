@@ -5082,7 +5082,9 @@ function hasDescendantChanged(elementKey, prevTree, nextTree, visited = /* @__PU
   visited.add(elementKey);
   const prevElement = prevTree.elements[elementKey];
   const nextElement = nextTree.elements[elementKey];
-  if (prevElement !== nextElement) return true;
+  if (prevElement !== nextElement) {
+    return true;
+  }
   const children = prevElement?.children;
   if (children) {
     for (const childKey of children) {
@@ -8258,12 +8260,14 @@ export {
   ActionProvider,
   ActionProvider2 as ActionTrackingProvider,
   AutoSaveProvider,
+  CanvasBlock,
   ChildSkeleton,
   CitationProvider,
   ConfirmDialog,
   DEFAULT_AI_SETTINGS,
   DEFAULT_EXTENDED_SETTINGS,
   DataProvider,
+  DocumentBlock,
   EditableNumber,
   EditableProvider,
   EditableText,

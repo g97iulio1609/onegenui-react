@@ -34,12 +34,14 @@ __export(index_exports, {
   ActionProvider: () => ActionProvider,
   ActionTrackingProvider: () => ActionProvider2,
   AutoSaveProvider: () => AutoSaveProvider,
+  CanvasBlock: () => CanvasBlock,
   ChildSkeleton: () => ChildSkeleton,
   CitationProvider: () => CitationProvider,
   ConfirmDialog: () => ConfirmDialog,
   DEFAULT_AI_SETTINGS: () => DEFAULT_AI_SETTINGS,
   DEFAULT_EXTENDED_SETTINGS: () => DEFAULT_EXTENDED_SETTINGS,
   DataProvider: () => DataProvider,
+  DocumentBlock: () => DocumentBlock,
   EditableNumber: () => EditableNumber,
   EditableProvider: () => EditableProvider,
   EditableText: () => EditableText,
@@ -5172,7 +5174,9 @@ function hasDescendantChanged(elementKey, prevTree, nextTree, visited = /* @__PU
   visited.add(elementKey);
   const prevElement = prevTree.elements[elementKey];
   const nextElement = nextTree.elements[elementKey];
-  if (prevElement !== nextElement) return true;
+  if (prevElement !== nextElement) {
+    return true;
+  }
   const children = prevElement?.children;
   if (children) {
     for (const childKey of children) {
@@ -8344,12 +8348,14 @@ function groupDeepSelectionsByElement(selections) {
   ActionProvider,
   ActionTrackingProvider,
   AutoSaveProvider,
+  CanvasBlock,
   ChildSkeleton,
   CitationProvider,
   ConfirmDialog,
   DEFAULT_AI_SETTINGS,
   DEFAULT_EXTENDED_SETTINGS,
   DataProvider,
+  DocumentBlock,
   EditableNumber,
   EditableProvider,
   EditableText,
