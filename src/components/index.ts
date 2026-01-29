@@ -34,3 +34,7 @@ export {
   type InteractionTrackingWrapperProps,
   type InteractionTrackingCallback,
 } from "./InteractionTrackingWrapper";
+
+// Canvas integration components
+export { CanvasBlock, type CanvasBlockProps } from "./Canvas";
+export { DocumentBlock, type DocumentBlockProps } from "./Document";

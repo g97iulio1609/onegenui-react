@@ -26,6 +26,7 @@ import {
   createPlanExecutionSlice,
   createDeepResearchSlice,
   createUITreeSlice,
+  createWorkspaceSlice,
 } from "./slices";
 
 import type { StoreState } from "./types";
@@ -87,6 +88,7 @@ export const useStore: OneGenUIStore = create<StoreState>()(
         ...createPlanExecutionSlice(...args),
         ...createDeepResearchSlice(...args),
         ...createUITreeSlice(...args),
+        ...createWorkspaceSlice(...args),
       })),
     ),
     {
@@ -290,6 +292,34 @@ export const useUITreeActions = () =>
     })),
   );
 
+// Workspace selectors
+export const useWorkspaceDocuments = () => useStore((s) => s.documents);
+export const useActiveDocumentId = () => useStore((s) => s.activeDocumentId);
+export const useWorkspaceLayout = () => useStore((s) => s.workspaceLayout);
+export const useYoloMode = () => useStore((s) => s.yoloMode);
+export const usePendingAIEdits = () => useStore((s) => s.pendingEdits);
+export const useIsWorkspaceOpen = () => useStore((s) => s.isWorkspaceOpen);
+export const useActiveDocument = () => useStore((s) => s.getActiveDocument());
+export const useWorkspaceActions = () =>
+  useStore(
+    useShallow((s) => ({
+      createDocument: s.createDocument,
+      openDocument: s.openDocument,
+      closeDocument: s.closeDocument,
+      setActiveDocument: s.setActiveDocument,
+      updateDocumentContent: s.updateDocumentContent,
+      renameDocument: s.renameDocument,
+      markDocumentSaved: s.markDocumentSaved,
+      setWorkspaceLayout: s.setWorkspaceLayout,
+      toggleWorkspace: s.toggleWorkspace,
+      setYoloMode: s.setYoloMode,
+      addPendingEdit: s.addPendingEdit,
+      approvePendingEdit: s.approvePendingEdit,
+      rejectPendingEdit: s.rejectPendingEdit,
+      clearPendingEdits: s.clearPendingEdits,
+    })),
+  );
+
 // =============================================================================
 // Re-export slice creators for direct use
 // =============================================================================
@@ -306,4 +336,12 @@ export {
   createPlanExecutionSlice,
   createDeepResearchSlice,
   createUITreeSlice,
+  createWorkspaceSlice,
 } from "./slices";
+
+export type {
+  WorkspaceSlice,
+  WorkspaceDocument,
+  PendingAIEdit,
+  WorkspaceLayout,
+} from "./slices/workspace";

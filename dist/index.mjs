@@ -979,6 +979,140 @@ function applyNestedPatch(obj, path, value) {
   current[lastKey] = value;
 }
 
+// src/store/slices/workspace.ts
+var createWorkspaceSlice = (set, get) => ({
+  // Initial state
+  documents: [],
+  activeDocumentId: null,
+  workspaceLayout: "chat-only",
+  yoloMode: false,
+  pendingEdits: [],
+  isWorkspaceOpen: false,
+  // Document actions
+  createDocument: (title) => {
+    const doc = {
+      id: crypto.randomUUID(),
+      title: title || `Document ${get().documents.length + 1}`,
+      content: null,
+      savedAt: null,
+      modifiedAt: Date.now(),
+      isDirty: false,
+      format: "lexical"
+    };
+    set((state) => ({
+      documents: [...state.documents, doc],
+      activeDocumentId: doc.id,
+      isWorkspaceOpen: true,
+      workspaceLayout: state.workspaceLayout === "chat-only" ? "split" : state.workspaceLayout
+    }));
+    return doc;
+  },
+  openDocument: (doc) => {
+    set((state) => {
+      const exists = state.documents.some((d) => d.id === doc.id);
+      return {
+        documents: exists ? state.documents : [...state.documents, doc],
+        activeDocumentId: doc.id,
+        isWorkspaceOpen: true,
+        workspaceLayout: state.workspaceLayout === "chat-only" ? "split" : state.workspaceLayout
+      };
+    });
+  },
+  closeDocument: (id) => {
+    set((state) => {
+      const newDocs = state.documents.filter((d) => d.id !== id);
+      const wasActive = state.activeDocumentId === id;
+      return {
+        documents: newDocs,
+        activeDocumentId: wasActive ? newDocs[newDocs.length - 1]?.id || null : state.activeDocumentId,
+        isWorkspaceOpen: newDocs.length > 0,
+        workspaceLayout: newDocs.length === 0 ? "chat-only" : state.workspaceLayout
+      };
+    });
+  },
+  setActiveDocument: (id) => {
+    set({ activeDocumentId: id });
+  },
+  updateDocumentContent: (id, content) => {
+    set((state) => ({
+      documents: state.documents.map(
+        (doc) => doc.id === id ? { ...doc, content, modifiedAt: Date.now(), isDirty: true } : doc
+      )
+    }));
+  },
+  renameDocument: (id, title) => {
+    set((state) => ({
+      documents: state.documents.map(
+        (doc) => doc.id === id ? { ...doc, title, isDirty: true } : doc
+      )
+    }));
+  },
+  markDocumentSaved: (id) => {
+    set((state) => ({
+      documents: state.documents.map(
+        (doc) => doc.id === id ? { ...doc, savedAt: Date.now(), isDirty: false } : doc
+      )
+    }));
+  },
+  // Layout actions
+  setWorkspaceLayout: (layout) => {
+    set({
+      workspaceLayout: layout,
+      isWorkspaceOpen: layout !== "chat-only"
+    });
+  },
+  toggleWorkspace: () => {
+    set((state) => ({
+      isWorkspaceOpen: !state.isWorkspaceOpen,
+      workspaceLayout: state.isWorkspaceOpen ? "chat-only" : "split"
+    }));
+  },
+  // AI edit actions
+  setYoloMode: (enabled) => {
+    set({ yoloMode: enabled });
+  },
+  addPendingEdit: (edit) => {
+    const pendingEdit = {
+      ...edit,
+      id: crypto.randomUUID(),
+      createdAt: Date.now()
+    };
+    const { yoloMode } = get();
+    if (yoloMode) {
+      get().updateDocumentContent(edit.documentId, edit.newContent);
+    } else {
+      set((state) => ({
+        pendingEdits: [...state.pendingEdits, pendingEdit]
+      }));
+    }
+  },
+  approvePendingEdit: (editId) => {
+    const edit = get().pendingEdits.find((e) => e.id === editId);
+    if (edit) {
+      get().updateDocumentContent(edit.documentId, edit.newContent);
+    }
+    set((state) => ({
+      pendingEdits: state.pendingEdits.filter((e) => e.id !== editId)
+    }));
+  },
+  rejectPendingEdit: (editId) => {
+    set((state) => ({
+      pendingEdits: state.pendingEdits.filter((e) => e.id !== editId)
+    }));
+  },
+  clearPendingEdits: () => {
+    set({ pendingEdits: [] });
+  },
+  // Helpers
+  getActiveDocument: () => {
+    const { documents, activeDocumentId } = get();
+    return documents.find((d) => d.id === activeDocumentId) || null;
+  },
+  isDocumentOpen: (id) => {
+    return get().documents.some((d) => d.id === id);
+  }
+});
+
 // src/store/index.ts
 enableMapSet();
 var useStore = create()(
@@ -995,7 +1129,8 @@ var useStore = create()(
         ...createToolProgressSlice(...args),
         ...createPlanExecutionSlice(...args),
         ...createDeepResearchSlice(...args),
-        ...createUITreeSlice(...args)
+        ...createUITreeSlice(...args),
+        ...createWorkspaceSlice(...args)
       }))
     ),
     {
@@ -1107,6 +1242,31 @@ var useResearchProgress = () => useStore(
       sourcesTarget: research.sourcesTarget
     };
   })
+);
+var useWorkspaceDocuments = () => useStore((s) => s.documents);
+var useActiveDocumentId = () => useStore((s) => s.activeDocumentId);
+var useWorkspaceLayout = () => useStore((s) => s.workspaceLayout);
+var useYoloMode = () => useStore((s) => s.yoloMode);
+var usePendingAIEdits = () => useStore((s) => s.pendingEdits);
+var useIsWorkspaceOpen = () => useStore((s) => s.isWorkspaceOpen);
+var useActiveDocument = () => useStore((s) => s.getActiveDocument());
+var useWorkspaceActions = () => useStore(
+  useShallow((s) => ({
+    createDocument: s.createDocument,
+    openDocument: s.openDocument,
+    closeDocument: s.closeDocument,
+    setActiveDocument: s.setActiveDocument,
+    updateDocumentContent: s.updateDocumentContent,
+    renameDocument: s.renameDocument,
+    markDocumentSaved: s.markDocumentSaved,
+    setWorkspaceLayout: s.setWorkspaceLayout,
+    toggleWorkspace: s.toggleWorkspace,
+    setYoloMode: s.setYoloMode,
+    addPendingEdit: s.addPendingEdit,
+    approvePendingEdit: s.approvePendingEdit,
+    rejectPendingEdit: s.rejectPendingEdit,
+    clearPendingEdits: s.clearPendingEdits
+  }))
 );
 
 // src/contexts/data.tsx
@@ -4917,6 +5077,22 @@ function SelectionWrapper({
 
 // src/renderer/element-renderer.tsx
 import { jsx as jsx19 } from "react/jsx-runtime";
+function hasDescendantChanged(elementKey, prevTree, nextTree, visited = /* @__PURE__ */ new Set()) {
+  if (visited.has(elementKey)) return false;
+  visited.add(elementKey);
+  const prevElement = prevTree.elements[elementKey];
+  const nextElement = nextTree.elements[elementKey];
+  if (prevElement !== nextElement) return true;
+  const children = prevElement?.children;
+  if (children) {
+    for (const childKey of children) {
+      if (hasDescendantChanged(childKey, prevTree, nextTree, visited)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
 function elementRendererPropsAreEqual(prevProps, nextProps) {
   if (prevProps.element !== nextProps.element) {
     return false;
@@ -4930,19 +5106,12 @@ function elementRendererPropsAreEqual(prevProps, nextProps) {
     return false;
   }
   if (prevProps.tree !== nextProps.tree) {
-    const elementKey = prevProps.element.key;
-    const prevElement = prevProps.tree.elements[elementKey];
-    const nextElement = nextProps.tree.elements[elementKey];
-    if (prevElement !== nextElement) {
+    if (hasDescendantChanged(
+      prevProps.element.key,
+      prevProps.tree,
+      nextProps.tree
+    )) {
       return false;
-    }
-    const children = prevProps.element.children;
-    if (children) {
-      for (const childKey of children) {
-        if (prevProps.tree.elements[childKey] !== nextProps.tree.elements[childKey]) {
-          return false;
-        }
-      }
     }
   }
   return true;
@@ -7655,6 +7824,260 @@ var ToolProgressOverlay = memo4(function ToolProgressOverlay2({
   ] });
 });
 
+// src/components/Canvas/CanvasBlock.tsx
+import { memo as memo5, useCallback as useCallback28, useState as useState15 } from "react";
+import { jsx as jsx32, jsxs as jsxs13 } from "react/jsx-runtime";
+function CanvasBlockSkeleton() {
+  return /* @__PURE__ */ jsx32("div", { className: "w-full min-h-[200px] bg-zinc-900/50 rounded-xl border border-white/5 flex items-center justify-center", children: /* @__PURE__ */ jsx32("div", { className: "text-zinc-500 text-sm", children: "Loading editor..." }) });
+}
+var CanvasBlock = memo5(function CanvasBlock2({
+  element,
+  onAction,
+  loading,
+  EditorComponent
+}) {
+  const {
+    documentId,
+    initialContent,
+    mode = "edit",
+    width = "100%",
+    height = "300px",
+    showToolbar = true,
+    placeholder = "Start typing... Use '/' for commands",
+    title
+  } = element.props;
+  const [content, setContent] = useState15(initialContent || null);
+  const handleChange = useCallback28(
+    (_state, serialized) => {
+      setContent(serialized);
+      onAction?.({
+        type: "canvas:change",
+        payload: {
+          documentId,
+          content: serialized
+        }
+      });
+    },
+    [documentId, onAction]
+  );
+  const handleSave = useCallback28(() => {
+    if (content) {
+      onAction?.({
+        type: "canvas:save",
+        payload: {
+          documentId,
+          content
+        }
+      });
+    }
+  }, [documentId, content, onAction]);
+  const handleOpenInCanvas = useCallback28(() => {
+    onAction?.({
+      type: "canvas:open",
+      payload: {
+        documentId,
+        title,
+        content: initialContent
+      }
+    });
+  }, [documentId, title, initialContent, onAction]);
+  if (loading) {
+    return /* @__PURE__ */ jsx32(CanvasBlockSkeleton, {});
+  }
+  if (!EditorComponent) {
+    return /* @__PURE__ */ jsxs13(
+      "div",
+      {
+        className: "canvas-block w-full bg-zinc-900/50 rounded-xl border border-white/5 overflow-hidden",
+        style: { minHeight: height },
+        "data-document-id": documentId,
+        children: [
+          title && /* @__PURE__ */ jsx32("div", { className: "px-4 py-3 border-b border-white/5", children: /* @__PURE__ */ jsx32("h3", { className: "text-lg font-semibold text-white", children: title }) }),
+          /* @__PURE__ */ jsxs13(
+            "div",
+            {
+              className: "flex flex-col items-center justify-center gap-4 p-8",
+              style: { minHeight: "200px" },
+              children: [
+                /* @__PURE__ */ jsx32("p", { className: "text-zinc-400 text-sm", children: initialContent ? "Document content available" : "Empty document" }),
+                /* @__PURE__ */ jsxs13(
+                  "button",
+                  {
+                    onClick: handleOpenInCanvas,
+                    className: "flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-sm font-medium transition-colors border-none cursor-pointer",
+                    children: [
+                      /* @__PURE__ */ jsxs13(
+                        "svg",
+                        {
+                          width: "16",
+                          height: "16",
+                          viewBox: "0 0 24 24",
+                          fill: "none",
+                          stroke: "currentColor",
+                          strokeWidth: "2",
+                          strokeLinecap: "round",
+                          strokeLinejoin: "round",
+                          children: [
+                            /* @__PURE__ */ jsx32("path", { d: "M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" }),
+                            /* @__PURE__ */ jsx32("path", { d: "M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" })
+                          ]
+                        }
+                      ),
+                      "Open in Canvas"
+                    ]
+                  }
+                )
+              ]
+            }
+          )
+        ]
+      }
+    );
+  }
+  return /* @__PURE__ */ jsxs13(
+    "div",
+    {
+      className: "canvas-block",
+      style: { width, minHeight: height },
+      "data-document-id": documentId,
+      children: [
+        title && /* @__PURE__ */ jsx32("h3", { className: "text-lg font-semibold text-white mb-3", children: title }),
+        /* @__PURE__ */ jsx32("div", { className: "bg-zinc-900/50 rounded-xl border border-white/5 overflow-hidden", children: /* @__PURE__ */ jsx32(
+          EditorComponent,
+          {
+            initialState: initialContent,
+            onChange: handleChange,
+            placeholder,
+            editable: mode !== "view",
+            enableFloatingToolbar: showToolbar && mode === "edit",
+            enableDragDrop: mode === "edit",
+            className: "prose prose-invert max-w-none p-4"
+          }
+        ) }),
+        mode === "edit" && /* @__PURE__ */ jsx32("div", { className: "flex justify-end mt-2", children: /* @__PURE__ */ jsx32(
+          "button",
+          {
+            onClick: handleSave,
+            className: "px-3 py-1.5 text-sm bg-primary/10 hover:bg-primary/20 text-primary rounded-lg transition-colors border-none cursor-pointer",
+            children: "Save"
+          }
+        ) })
+      ]
+    }
+  );
+});
+
+// src/components/Document/DocumentBlock.tsx
+import { memo as memo6, useMemo as useMemo20 } from "react";
+import { jsx as jsx33, jsxs as jsxs14 } from "react/jsx-runtime";
+var DocumentBlock = memo6(function DocumentBlock2({
+  element,
+  onAction,
+  renderText,
+  loading
+}) {
+  const {
+    title,
+    content,
+    format = "markdown",
+    editable = false,
+    documentId,
+    showOpenInCanvas = true
+  } = element.props;
+  const renderedContent = useMemo20(() => {
+    if (format === "html") {
+      return /* @__PURE__ */ jsx33(
+        "div",
+        {
+          className: "prose prose-invert max-w-none",
+          dangerouslySetInnerHTML: { __html: content }
+        }
+      );
+    }
+    if (format === "markdown" && renderText) {
+      return renderText(content, { markdown: true });
+    }
+    return /* @__PURE__ */ jsx33("pre", { className: "whitespace-pre-wrap text-sm", children: content });
+  }, [content, format, renderText]);
+  const handleOpenInCanvas = () => {
+    onAction?.({
+      type: "canvas:open",
+      payload: {
+        documentId,
+        title,
+        content,
+        format
+      }
+    });
+  };
+  if (loading) {
+    return /* @__PURE__ */ jsxs14("div", { className: "w-full p-6 bg-zinc-900/50 rounded-xl border border-white/5 animate-pulse", children: [
+      /* @__PURE__ */ jsx33("div", { className: "h-6 w-1/3 bg-zinc-800 rounded mb-4" }),
+      /* @__PURE__ */ jsxs14("div", { className: "space-y-2", children: [
+        /* @__PURE__ */ jsx33("div", { className: "h-4 bg-zinc-800 rounded w-full" }),
+        /* @__PURE__ */ jsx33("div", { className: "h-4 bg-zinc-800 rounded w-5/6" }),
+        /* @__PURE__ */ jsx33("div", { className: "h-4 bg-zinc-800 rounded w-4/6" })
+      ] })
+    ] });
+  }
+  return /* @__PURE__ */ jsxs14("div", { className: "document-block w-full bg-zinc-900/50 rounded-xl border border-white/5 overflow-hidden", children: [
+    /* @__PURE__ */ jsxs14("div", { className: "flex items-center justify-between px-4 py-3 border-b border-white/5 bg-zinc-900/30", children: [
+      /* @__PURE__ */ jsxs14("div", { className: "flex items-center gap-2", children: [
+        /* @__PURE__ */ jsxs14(
+          "svg",
+          {
+            width: "16",
+            height: "16",
+            viewBox: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            strokeWidth: "2",
+            strokeLinecap: "round",
+            strokeLinejoin: "round",
+            className: "text-zinc-400",
+            children: [
+              /* @__PURE__ */ jsx33("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
+              /* @__PURE__ */ jsx33("polyline", { points: "14 2 14 8 20 8" }),
+              /* @__PURE__ */ jsx33("line", { x1: "16", x2: "8", y1: "13", y2: "13" }),
+              /* @__PURE__ */ jsx33("line", { x1: "16", x2: "8", y1: "17", y2: "17" }),
+              /* @__PURE__ */ jsx33("line", { x1: "10", x2: "8", y1: "9", y2: "9" })
+            ]
+          }
+        ),
+        /* @__PURE__ */ jsx33("h3", { className: "text-sm font-medium text-white", children: title })
+      ] }),
+      showOpenInCanvas && /* @__PURE__ */ jsxs14(
+        "button",
+        {
+          onClick: handleOpenInCanvas,
+          className: "flex items-center gap-1.5 px-2.5 py-1 text-xs text-zinc-400 hover:text-white bg-zinc-800 hover:bg-zinc-700 rounded-md transition-colors border-none cursor-pointer",
+          children: [
+            /* @__PURE__ */ jsxs14(
+              "svg",
+              {
+                width: "12",
+                height: "12",
+                viewBox: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                strokeWidth: "2",
+                strokeLinecap: "round",
+                strokeLinejoin: "round",
+                children: [
+                  /* @__PURE__ */ jsx33("path", { d: "M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" }),
+                  /* @__PURE__ */ jsx33("path", { d: "M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" })
+                ]
+              }
+            ),
+            "Open in Canvas"
+          ]
+        }
+      )
+    ] }),
+    /* @__PURE__ */ jsx33("div", { className: "p-4", children: renderedContent })
+  ] });
+});
+
 // src/use-cases/selection.use-case.ts
 function computeToggleSelection(currentSelection, item) {
   const isCurrentlySelected = currentSelection.some(
@@ -7897,6 +8320,8 @@ export {
   useActionHistory,
   useActionSubscriber,
   useActions,
+  useActiveDocument,
+  useActiveDocumentId,
   useActiveResearch,
   useActiveStep,
   useActiveToolProgress2 as useActiveToolProgress,
@@ -7932,10 +8357,12 @@ export {
   useIsToolRunning,
   useIsValidating,
   useIsVisible,
+  useIsWorkspaceOpen,
   useItemSelection,
   useLayoutManager,
   useLoadingActions,
   useMarkdown,
+  usePendingAIEdits,
   usePendingConfirmations,
   usePlanExecution,
   usePlanProgress,
@@ -7955,6 +8382,10 @@ export {
   useUnifiedProgress,
   useUnifiedProgressOptional,
   useValidation,
-  useVisibility
+  useVisibility,
+  useWorkspaceActions,
+  useWorkspaceDocuments,
+  useWorkspaceLayout,
+  useYoloMode
 };
 //# sourceMappingURL=index.mjs.map

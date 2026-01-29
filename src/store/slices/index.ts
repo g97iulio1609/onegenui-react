@@ -66,3 +66,10 @@ export {
   type ResearchResultSummary,
 } from "./deep-research";
 export { createUITreeSlice, type UITreeSlice } from "./ui-tree";
+export {
+  createWorkspaceSlice,
+  type WorkspaceSlice,
+  type WorkspaceDocument,
+  type PendingAIEdit,
+  type WorkspaceLayout,
+} from "./workspace";

@@ -273,6 +273,15 @@ export {
   useResearchHistory,
   useIsResearchActive,
   useResearchProgress,
+  // Workspace selectors
+  useWorkspaceDocuments,
+  useActiveDocumentId,
+  useWorkspaceLayout,
+  useYoloMode,
+  usePendingAIEdits,
+  useIsWorkspaceOpen,
+  useActiveDocument,
+  useWorkspaceActions,
   // Types
   type PlanExecutionState,
   type PlanStep,
@@ -280,6 +289,9 @@ export {
   type PlanStepStatus,
   type ExecutionPlan as StorePlanType,
   type DeepResearchEffortLevel,
+  type WorkspaceDocument,
+  type WorkspaceLayout,
+  type PendingAIEdit,
   // Note: DeepSelectionInfo is exported from ./contexts/selection
 } from "./store";
 
