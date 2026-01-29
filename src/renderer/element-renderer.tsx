@@ -26,8 +26,42 @@ interface ElementRendererProps {
 }
 
 /**
+ * Recursively checks if any descendant element has changed between two trees.
+ * This ensures parent components re-render when deeply nested children update.
+ */
+function hasDescendantChanged(
+  elementKey: string,
+  prevTree: UITree,
+  nextTree: UITree,
+  visited: Set<string> = new Set(),
+): boolean {
+  // Prevent infinite loops in case of circular references
+  if (visited.has(elementKey)) return false;
+  visited.add(elementKey);
+
+  const prevElement = prevTree.elements[elementKey];
+  const nextElement = nextTree.elements[elementKey];
+
+  // Element itself changed
+  if (prevElement !== nextElement) return true;
+
+  // Check all children recursively
+  const children = prevElement?.children;
+  if (children) {
+    for (const childKey of children) {
+      if (hasDescendantChanged(childKey, prevTree, nextTree, visited)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
  * Memoization comparator: structural sharing in patch-utils.ts means only
- * modified elements get new references. This enables O(1) equality checks.
+ * modified elements get new references. This enables O(1) equality checks
+ * for leaf nodes, with recursive descent for container components.
  */
 function elementRendererPropsAreEqual(
   prevProps: ElementRendererProps,
@@ -48,29 +82,15 @@ function elementRendererPropsAreEqual(
     return false;
   }
 
-  // CRITICAL: When tree changes, check if THIS element changed in the new tree
-  // This catches cases where element props (like hotels array) are modified
+  // CRITICAL: When tree changes, check if THIS element or ANY descendant changed
+  // This ensures containers re-render when deeply nested children update
   if (prevProps.tree !== nextProps.tree) {
-    const elementKey = prevProps.element.key;
-    const prevElement = prevProps.tree.elements[elementKey];
-    const nextElement = nextProps.tree.elements[elementKey];
-    
-    // If this element changed in the tree, re-render
-    if (prevElement !== nextElement) {
+    if (hasDescendantChanged(
+      prevProps.element.key,
+      prevProps.tree,
+      nextProps.tree,
+    )) {
       return false;
-    }
-    
-    // Also check children
-    const children = prevProps.element.children;
-    if (children) {
-      for (const childKey of children) {
-        if (
-          prevProps.tree.elements[childKey] !==
-          nextProps.tree.elements[childKey]
-        ) {
-          return false;
-        }
-      }
     }
   }
 
