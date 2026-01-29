@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import type { UITree, JsonPatch } from "@onegenui/core";
 import { applyPatchesBatch } from "./patch-utils";
 import type {
@@ -106,6 +106,17 @@ export function useUIStream({
   const storeSetTreeStreaming = useStore((s) => s.setTreeStreaming);
   const storeBumpTreeVersion = useStore((s) => s.bumpTreeVersion);
   
+  // CRITICAL: Create new tree reference when version changes to force re-renders
+  // Without this, React.memo components won't detect tree mutations
+  const tree = useMemo(() => {
+    if (!storeTree) return null;
+    // Shallow copy to create new reference - structural sharing preserved internally
+    return {
+      ...storeTree,
+      elements: { ...storeTree.elements },
+    };
+  }, [storeTree, treeVersion]);
+  
   // Local state for backward compat - sync from store
   const [localTree, setLocalTree] = useState<UITree | null>(null);
   const [conversation, setConversation] = useState<ConversationTurn[]>([]);
@@ -119,14 +130,11 @@ export function useUIStream({
   
   // Sync local tree FROM store when store changes (triggered by treeVersion)
   useEffect(() => {
-    if (storeTree && storeTree !== localTree) {
-      setLocalTree(storeTree);
-      treeRef.current = storeTree;
+    if (tree && tree !== localTree) {
+      setLocalTree(tree);
+      treeRef.current = tree;
     }
-  }, [storeTree, treeVersion]); // treeVersion ensures we catch all updates
-  
-  // Return store tree primarily (it's reactive via selector)
-  const tree = storeTree;
+  }, [tree, treeVersion]); // treeVersion ensures we catch all updates
   
   // Wrapper to update store - local sync happens via effect above
   const setTree = useCallback((newTree: UITree | null | ((prev: UITree | null) => UITree | null)) => {

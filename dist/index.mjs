@@ -5198,7 +5198,7 @@ function isPlaceholderElement(element) {
 }
 
 // src/hooks/useUIStream.ts
-import { useState as useState9, useCallback as useCallback21, useRef as useRef13, useEffect as useEffect14 } from "react";
+import { useState as useState9, useCallback as useCallback21, useRef as useRef13, useEffect as useEffect14, useMemo as useMemo15 } from "react";
 
 // src/hooks/patches/structural-sharing.ts
 function setByPathWithStructuralSharing(obj, path, value) {
@@ -5738,6 +5738,13 @@ function useUIStream({
   const storeClearUITree = useStore((s) => s.clearUITree);
   const storeSetTreeStreaming = useStore((s) => s.setTreeStreaming);
   const storeBumpTreeVersion = useStore((s) => s.bumpTreeVersion);
+  const tree = useMemo15(() => {
+    if (!storeTree) return null;
+    return {
+      ...storeTree,
+      elements: { ...storeTree.elements }
+    };
+  }, [storeTree, treeVersion]);
   const [localTree, setLocalTree] = useState9(null);
   const [conversation, setConversation] = useState9([]);
   const treeRef = useRef13(null);
@@ -5746,12 +5753,11 @@ function useUIStream({
     storeSetUITreeRef.current = storeSetUITree;
   }, [storeSetUITree]);
   useEffect14(() => {
-    if (storeTree && storeTree !== localTree) {
-      setLocalTree(storeTree);
-      treeRef.current = storeTree;
+    if (tree && tree !== localTree) {
+      setLocalTree(tree);
+      treeRef.current = tree;
     }
-  }, [storeTree, treeVersion]);
-  const tree = storeTree;
+  }, [tree, treeVersion]);
   const setTree = useCallback21((newTree) => {
     if (typeof newTree === "function") {
       const currentTree = treeRef.current;
@@ -6590,7 +6596,7 @@ function usePreservedSelection() {
 }
 
 // src/hooks/useLayoutManager.ts
-import { useCallback as useCallback24, useMemo as useMemo15 } from "react";
+import { useCallback as useCallback24, useMemo as useMemo16 } from "react";
 function useLayoutManager({
   tree,
   onTreeUpdate,
@@ -6655,7 +6661,7 @@ function useLayoutManager({
     },
     [tree]
   );
-  const getLayoutElements = useMemo15(() => {
+  const getLayoutElements = useMemo16(() => {
     return () => {
       if (!tree) return [];
       return Object.entries(tree.elements).filter(([, element]) => element.layout !== void 0).map(([key, element]) => ({
@@ -7088,7 +7094,7 @@ function TextSelectionBadge({
 }
 
 // src/components/free-grid/canvas.tsx
-import { useMemo as useMemo17 } from "react";
+import { useMemo as useMemo18 } from "react";
 
 // src/components/free-grid/styles.ts
 var gridContainerBaseStyle = {
@@ -7112,10 +7118,10 @@ var gridCellBaseStyle = {
 };
 
 // src/components/free-grid/grid-lines.tsx
-import { useMemo as useMemo16 } from "react";
+import { useMemo as useMemo17 } from "react";
 import { jsx as jsx26, jsxs as jsxs8 } from "react/jsx-runtime";
 function GridLines({ columns, rows, color }) {
-  const patternId = useMemo16(
+  const patternId = useMemo17(
     () => `grid-pattern-${Math.random().toString(36).substr(2, 9)}`,
     []
   );
@@ -7160,13 +7166,13 @@ function FreeGridCanvas({
   className,
   style
 }) {
-  const gridTemplateColumns = useMemo17(() => {
+  const gridTemplateColumns = useMemo18(() => {
     if (cellSize) {
       return `repeat(${columns}, ${cellSize}px)`;
     }
     return `repeat(${columns}, 1fr)`;
   }, [columns, cellSize]);
-  const gridTemplateRows = useMemo17(() => {
+  const gridTemplateRows = useMemo18(() => {
     if (rows) {
       if (cellSize) {
         return `repeat(${rows}, ${cellSize}px)`;

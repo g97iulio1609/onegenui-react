@@ -5820,6 +5820,13 @@ function useUIStream({
   const storeClearUITree = useStore((s) => s.clearUITree);
   const storeSetTreeStreaming = useStore((s) => s.setTreeStreaming);
   const storeBumpTreeVersion = useStore((s) => s.bumpTreeVersion);
+  const tree = (0, import_react29.useMemo)(() => {
+    if (!storeTree) return null;
+    return {
+      ...storeTree,
+      elements: { ...storeTree.elements }
+    };
+  }, [storeTree, treeVersion]);
   const [localTree, setLocalTree] = (0, import_react29.useState)(null);
   const [conversation, setConversation] = (0, import_react29.useState)([]);
   const treeRef = (0, import_react29.useRef)(null);
@@ -5828,12 +5835,11 @@ function useUIStream({
     storeSetUITreeRef.current = storeSetUITree;
   }, [storeSetUITree]);
   (0, import_react29.useEffect)(() => {
-    if (storeTree && storeTree !== localTree) {
-      setLocalTree(storeTree);
-      treeRef.current = storeTree;
+    if (tree && tree !== localTree) {
+      setLocalTree(tree);
+      treeRef.current = tree;
     }
-  }, [storeTree, treeVersion]);
-  const tree = storeTree;
+  }, [tree, treeVersion]);
   const setTree = (0, import_react29.useCallback)((newTree) => {
     if (typeof newTree === "function") {
       const currentTree = treeRef.current;
