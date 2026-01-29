@@ -5296,6 +5296,8 @@ function setByPathWithStructuralSharing(obj, path, value) {
   }
   const result = { ...obj };
   let current = result;
+  let parent = null;
+  let parentKey = null;
   for (let i = 0; i < segments.length - 1; i++) {
     const segment = segments[i];
     const nextValue = current[segment];
@@ -5306,11 +5308,15 @@ function setByPathWithStructuralSharing(obj, path, value) {
     } else {
       current[segment] = {};
     }
+    parent = current;
+    parentKey = segment;
     current = current[segment];
   }
   const lastSegment = segments[segments.length - 1];
   if (lastSegment === "-" && Array.isArray(current)) {
-    current.push(value);
+    if (parent && parentKey) {
+      parent[parentKey] = [...current, value];
+    }
   } else if (Array.isArray(current)) {
     const index = parseInt(lastSegment, 10);
     if (!isNaN(index)) {

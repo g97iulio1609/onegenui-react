@@ -5,6 +5,7 @@
 /**
  * Set a value by JSON Pointer path with structural sharing.
  * Only clones objects along the modified path.
+ * IMPORTANT: Never mutates - always creates new references for changed paths.
  */
 export function setByPathWithStructuralSharing<
   T extends Record<string, unknown>,
@@ -18,6 +19,8 @@ export function setByPathWithStructuralSharing<
 
   const result = { ...obj } as T;
   let current: Record<string, unknown> = result;
+  let parent: Record<string, unknown> | null = null;
+  let parentKey: string | null = null;
 
   for (let i = 0; i < segments.length - 1; i++) {
     const segment = segments[i]!;
@@ -30,25 +33,35 @@ export function setByPathWithStructuralSharing<
     } else {
       current[segment] = {};
     }
+    parent = current;
+    parentKey = segment;
     current = current[segment] as Record<string, unknown>;
   }
 
   const lastSegment = segments[segments.length - 1]!;
 
   // Handle JSON Pointer "-" suffix for array append (RFC 6901)
+  // CRITICAL: Create new array reference, never mutate with push()
   if (lastSegment === "-" && Array.isArray(current)) {
-    (current as unknown[]).push(value);
+    // current IS the array (already cloned in the loop above)
+    // We need to append to it, but we MUST create a new reference
+    // by replacing the array in the parent
+    if (parent && parentKey) {
+      parent[parentKey] = [...(current as unknown[]), value];
+    }
   } else if (Array.isArray(current)) {
     const index = parseInt(lastSegment, 10);
     if (!isNaN(index)) {
+      // current is already cloned, direct assignment is fine
       (current as unknown[])[index] = value;
     }
   } else if (lastSegment === "-") {
-    // Edge case: path ends with /property/- for array append
+    // Path like /foo/bar/- where bar is a property name containing an array
     if (segments.length >= 2) {
       const arrayPropertyName = segments[segments.length - 2]!;
       const arrayProperty = current[arrayPropertyName];
       if (Array.isArray(arrayProperty)) {
+        // Create NEW array with appended value (immutable)
         current[arrayPropertyName] = [...arrayProperty, value];
       } else if (!arrayProperty) {
         current[arrayPropertyName] = [value];
