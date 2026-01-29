@@ -100,12 +100,13 @@ export function useUIStream({
 }: UseUIStreamOptions): UseUIStreamReturn {
   // Use Zustand store for tree state (ensures proper reactivity during streaming)
   const storeTree = useStore((s) => s.uiTree);
+  const treeVersion = useStore((s) => s.treeVersion);
   const storeSetUITree = useStore((s) => s.setUITree);
   const storeClearUITree = useStore((s) => s.clearUITree);
   const storeSetTreeStreaming = useStore((s) => s.setTreeStreaming);
   const storeBumpTreeVersion = useStore((s) => s.bumpTreeVersion);
   
-  // Keep a local tree state that shadows the store for compatibility
+  // Local state for backward compat - sync from store
   const [localTree, setLocalTree] = useState<UITree | null>(null);
   const [conversation, setConversation] = useState<ConversationTurn[]>([]);
   const treeRef = useRef<UITree | null>(null);
@@ -116,21 +117,26 @@ export function useUIStream({
     storeSetUITreeRef.current = storeSetUITree;
   }, [storeSetUITree]);
   
-  // Sync local tree with store tree (read only, no setState during render)
-  const tree = storeTree ?? localTree;
+  // Sync local tree FROM store when store changes (triggered by treeVersion)
+  useEffect(() => {
+    if (storeTree && storeTree !== localTree) {
+      setLocalTree(storeTree);
+      treeRef.current = storeTree;
+    }
+  }, [storeTree, treeVersion]); // treeVersion ensures we catch all updates
   
-  // Wrapper to update both store and local state - uses refs to avoid render issues
+  // Return store tree primarily (it's reactive via selector)
+  const tree = storeTree;
+  
+  // Wrapper to update store - local sync happens via effect above
   const setTree = useCallback((newTree: UITree | null | ((prev: UITree | null) => UITree | null)) => {
     if (typeof newTree === "function") {
       const currentTree = treeRef.current;
       const updatedTree = newTree(currentTree);
       treeRef.current = updatedTree;
-      setLocalTree(updatedTree);
-      // Use ref to avoid calling store during render
       storeSetUITreeRef.current(updatedTree);
     } else {
       treeRef.current = newTree;
-      setLocalTree(newTree);
       storeSetUITreeRef.current(newTree);
     }
   }, []);

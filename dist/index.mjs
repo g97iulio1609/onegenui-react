@@ -5733,6 +5733,7 @@ function useUIStream({
   getHeaders
 }) {
   const storeTree = useStore((s) => s.uiTree);
+  const treeVersion = useStore((s) => s.treeVersion);
   const storeSetUITree = useStore((s) => s.setUITree);
   const storeClearUITree = useStore((s) => s.clearUITree);
   const storeSetTreeStreaming = useStore((s) => s.setTreeStreaming);
@@ -5744,17 +5745,21 @@ function useUIStream({
   useEffect14(() => {
     storeSetUITreeRef.current = storeSetUITree;
   }, [storeSetUITree]);
-  const tree = storeTree ?? localTree;
+  useEffect14(() => {
+    if (storeTree && storeTree !== localTree) {
+      setLocalTree(storeTree);
+      treeRef.current = storeTree;
+    }
+  }, [storeTree, treeVersion]);
+  const tree = storeTree;
   const setTree = useCallback21((newTree) => {
     if (typeof newTree === "function") {
       const currentTree = treeRef.current;
       const updatedTree = newTree(currentTree);
       treeRef.current = updatedTree;
-      setLocalTree(updatedTree);
       storeSetUITreeRef.current(updatedTree);
     } else {
       treeRef.current = newTree;
-      setLocalTree(newTree);
       storeSetUITreeRef.current(newTree);
     }
   }, []);

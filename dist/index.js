@@ -5815,6 +5815,7 @@ function useUIStream({
   getHeaders
 }) {
   const storeTree = useStore((s) => s.uiTree);
+  const treeVersion = useStore((s) => s.treeVersion);
   const storeSetUITree = useStore((s) => s.setUITree);
   const storeClearUITree = useStore((s) => s.clearUITree);
   const storeSetTreeStreaming = useStore((s) => s.setTreeStreaming);
@@ -5826,17 +5827,21 @@ function useUIStream({
   (0, import_react29.useEffect)(() => {
     storeSetUITreeRef.current = storeSetUITree;
   }, [storeSetUITree]);
-  const tree = storeTree ?? localTree;
+  (0, import_react29.useEffect)(() => {
+    if (storeTree && storeTree !== localTree) {
+      setLocalTree(storeTree);
+      treeRef.current = storeTree;
+    }
+  }, [storeTree, treeVersion]);
+  const tree = storeTree;
   const setTree = (0, import_react29.useCallback)((newTree) => {
     if (typeof newTree === "function") {
       const currentTree = treeRef.current;
       const updatedTree = newTree(currentTree);
       treeRef.current = updatedTree;
-      setLocalTree(updatedTree);
       storeSetUITreeRef.current(updatedTree);
     } else {
       treeRef.current = newTree;
-      setLocalTree(newTree);
       storeSetUITreeRef.current(newTree);
     }
   }, []);
