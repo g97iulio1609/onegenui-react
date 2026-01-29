@@ -216,12 +216,17 @@ export {
   getLayoutStyles,
   createLayout,
   ToolProgressOverlay,
+  // Canvas integration
+  CanvasBlock,
+  DocumentBlock,
   type MarkdownTextProps,
   type TextSelectionBadgeProps,
   type ResizableWrapperProps,
   type FreeGridCanvasProps,
   type GridCellProps,
   type ToolProgressOverlayProps,
+  type CanvasBlockProps,
+  type DocumentBlockProps,
 } from "./components";
 
 // Ports (Hexagonal Architecture)
