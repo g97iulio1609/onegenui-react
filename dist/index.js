@@ -6468,18 +6468,17 @@ Answer: ${answerSummary}`;
   const deleteTurn = (0, import_react29.useCallback)(
     (turnId) => {
       pushHistory();
-      setConversation((prev) => {
-        const turnIndex = prev.findIndex((t) => t.id === turnId);
-        if (turnIndex === -1) return prev;
-        const newConversation = prev.slice(0, turnIndex);
-        const previousTurn = newConversation[newConversation.length - 1];
-        const restoredTree = previousTurn?.treeSnapshot ?? null;
-        setTree(restoredTree);
-        treeRef.current = restoredTree;
-        return newConversation;
-      });
+      const currentConversation = conversation;
+      const turnIndex = currentConversation.findIndex((t) => t.id === turnId);
+      if (turnIndex === -1) return;
+      const newConversation = currentConversation.slice(0, turnIndex);
+      const previousTurn = newConversation[newConversation.length - 1];
+      const restoredTree = previousTurn?.treeSnapshot ?? null;
+      setTree(restoredTree);
+      treeRef.current = restoredTree;
+      setConversation(newConversation);
     },
-    [pushHistory, setTree]
+    [conversation, pushHistory, setTree]
   );
   const editTurn = (0, import_react29.useCallback)(
     async (turnId, newMessage) => {
@@ -6487,11 +6486,11 @@ Answer: ${answerSummary}`;
       const turnIndex = conversation.findIndex((t) => t.id === turnId);
       if (turnIndex === -1) return;
       const newConversation = conversation.slice(0, turnIndex);
-      setConversation(newConversation);
       const previousTurn = newConversation[newConversation.length - 1];
       const restoredTree = previousTurn?.treeSnapshot ?? null;
       setTree(restoredTree);
       treeRef.current = restoredTree;
+      setConversation(newConversation);
       await send(newMessage, restoredTree ? { tree: restoredTree } : void 0);
     },
     [conversation, send, pushHistory, setTree]

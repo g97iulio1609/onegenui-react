@@ -954,23 +954,26 @@ export function useUIStream({
       // Save current state to history before mutation
       pushHistory();
 
-      setConversation((prev) => {
-        const turnIndex = prev.findIndex((t) => t.id === turnId);
-        if (turnIndex === -1) return prev;
+      // Find the turn first
+      const currentConversation = conversation;
+      const turnIndex = currentConversation.findIndex((t) => t.id === turnId);
+      if (turnIndex === -1) return;
 
-        // Get the new conversation (all turns before this one)
-        const newConversation = prev.slice(0, turnIndex);
+      // Get the new conversation (all turns before this one)
+      const newConversation = currentConversation.slice(0, turnIndex);
 
-        // Restore tree to previous turn's snapshot (or null if first turn)
-        const previousTurn = newConversation[newConversation.length - 1];
-        const restoredTree = previousTurn?.treeSnapshot ?? null;
-        setTree(restoredTree);
-        treeRef.current = restoredTree;
-
-        return newConversation;
-      });
+      // Restore tree to previous turn's snapshot (or null if first turn)
+      const previousTurn = newConversation[newConversation.length - 1];
+      const restoredTree = previousTurn?.treeSnapshot ?? null;
+      
+      // Update tree first (outside of setConversation callback)
+      setTree(restoredTree);
+      treeRef.current = restoredTree;
+      
+      // Then update conversation
+      setConversation(newConversation);
     },
-    [pushHistory, setTree],
+    [conversation, pushHistory, setTree],
   );
 
   // Edit a turn message and regenerate
@@ -985,13 +988,17 @@ export function useUIStream({
 
       // Remove this turn and all subsequent turns
       const newConversation = conversation.slice(0, turnIndex);
-      setConversation(newConversation);
-
+      
       // Restore tree to previous turn's snapshot
       const previousTurn = newConversation[newConversation.length - 1];
       const restoredTree = previousTurn?.treeSnapshot ?? null;
+      
+      // Update tree first
       setTree(restoredTree);
       treeRef.current = restoredTree;
+      
+      // Then update conversation
+      setConversation(newConversation);
 
       // Re-send with edited message
       await send(newMessage, restoredTree ? { tree: restoredTree } : undefined);
