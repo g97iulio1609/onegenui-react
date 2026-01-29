@@ -1,7 +1,7 @@
 import * as react_jsx_runtime from 'react/jsx-runtime';
 import * as React$1 from 'react';
 import React__default, { ReactNode, CSSProperties, ComponentType } from 'react';
-import { DataModel, AuthState, VisibilityCondition, VisibilityContext, ActionHandler, ResolvedAction, Action, ActionConfirm, ValidationFunction, ValidationResult, ValidationConfig, ToolProgressEvent, UIElement, UITree, DocumentIndex, Catalog, ComponentDefinition, ElementSize, ElementResizeConfig, ElementLayout } from '@onegenui/core';
+import { DataModel, AuthState, VisibilityCondition, VisibilityContext, ActionHandler, ResolvedAction, Action, ActionConfirm, ValidationFunction, ValidationResult, ValidationConfig, ToolProgressEvent, UITree, UIElement, JsonPatch, DocumentIndex, Catalog, ComponentDefinition, ElementSize, ElementResizeConfig, ElementLayout } from '@onegenui/core';
 export { DocumentIndex, DocumentIndexNode, ToolProgressEvent, ToolProgressStatus } from '@onegenui/core';
 import { UseBoundStore, StoreApi } from 'zustand';
 
@@ -643,6 +643,28 @@ interface DeepResearchSlice {
 }
 
 /**
+ * UI Tree Slice - Streaming UI state management
+ *
+ * This slice manages the UI tree state during streaming generation.
+ * Using Zustand ensures proper reactivity when the tree is updated
+ * from async stream handlers.
+ */
+
+interface UITreeSlice {
+    uiTree: UITree | null;
+    isTreeStreaming: boolean;
+    treeVersion: number;
+    setUITree: (tree: UITree | null) => void;
+    updateUITree: (updater: (tree: UITree) => UITree) => void;
+    setElement: (key: string, element: UIElement) => void;
+    removeElement: (key: string) => void;
+    applyTreePatch: (patch: JsonPatch) => void;
+    setTreeStreaming: (streaming: boolean) => void;
+    clearUITree: () => void;
+    bumpTreeVersion: () => void;
+}
+
+/**
  * Store Types - Shared types for Zustand slices with immer middleware
  *
  * This is the official Zustand pattern for typing slices with middleware.
@@ -652,7 +674,7 @@ interface DeepResearchSlice {
 /**
  * The complete store state combining all slices
  */
-type StoreState = DomainSlice & UISlice & SelectionSlice & SettingsSlice & AnalyticsSlice & ActionsSlice & ValidationSlice & ToolProgressSlice & PlanExecutionSlice & DeepResearchSlice;
+type StoreState = DomainSlice & UISlice & SelectionSlice & SettingsSlice & AnalyticsSlice & ActionsSlice & ValidationSlice & ToolProgressSlice & PlanExecutionSlice & DeepResearchSlice & UITreeSlice;
 
 /**
  * Selection Slice - Unified element selection state

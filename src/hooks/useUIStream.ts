@@ -29,6 +29,63 @@ import { useHistory } from "./ui-stream/use-history";
 import { useConversation } from "./ui-stream/use-conversation";
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Debug Logger for useUIStream
+// ─────────────────────────────────────────────────────────────────────────────
+
+const LOG_ENDPOINT = "/api/debug-log";
+const LOG_BUFFER: string[] = [];
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+function formatLog(level: string, message: string, data?: unknown): string {
+  const timestamp = new Date().toISOString();
+  const dataStr = data ? `\n  DATA: ${JSON.stringify(data, null, 2).replace(/\n/g, "\n  ")}` : "";
+  return `[${timestamp}] [${level}] [useUIStream] ${message}${dataStr}`;
+}
+
+function flushLogs(): void {
+  if (LOG_BUFFER.length === 0) return;
+  const logs = LOG_BUFFER.splice(0, LOG_BUFFER.length);
+  if (typeof window !== "undefined") {
+    fetch(LOG_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ logs }),
+    }).catch(() => {});
+  }
+}
+
+function scheduleFlush(): void {
+  if (flushTimer) return;
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    flushLogs();
+  }, 500);
+}
+
+const streamLog = {
+  debug: (msg: string, data?: unknown) => {
+    console.log(`[useUIStream] ${msg}`, data ?? "");
+    LOG_BUFFER.push(formatLog("DEBUG", msg, data));
+    scheduleFlush();
+  },
+  info: (msg: string, data?: unknown) => {
+    console.log(`[useUIStream] ${msg}`, data ?? "");
+    LOG_BUFFER.push(formatLog("INFO", msg, data));
+    scheduleFlush();
+  },
+  warn: (msg: string, data?: unknown) => {
+    console.warn(`[useUIStream] ${msg}`, data ?? "");
+    LOG_BUFFER.push(formatLog("WARN", msg, data));
+    scheduleFlush();
+  },
+  error: (msg: string, data?: unknown) => {
+    console.error(`[useUIStream] ${msg}`, data ?? "");
+    LOG_BUFFER.push(formatLog("ERROR", msg, data));
+    scheduleFlush();
+  },
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // useUIStream Hook
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -41,9 +98,36 @@ export function useUIStream({
   onError,
   getHeaders,
 }: UseUIStreamOptions): UseUIStreamReturn {
-  const [tree, setTree] = useState<UITree | null>(null);
+  // Use Zustand store for tree state (ensures proper reactivity during streaming)
+  const storeTree = useStore((s) => s.uiTree);
+  const storeSetUITree = useStore((s) => s.setUITree);
+  const storeClearUITree = useStore((s) => s.clearUITree);
+  const storeSetTreeStreaming = useStore((s) => s.setTreeStreaming);
+  const storeBumpTreeVersion = useStore((s) => s.bumpTreeVersion);
+  
+  // Keep a local tree state that shadows the store for compatibility
+  // This ensures existing code paths work while store provides reactivity
+  const [localTree, setLocalTree] = useState<UITree | null>(null);
   const [conversation, setConversation] = useState<ConversationTurn[]>([]);
   const treeRef = useRef<UITree | null>(null);
+  
+  // Sync local tree with store tree
+  const tree = storeTree ?? localTree;
+  
+  // Wrapper to update both store and local state
+  const setTree = useCallback((newTree: UITree | null | ((prev: UITree | null) => UITree | null)) => {
+    if (typeof newTree === "function") {
+      const currentTree = treeRef.current;
+      const updatedTree = newTree(currentTree);
+      treeRef.current = updatedTree;
+      setLocalTree(updatedTree);
+      storeSetUITree(updatedTree);
+    } else {
+      treeRef.current = newTree;
+      setLocalTree(newTree);
+      storeSetUITree(newTree);
+    }
+  }, [storeSetUITree]);
 
   // Tool progress actions from Zustand store (direct store access for reliability)
   const addProgressEvent = useStore((s) => s.addProgressEvent);
@@ -63,6 +147,20 @@ export function useUIStream({
   useEffect(() => {
     addProgressRef.current = addProgressEvent;
   }, [addProgressEvent]);
+  
+  // Keep store setters in refs for async use
+  const storeRef = useRef({
+    setUITree: storeSetUITree,
+    bumpTreeVersion: storeBumpTreeVersion,
+    setTreeStreaming: storeSetTreeStreaming,
+  });
+  useEffect(() => {
+    storeRef.current = {
+      setUITree: storeSetUITree,
+      bumpTreeVersion: storeBumpTreeVersion,
+      setTreeStreaming: storeSetTreeStreaming,
+    };
+  }, [storeSetUITree, storeBumpTreeVersion, storeSetTreeStreaming]);
 
   const planStoreRef = useRef({
     setPlanCreated,
@@ -120,7 +218,8 @@ export function useUIStream({
     treeRef.current = null;
     setError(null);
     resetPlanExecution();
-  }, [resetPlanExecution]);
+    storeClearUITree();
+  }, [resetPlanExecution, setTree, storeClearUITree]);
 
   const loadSession = useCallback(
     (session: { tree: UITree; conversation: ConversationTurn[] }) => {
@@ -130,7 +229,7 @@ export function useUIStream({
       setHistory([]);
       setHistoryIndex(-1);
     },
-    [setHistory, setHistoryIndex],
+    [setTree, setHistory, setHistoryIndex],
   );
 
   const removeElement = useCallback(
@@ -138,7 +237,7 @@ export function useUIStream({
       pushHistory();
       setTree((prev) => (prev ? removeElementFromTree(prev, key) : null));
     },
-    [pushHistory],
+    [pushHistory, setTree],
   );
 
   const removeSubItems = useCallback(
@@ -149,7 +248,7 @@ export function useUIStream({
         prev ? removeSubItemsFromTree(prev, elementKey, identifiers) : null,
       );
     },
-    [pushHistory],
+    [pushHistory, setTree],
   );
 
   const updateElement = useCallback(
@@ -158,7 +257,7 @@ export function useUIStream({
         prev ? updateElementInTree(prev, elementKey, updates) : null,
       );
     },
-    [],
+    [setTree],
   );
 
   const updateElementLayout = useCallback(
@@ -170,7 +269,7 @@ export function useUIStream({
           : null,
       );
     },
-    [pushHistory],
+    [pushHistory, setTree],
   );
 
   const send = useCallback(
@@ -181,10 +280,16 @@ export function useUIStream({
     ) => {
       // Prevent concurrent sends
       if (sendingRef.current) {
-        console.warn("[useUIStream] Ignoring concurrent send request");
+        streamLog.warn("Ignoring concurrent send request", { prompt: prompt.slice(0, 100) });
         return;
       }
       sendingRef.current = true;
+      
+      streamLog.info("Starting send", { 
+        promptLength: prompt.length, 
+        hasContext: !!context,
+        attachmentCount: attachments?.length ?? 0 
+      });
 
       // Abort any existing request
       abortControllerRef.current?.abort();
@@ -201,6 +306,7 @@ export function useUIStream({
 
       // If no tree existed, initialize it and sync ref immediately
       if (!treeRef.current) {
+        streamLog.debug("Initializing empty tree");
         setTree(currentTree);
         treeRef.current = currentTree; // Sync ref immediately to prevent race conditions
       }
@@ -209,6 +315,7 @@ export function useUIStream({
       // For proactive responses, we hide the user message
       const isProactive = context?.hideUserMessage === true;
       const turnId = `turn-${Date.now()}`;
+      streamLog.debug("Creating turn", { turnId, isProactive });
       const pendingTurn: ConversationTurn = {
         id: turnId,
         userMessage: prompt,
@@ -313,12 +420,16 @@ export function useUIStream({
           Object.assign(headers, dynamicHeaders);
         }
 
+        streamLog.info("Sending request to API", { api, hasAuth: !!getHeaders });
+
         const response = await fetch(api, {
           method: "POST",
           headers,
           body,
           signal: abortControllerRef.current.signal,
         });
+
+        streamLog.debug("Response received", { status: response.status, ok: response.ok });
 
         if (!response.ok) {
           throw new Error(`HTTP error: ${response.status}`);
@@ -337,6 +448,8 @@ export function useUIStream({
         const currentToolProgress: ToolProgress[] = [];
         const currentPersistedAttachments: PersistedAttachment[] = [];
         let currentDocumentIndex: DocumentIndex | undefined = undefined;
+        let patchCount = 0;
+        let messageCount = 0;
 
         // Helper to update the pending turn
         const updateTurnData = () => {
@@ -360,6 +473,8 @@ export function useUIStream({
           );
         };
 
+        streamLog.debug("Starting stream processing");
+
         // Process incoming stream data
         let buffer = "";
         while (true) {
@@ -382,7 +497,10 @@ export function useUIStream({
               // Only process "d" or "data" line types
               if (lineType === "d" || lineType === "data") {
                 // Data Part - parse and apply patch
-                if (content.trim() === "[DONE]") continue;
+                if (content.trim() === "[DONE]") {
+                  streamLog.debug("Stream DONE received");
+                  continue;
+                }
 
                 const data = JSON.parse(content);
 
@@ -399,6 +517,8 @@ export function useUIStream({
                   if (op === "message") {
                     const msgContent = payload.content || value;
                     if (msgContent) {
+                      messageCount++;
+                      streamLog.debug("Message received", { messageCount, contentLength: msgContent.length });
                       currentMessages.push({
                         role: payload.role || "assistant",
                         content: msgContent,
@@ -425,6 +545,7 @@ export function useUIStream({
                       message: payload.message as string | undefined,
                       data: payload.data,
                     };
+                    streamLog.debug("Tool progress", { toolName: progress.toolName, status: progress.status });
                     currentToolProgress.push(progress);
                     updateTurnData();
 
@@ -438,6 +559,7 @@ export function useUIStream({
                     });
                   } else if (path) {
                     // Tree mutation patch - accumulate in buffer for batch processing
+                    patchCount++;
                     patchBuffer.push({
                       op,
                       path,
@@ -450,14 +572,31 @@ export function useUIStream({
                       patchFlushTimer = setTimeout(() => {
                         patchFlushTimer = null;
                         if (patchBuffer.length > 0) {
-                          // Apply all patches in dependency order
-                          currentTree = applyPatchesBatch(
-                            currentTree,
+                          streamLog.debug("Flushing patches", { count: patchBuffer.length });
+                          // CRITICAL: Use treeRef.current as the base, not the captured currentTree
+                          // This ensures we're always working with the latest state
+                          const baseTree = treeRef.current ?? currentTree;
+                          const updatedTree = applyPatchesBatch(
+                            baseTree,
                             patchBuffer,
                             turnId,
                           );
                           patchBuffer = [];
-                          setTree({ ...currentTree });
+                          // Update both ref and state atomically
+                          treeRef.current = updatedTree;
+                          currentTree = updatedTree; // Keep local var in sync for subsequent patches
+                          
+                          // Update Zustand store directly for guaranteed reactivity
+                          const store = storeRef.current;
+                          store.setUITree({
+                            root: updatedTree.root,
+                            elements: { ...updatedTree.elements },
+                          });
+                          store.bumpTreeVersion();
+                          
+                          streamLog.debug("Tree updated", { 
+                            elementCount: Object.keys(updatedTree.elements).length 
+                          });
                         }
                       }, 50); // Flush every 50ms for more responsive UI
                     }
@@ -617,8 +756,17 @@ export function useUIStream({
         }
 
         // Final setTree with fresh reference and sync ref
+        streamLog.info("Stream completed", { 
+          totalPatches: patchCount, 
+          totalMessages: messageCount,
+          treeElementCount: Object.keys(currentTree.elements).length 
+        });
         treeRef.current = currentTree;
-        setTree({ ...currentTree });
+        // Create a shallow copy with new elements reference to ensure React detects change
+        setTree({
+          root: currentTree.root,
+          elements: { ...currentTree.elements },
+        });
 
         // Clear flush timer if pending
         if (patchFlushTimer) {
@@ -628,16 +776,34 @@ export function useUIStream({
 
         // Flush any remaining patches before finalization
         if (patchBuffer.length > 0) {
-          currentTree = applyPatchesBatch(currentTree, patchBuffer, turnId);
+          streamLog.debug("Final patch flush", { count: patchBuffer.length });
+          // Use treeRef for consistency
+          const baseTree = treeRef.current ?? currentTree;
+          currentTree = applyPatchesBatch(baseTree, patchBuffer, turnId);
           patchBuffer = [];
           treeRef.current = currentTree;
-          setTree({ ...currentTree });
+          
+          // Update Zustand store for final state
+          const store = storeRef.current;
+          store.setUITree({
+            root: currentTree.root,
+            elements: { ...currentTree.elements },
+          });
+          store.bumpTreeVersion();
+          
+          streamLog.debug("Final tree state", { 
+            elementCount: Object.keys(currentTree.elements).length 
+          });
         }
 
         // Check abort before final state updates
-        if (signal.aborted) return;
+        if (signal.aborted) {
+          streamLog.warn("Request aborted before finalization");
+          return;
+        }
 
         // Finalize - mark loading complete
+        streamLog.debug("Finalizing turn", { turnId });
         setConversation((prev) =>
           prev.map((t) =>
             t.id === turnId
@@ -664,10 +830,12 @@ export function useUIStream({
         patchBuffer = [];
 
         if ((err as Error).name === "AbortError") {
+          streamLog.info("Request aborted", { turnId });
           setConversation((prev) => prev.filter((t) => t.id !== turnId));
           return;
         }
         const error = err instanceof Error ? err : new Error(String(err));
+        streamLog.error("Stream error", { error: error.message, turnId });
         setError(error);
         onError?.(error);
         // Mark turn as failed instead of removing it
@@ -684,9 +852,10 @@ export function useUIStream({
       } finally {
         sendingRef.current = false;
         setIsStreaming(false);
+        streamLog.debug("Send completed, isStreaming=false");
       }
     },
-    [api, onComplete, onError],
+    [api, onComplete, onError, setTree],
   );
 
   const answerQuestion = useCallback(
@@ -787,7 +956,7 @@ export function useUIStream({
         return newConversation;
       });
     },
-    [pushHistory],
+    [pushHistory, setTree],
   );
 
   // Edit a turn message and regenerate
@@ -813,7 +982,7 @@ export function useUIStream({
       // Re-send with edited message
       await send(newMessage, restoredTree ? { tree: restoredTree } : undefined);
     },
-    [conversation, send, pushHistory],
+    [conversation, send, pushHistory, setTree],
   );
 
   return {

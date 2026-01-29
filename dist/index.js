@@ -1047,6 +1047,92 @@ var createDeepResearchSlice = (set) => ({
   })
 });
 
+// src/store/slices/ui-tree.ts
+var initialTree = null;
+var createUITreeSlice = (set, get) => ({
+  // State
+  uiTree: initialTree,
+  isTreeStreaming: false,
+  treeVersion: 0,
+  // Actions
+  setUITree: (tree) => set((state) => {
+    state.uiTree = tree;
+    state.treeVersion += 1;
+  }),
+  updateUITree: (updater) => set((state) => {
+    if (state.uiTree) {
+      const updated = updater(state.uiTree);
+      state.uiTree = updated;
+      state.treeVersion += 1;
+    }
+  }),
+  setElement: (key, element) => set((state) => {
+    if (state.uiTree) {
+      state.uiTree.elements[key] = element;
+      state.treeVersion += 1;
+    }
+  }),
+  removeElement: (key) => set((state) => {
+    if (state.uiTree && state.uiTree.elements[key]) {
+      delete state.uiTree.elements[key];
+      state.treeVersion += 1;
+    }
+  }),
+  applyTreePatch: (patch) => set((state) => {
+    if (!state.uiTree) return;
+    if ((patch.op === "add" || patch.op === "replace") && patch.path.startsWith("/elements/")) {
+      const key = patch.path.replace("/elements/", "").split("/")[0];
+      if (key && patch.value) {
+        if (patch.path === `/elements/${key}`) {
+          state.uiTree.elements[key] = patch.value;
+        } else {
+          if (!state.uiTree.elements[key]) {
+            state.uiTree.elements[key] = {
+              type: "unknown",
+              props: {}
+            };
+          }
+          applyNestedPatch(
+            state.uiTree.elements[key],
+            patch.path.replace(`/elements/${key}`, ""),
+            patch.value
+          );
+        }
+        state.treeVersion += 1;
+      }
+    }
+    if (patch.path === "/root" && typeof patch.value === "string") {
+      state.uiTree.root = patch.value;
+      state.treeVersion += 1;
+    }
+  }),
+  setTreeStreaming: (streaming) => set({ isTreeStreaming: streaming }),
+  clearUITree: () => set((state) => {
+    state.uiTree = null;
+    state.treeVersion = 0;
+    state.isTreeStreaming = false;
+  }),
+  bumpTreeVersion: () => set((state) => {
+    state.treeVersion += 1;
+  })
+});
+function applyNestedPatch(obj, path, value) {
+  if (!path || path === "/") {
+    return;
+  }
+  const parts = path.slice(1).split("/");
+  let current = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const key = parts[i];
+    if (!current[key] || typeof current[key] !== "object") {
+      current[key] = {};
+    }
+    current = current[key];
+  }
+  const lastKey = parts[parts.length - 1];
+  current[lastKey] = value;
+}
+
 // src/store/index.ts
 (0, import_immer2.enableMapSet)();
 var useStore = (0, import_zustand.create)()(
@@ -1062,7 +1148,8 @@ var useStore = (0, import_zustand.create)()(
         ...createValidationSlice(...args),
         ...createToolProgressSlice(...args),
         ...createPlanExecutionSlice(...args),
-        ...createDeepResearchSlice(...args)
+        ...createDeepResearchSlice(...args),
+        ...createUITreeSlice(...args)
       }))
     ),
     {
@@ -3516,7 +3603,7 @@ function ActionProvider2({
     pendingActionsRef.current = [];
     notifySubscribers(batch);
   }, [notifySubscribers]);
-  const scheduleFlush = (0, import_react17.useCallback)(
+  const scheduleFlush2 = (0, import_react17.useCallback)(
     (delayMs) => {
       if (timerRef.current) {
         clearTimeout(timerRef.current);
@@ -3539,13 +3626,13 @@ function ActionProvider2({
       });
       setLastAction(action);
       pendingActionsRef.current.push(action);
-      scheduleFlush(options.debounceMs ?? 2500);
+      scheduleFlush2(options.debounceMs ?? 2500);
     },
     [
       options.enabled,
       options.maxActionsInContext,
       options.debounceMs,
-      scheduleFlush
+      scheduleFlush2
     ]
   );
   const clearActions = (0, import_react17.useCallback)(() => {
@@ -3587,13 +3674,13 @@ function ActionProvider2({
       if (!isEditable) return;
       setTimeout(() => {
         if (!isUserCurrentlyEditing() && pendingActionsRef.current.length > 0) {
-          scheduleFlush(options.debounceMs ?? 2500);
+          scheduleFlush2(options.debounceMs ?? 2500);
         }
       }, 100);
     };
     document.addEventListener("focusout", handleFocusOut, true);
     return () => document.removeEventListener("focusout", handleFocusOut, true);
-  }, [options.debounceMs, scheduleFlush]);
+  }, [options.debounceMs, scheduleFlush2]);
   const value = {
     actions,
     trackAction,
@@ -5671,15 +5758,84 @@ function useHistory(tree, conversation, setTree, setConversation, treeRef) {
 }
 
 // src/hooks/useUIStream.ts
+var LOG_ENDPOINT = "/api/debug-log";
+var LOG_BUFFER = [];
+var flushTimer = null;
+function formatLog(level, message, data) {
+  const timestamp = (/* @__PURE__ */ new Date()).toISOString();
+  const dataStr = data ? `
+  DATA: ${JSON.stringify(data, null, 2).replace(/\n/g, "\n  ")}` : "";
+  return `[${timestamp}] [${level}] [useUIStream] ${message}${dataStr}`;
+}
+function flushLogs() {
+  if (LOG_BUFFER.length === 0) return;
+  const logs = LOG_BUFFER.splice(0, LOG_BUFFER.length);
+  if (typeof window !== "undefined") {
+    fetch(LOG_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ logs })
+    }).catch(() => {
+    });
+  }
+}
+function scheduleFlush() {
+  if (flushTimer) return;
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    flushLogs();
+  }, 500);
+}
+var streamLog = {
+  debug: (msg, data) => {
+    console.log(`[useUIStream] ${msg}`, data ?? "");
+    LOG_BUFFER.push(formatLog("DEBUG", msg, data));
+    scheduleFlush();
+  },
+  info: (msg, data) => {
+    console.log(`[useUIStream] ${msg}`, data ?? "");
+    LOG_BUFFER.push(formatLog("INFO", msg, data));
+    scheduleFlush();
+  },
+  warn: (msg, data) => {
+    console.warn(`[useUIStream] ${msg}`, data ?? "");
+    LOG_BUFFER.push(formatLog("WARN", msg, data));
+    scheduleFlush();
+  },
+  error: (msg, data) => {
+    console.error(`[useUIStream] ${msg}`, data ?? "");
+    LOG_BUFFER.push(formatLog("ERROR", msg, data));
+    scheduleFlush();
+  }
+};
 function useUIStream({
   api,
   onComplete,
   onError,
   getHeaders
 }) {
-  const [tree, setTree] = (0, import_react29.useState)(null);
+  const storeTree = useStore((s) => s.uiTree);
+  const storeSetUITree = useStore((s) => s.setUITree);
+  const storeClearUITree = useStore((s) => s.clearUITree);
+  const storeSetTreeStreaming = useStore((s) => s.setTreeStreaming);
+  const storeBumpTreeVersion = useStore((s) => s.bumpTreeVersion);
+  const [localTree, setLocalTree] = (0, import_react29.useState)(null);
   const [conversation, setConversation] = (0, import_react29.useState)([]);
   const treeRef = (0, import_react29.useRef)(null);
+  const tree = storeTree ?? localTree;
+  const setTree = (0, import_react29.useCallback)((newTree) => {
+    if (typeof newTree === "function") {
+      const currentTree = treeRef.current;
+      const updatedTree = newTree(currentTree);
+      treeRef.current = updatedTree;
+      setLocalTree(updatedTree);
+      storeSetUITree(updatedTree);
+    } else {
+      treeRef.current = newTree;
+      setLocalTree(newTree);
+      storeSetUITree(newTree);
+    }
+  }, [storeSetUITree]);
   const addProgressEvent = useStore((s) => s.addProgressEvent);
   const setPlanCreated = useStore((s) => s.setPlanCreated);
   const setStepStarted = useStore((s) => s.setStepStarted);
@@ -5693,6 +5849,18 @@ function useUIStream({
   (0, import_react29.useEffect)(() => {
     addProgressRef.current = addProgressEvent;
   }, [addProgressEvent]);
+  const storeRef = (0, import_react29.useRef)({
+    setUITree: storeSetUITree,
+    bumpTreeVersion: storeBumpTreeVersion,
+    setTreeStreaming: storeSetTreeStreaming
+  });
+  (0, import_react29.useEffect)(() => {
+    storeRef.current = {
+      setUITree: storeSetUITree,
+      bumpTreeVersion: storeBumpTreeVersion,
+      setTreeStreaming: storeSetTreeStreaming
+    };
+  }, [storeSetUITree, storeBumpTreeVersion, storeSetTreeStreaming]);
   const planStoreRef = (0, import_react29.useRef)({
     setPlanCreated,
     setStepStarted,
@@ -5743,7 +5911,8 @@ function useUIStream({
     treeRef.current = null;
     setError(null);
     resetPlanExecution();
-  }, [resetPlanExecution]);
+    storeClearUITree();
+  }, [resetPlanExecution, setTree, storeClearUITree]);
   const loadSession = (0, import_react29.useCallback)(
     (session) => {
       setTree(session.tree);
@@ -5752,14 +5921,14 @@ function useUIStream({
       setHistory([]);
       setHistoryIndex(-1);
     },
-    [setHistory, setHistoryIndex]
+    [setTree, setHistory, setHistoryIndex]
   );
   const removeElement = (0, import_react29.useCallback)(
     (key) => {
       pushHistory();
       setTree((prev) => prev ? removeElementFromTree(prev, key) : null);
     },
-    [pushHistory]
+    [pushHistory, setTree]
   );
   const removeSubItems = (0, import_react29.useCallback)(
     (elementKey, identifiers) => {
@@ -5769,7 +5938,7 @@ function useUIStream({
         (prev) => prev ? removeSubItemsFromTree(prev, elementKey, identifiers) : null
       );
     },
-    [pushHistory]
+    [pushHistory, setTree]
   );
   const updateElement = (0, import_react29.useCallback)(
     (elementKey, updates) => {
@@ -5777,7 +5946,7 @@ function useUIStream({
         (prev) => prev ? updateElementInTree(prev, elementKey, updates) : null
       );
     },
-    []
+    [setTree]
   );
   const updateElementLayout = (0, import_react29.useCallback)(
     (elementKey, layoutUpdates) => {
@@ -5786,15 +5955,20 @@ function useUIStream({
         (prev) => prev ? updateElementLayoutInTree(prev, elementKey, layoutUpdates) : null
       );
     },
-    [pushHistory]
+    [pushHistory, setTree]
   );
   const send = (0, import_react29.useCallback)(
     async (prompt, context, attachments) => {
       if (sendingRef.current) {
-        console.warn("[useUIStream] Ignoring concurrent send request");
+        streamLog.warn("Ignoring concurrent send request", { prompt: prompt.slice(0, 100) });
         return;
       }
       sendingRef.current = true;
+      streamLog.info("Starting send", {
+        promptLength: prompt.length,
+        hasContext: !!context,
+        attachmentCount: attachments?.length ?? 0
+      });
       abortControllerRef.current?.abort();
       abortControllerRef.current = new AbortController();
       const signal = abortControllerRef.current.signal;
@@ -5802,11 +5976,13 @@ function useUIStream({
       setError(null);
       let currentTree = treeRef.current ? JSON.parse(JSON.stringify(treeRef.current)) : { root: "", elements: {} };
       if (!treeRef.current) {
+        streamLog.debug("Initializing empty tree");
         setTree(currentTree);
         treeRef.current = currentTree;
       }
       const isProactive = context?.hideUserMessage === true;
       const turnId = `turn-${Date.now()}`;
+      streamLog.debug("Creating turn", { turnId, isProactive });
       const pendingTurn = {
         id: turnId,
         userMessage: prompt,
@@ -5889,12 +6065,14 @@ function useUIStream({
           const dynamicHeaders = await getHeaders();
           Object.assign(headers, dynamicHeaders);
         }
+        streamLog.info("Sending request to API", { api, hasAuth: !!getHeaders });
         const response = await fetch(api, {
           method: "POST",
           headers,
           body,
           signal: abortControllerRef.current.signal
         });
+        streamLog.debug("Response received", { status: response.status, ok: response.ok });
         if (!response.ok) {
           throw new Error(`HTTP error: ${response.status}`);
         }
@@ -5909,6 +6087,8 @@ function useUIStream({
         const currentToolProgress = [];
         const currentPersistedAttachments = [];
         let currentDocumentIndex = void 0;
+        let patchCount = 0;
+        let messageCount = 0;
         const updateTurnData = () => {
           setConversation(
             (prev) => prev.map(
@@ -5924,6 +6104,7 @@ function useUIStream({
             )
           );
         };
+        streamLog.debug("Starting stream processing");
         let buffer = "";
         while (true) {
           const { done, value } = await reader.read();
@@ -5939,7 +6120,10 @@ function useUIStream({
             const content = line.slice(colIdx + 1);
             try {
               if (lineType === "d" || lineType === "data") {
-                if (content.trim() === "[DONE]") continue;
+                if (content.trim() === "[DONE]") {
+                  streamLog.debug("Stream DONE received");
+                  continue;
+                }
                 const data = JSON.parse(content);
                 const payload = data?.type === "data" ? data.data : data;
                 if (payload?.type === "text-delta") {
@@ -5949,6 +6133,8 @@ function useUIStream({
                   if (op === "message") {
                     const msgContent = payload.content || value2;
                     if (msgContent) {
+                      messageCount++;
+                      streamLog.debug("Message received", { messageCount, contentLength: msgContent.length });
                       currentMessages.push({
                         role: payload.role || "assistant",
                         content: msgContent
@@ -5973,6 +6159,7 @@ function useUIStream({
                       message: payload.message,
                       data: payload.data
                     };
+                    streamLog.debug("Tool progress", { toolName: progress.toolName, status: progress.status });
                     currentToolProgress.push(progress);
                     updateTurnData();
                     addProgressRef.current({
@@ -5983,6 +6170,7 @@ function useUIStream({
                       data: progress.data
                     });
                   } else if (path) {
+                    patchCount++;
                     patchBuffer.push({
                       op,
                       path,
@@ -5992,13 +6180,25 @@ function useUIStream({
                       patchFlushTimer = setTimeout(() => {
                         patchFlushTimer = null;
                         if (patchBuffer.length > 0) {
-                          currentTree = applyPatchesBatch(
-                            currentTree,
+                          streamLog.debug("Flushing patches", { count: patchBuffer.length });
+                          const baseTree = treeRef.current ?? currentTree;
+                          const updatedTree = applyPatchesBatch(
+                            baseTree,
                             patchBuffer,
                             turnId
                           );
                           patchBuffer = [];
-                          setTree({ ...currentTree });
+                          treeRef.current = updatedTree;
+                          currentTree = updatedTree;
+                          const store = storeRef.current;
+                          store.setUITree({
+                            root: updatedTree.root,
+                            elements: { ...updatedTree.elements }
+                          });
+                          store.bumpTreeVersion();
+                          streamLog.debug("Tree updated", {
+                            elementCount: Object.keys(updatedTree.elements).length
+                          });
                         }
                       }, 50);
                     }
@@ -6112,19 +6312,41 @@ function useUIStream({
             }
           }
         }
+        streamLog.info("Stream completed", {
+          totalPatches: patchCount,
+          totalMessages: messageCount,
+          treeElementCount: Object.keys(currentTree.elements).length
+        });
         treeRef.current = currentTree;
-        setTree({ ...currentTree });
+        setTree({
+          root: currentTree.root,
+          elements: { ...currentTree.elements }
+        });
         if (patchFlushTimer) {
           clearTimeout(patchFlushTimer);
           patchFlushTimer = null;
         }
         if (patchBuffer.length > 0) {
-          currentTree = applyPatchesBatch(currentTree, patchBuffer, turnId);
+          streamLog.debug("Final patch flush", { count: patchBuffer.length });
+          const baseTree = treeRef.current ?? currentTree;
+          currentTree = applyPatchesBatch(baseTree, patchBuffer, turnId);
           patchBuffer = [];
           treeRef.current = currentTree;
-          setTree({ ...currentTree });
+          const store = storeRef.current;
+          store.setUITree({
+            root: currentTree.root,
+            elements: { ...currentTree.elements }
+          });
+          store.bumpTreeVersion();
+          streamLog.debug("Final tree state", {
+            elementCount: Object.keys(currentTree.elements).length
+          });
         }
-        if (signal.aborted) return;
+        if (signal.aborted) {
+          streamLog.warn("Request aborted before finalization");
+          return;
+        }
+        streamLog.debug("Finalizing turn", { turnId });
         setConversation(
           (prev) => prev.map(
             (t) => t.id === turnId ? {
@@ -6147,10 +6369,12 @@ function useUIStream({
         }
         patchBuffer = [];
         if (err.name === "AbortError") {
+          streamLog.info("Request aborted", { turnId });
           setConversation((prev) => prev.filter((t) => t.id !== turnId));
           return;
         }
         const error2 = err instanceof Error ? err : new Error(String(err));
+        streamLog.error("Stream error", { error: error2.message, turnId });
         setError(error2);
         onError?.(error2);
         setConversation(
@@ -6164,9 +6388,10 @@ function useUIStream({
       } finally {
         sendingRef.current = false;
         setIsStreaming(false);
+        streamLog.debug("Send completed, isStreaming=false");
       }
     },
-    [api, onComplete, onError]
+    [api, onComplete, onError, setTree]
   );
   const answerQuestion = (0, import_react29.useCallback)(
     (turnId, questionId, answers) => {
@@ -6243,7 +6468,7 @@ Answer: ${answerSummary}`;
         return newConversation;
       });
     },
-    [pushHistory]
+    [pushHistory, setTree]
   );
   const editTurn = (0, import_react29.useCallback)(
     async (turnId, newMessage) => {
@@ -6258,7 +6483,7 @@ Answer: ${answerSummary}`;
       treeRef.current = restoredTree;
       await send(newMessage, restoredTree ? { tree: restoredTree } : void 0);
     },
-    [conversation, send, pushHistory]
+    [conversation, send, pushHistory, setTree]
   );
   return {
     tree,

@@ -25,10 +25,12 @@ import {
   createToolProgressSlice,
   createPlanExecutionSlice,
   createDeepResearchSlice,
+  createUITreeSlice,
 } from "./slices";
 
 import type { StoreState } from "./types";
 export type { StoreState } from "./types";
+export type { UITreeSlice } from "./slices/ui-tree";
 export type { DeepSelectionInfo, DeepSelectionInput } from "./slices/selection";
 export type {
   PlanExecutionState,
@@ -84,6 +86,7 @@ export const useStore: OneGenUIStore = create<StoreState>()(
         ...createToolProgressSlice(...args),
         ...createPlanExecutionSlice(...args),
         ...createDeepResearchSlice(...args),
+        ...createUITreeSlice(...args),
       })),
     ),
     {
@@ -269,6 +272,24 @@ export const useResearchProgress = () =>
     }),
   );
 
+// UI Tree selectors
+export const useUITree = () => useStore((s) => s.uiTree);
+export const useTreeVersion = () => useStore((s) => s.treeVersion);
+export const useIsTreeStreaming = () => useStore((s) => s.isTreeStreaming);
+export const useUITreeActions = () =>
+  useStore(
+    useShallow((s) => ({
+      setUITree: s.setUITree,
+      updateUITree: s.updateUITree,
+      setElement: s.setElement,
+      removeElement: s.removeElement,
+      applyTreePatch: s.applyTreePatch,
+      setTreeStreaming: s.setTreeStreaming,
+      clearUITree: s.clearUITree,
+      bumpTreeVersion: s.bumpTreeVersion,
+    })),
+  );
+
 // =============================================================================
 // Re-export slice creators for direct use
 // =============================================================================
@@ -284,4 +305,5 @@ export {
   createToolProgressSlice,
   createPlanExecutionSlice,
   createDeepResearchSlice,
+  createUITreeSlice,
 } from "./slices";

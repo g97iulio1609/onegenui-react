@@ -17,6 +17,7 @@ import type { ValidationSlice } from "./slices/validation";
 import type { ToolProgressSlice } from "./slices/tool-progress";
 import type { PlanExecutionSlice } from "./slices/plan-execution";
 import type { DeepResearchSlice } from "./slices/deep-research";
+import type { UITreeSlice } from "./slices/ui-tree";
 
 // =============================================================================
 // Combined Store Type
@@ -34,7 +35,8 @@ export type StoreState = DomainSlice &
   ValidationSlice &
   ToolProgressSlice &
   PlanExecutionSlice &
-  DeepResearchSlice;
+  DeepResearchSlice &
+  UITreeSlice;
 
 // =============================================================================
 // Slice Creator Type (with immer middleware)
@@ -76,4 +78,5 @@ export type {
   ToolProgressSlice,
   PlanExecutionSlice,
   DeepResearchSlice,
+  UITreeSlice,
 };

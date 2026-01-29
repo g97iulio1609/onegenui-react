@@ -65,3 +65,4 @@ export {
   type ActiveResearch,
   type ResearchResultSummary,
 } from "./deep-research";
+export { createUITreeSlice, type UITreeSlice } from "./ui-tree";
