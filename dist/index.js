@@ -7999,6 +7999,13 @@ var CanvasBlock = (0, import_react42.memo)(function CanvasBlock2({
     title
   } = element.props;
   const [content, setContent] = (0, import_react42.useState)(initialContent || null);
+  const [editorKey, setEditorKey] = (0, import_react42.useState)(0);
+  (0, import_react42.useEffect)(() => {
+    if (initialContent !== void 0) {
+      setContent(initialContent);
+      setEditorKey((k) => k + 1);
+    }
+  }, [initialContent]);
   const handleChange = (0, import_react42.useCallback)(
     (_state, serialized) => {
       setContent(serialized);
@@ -8097,14 +8104,15 @@ var CanvasBlock = (0, import_react42.memo)(function CanvasBlock2({
         /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("div", { className: "bg-zinc-900/50 rounded-xl border border-white/5 overflow-hidden", children: /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(
           EditorComponent,
           {
-            initialState: initialContent,
+            initialState: content,
             onChange: handleChange,
             placeholder,
             editable: mode !== "view",
             enableFloatingToolbar: showToolbar && mode === "edit",
             enableDragDrop: mode === "edit",
             className: "prose prose-invert max-w-none p-4"
-          }
+          },
+          editorKey
         ) }),
         mode === "edit" && /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("div", { className: "flex justify-end mt-2", children: /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(
           "button",

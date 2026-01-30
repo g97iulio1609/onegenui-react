@@ -7,7 +7,7 @@
  */
 "use client";
 
-import { memo, useCallback, useState, useMemo } from "react";
+import { memo, useCallback, useState, useEffect, useMemo } from "react";
 import type { UIElement } from "@onegenui/core";
 
 export interface CanvasBlockProps {
@@ -73,6 +73,17 @@ export const CanvasBlock = memo(function CanvasBlock({
   } = element.props;
 
   const [content, setContent] = useState<unknown>(initialContent || null);
+  // Key to force editor re-render when content is externally updated
+  const [editorKey, setEditorKey] = useState(0);
+
+  // Sync with external initialContent changes (from AI updates)
+  useEffect(() => {
+    if (initialContent !== undefined) {
+      setContent(initialContent);
+      // Force editor to re-initialize with new content
+      setEditorKey((k) => k + 1);
+    }
+  }, [initialContent]);
 
   const handleChange = useCallback(
     (_state: unknown, serialized: unknown) => {
@@ -170,7 +181,8 @@ export const CanvasBlock = memo(function CanvasBlock({
       )}
       <div className="bg-zinc-900/50 rounded-xl border border-white/5 overflow-hidden">
         <EditorComponent
-          initialState={initialContent}
+          key={editorKey}
+          initialState={content}
           onChange={handleChange}
           placeholder={placeholder}
           editable={mode !== "view"}
