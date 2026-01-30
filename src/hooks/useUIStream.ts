@@ -505,19 +505,25 @@ export function useUIStream({
 
         streamLog.debug("Starting stream processing");
 
-        // Process incoming stream data with timeout protection
+        // Process incoming stream data with idle timeout protection
+        // Timeout resets on ANY backend activity (token, message, patch, tool-progress, suggestion)
         let buffer = "";
-        const STREAM_TIMEOUT_MS = 60000; // 60 second timeout between chunks
-        let lastChunkTime = Date.now();
+        const IDLE_TIMEOUT_MS = 90000; // 90 second idle timeout
+        let lastActivityTime = Date.now();
+        
+        // Helper to reset idle timer on any meaningful event
+        const resetIdleTimer = () => {
+          lastActivityTime = Date.now();
+        };
 
         while (true) {
-          // Create read with timeout
+          // Create read with idle timeout check
           const readPromise = reader.read();
           const timeoutPromise = new Promise<{ done: true; value: undefined }>((_, reject) => {
             const checkInterval = setInterval(() => {
-              if (Date.now() - lastChunkTime > STREAM_TIMEOUT_MS) {
+              if (Date.now() - lastActivityTime > IDLE_TIMEOUT_MS) {
                 clearInterval(checkInterval);
-                reject(new Error(`Stream timeout: no data received for ${STREAM_TIMEOUT_MS / 1000}s`));
+                reject(new Error(`Stream idle timeout: no activity for ${IDLE_TIMEOUT_MS / 1000}s`));
               }
             }, 5000);
             // Clear interval when read completes
@@ -527,7 +533,8 @@ export function useUIStream({
           const { done, value } = await Promise.race([readPromise, timeoutPromise]);
           if (done) break;
 
-          lastChunkTime = Date.now();
+          // Raw data received - reset timer
+          resetIdleTimer();
 
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split("\n");
@@ -556,10 +563,12 @@ export function useUIStream({
                 const payload = data?.type === "data" ? data.data : data;
 
                 if (payload?.type === "text-delta") {
-                  // Text delta from AI SDK - not used, all chat comes from op:"message"
+                  // Text delta from AI SDK - reset timer on any text
+                  resetIdleTimer();
                   continue;
                 } else if (payload?.op) {
-                  // JSON Patch operation
+                  // JSON Patch operation - reset timer on any operation
+                  resetIdleTimer();
                   const { op, path, value } = payload;
 
                   if (op === "message") {

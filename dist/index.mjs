@@ -5578,7 +5578,15 @@ function applyPatch(tree, patch, turnId) {
               };
             }
           }
-          newTree.elements[elementKey] = newElement;
+          const updatedElement = turnId ? {
+            ...newElement,
+            _meta: {
+              ...newElement._meta,
+              turnId,
+              lastModifiedAt: Date.now()
+            }
+          } : newElement;
+          newTree.elements[elementKey] = updatedElement;
         }
       }
       break;
@@ -6231,22 +6239,25 @@ function useUIStream({
         };
         streamLog.debug("Starting stream processing");
         let buffer = "";
-        const STREAM_TIMEOUT_MS = 6e4;
-        let lastChunkTime = Date.now();
+        const IDLE_TIMEOUT_MS = 9e4;
+        let lastActivityTime = Date.now();
+        const resetIdleTimer = () => {
+          lastActivityTime = Date.now();
+        };
         while (true) {
           const readPromise = reader.read();
           const timeoutPromise = new Promise((_, reject) => {
             const checkInterval = setInterval(() => {
-              if (Date.now() - lastChunkTime > STREAM_TIMEOUT_MS) {
+              if (Date.now() - lastActivityTime > IDLE_TIMEOUT_MS) {
                 clearInterval(checkInterval);
-                reject(new Error(`Stream timeout: no data received for ${STREAM_TIMEOUT_MS / 1e3}s`));
+                reject(new Error(`Stream idle timeout: no activity for ${IDLE_TIMEOUT_MS / 1e3}s`));
               }
             }, 5e3);
             readPromise.finally(() => clearInterval(checkInterval));
           });
           const { done, value } = await Promise.race([readPromise, timeoutPromise]);
           if (done) break;
-          lastChunkTime = Date.now();
+          resetIdleTimer();
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split("\n");
           buffer = lines.pop() ?? "";
@@ -6265,8 +6276,10 @@ function useUIStream({
                 const data = JSON.parse(content);
                 const payload = data?.type === "data" ? data.data : data;
                 if (payload?.type === "text-delta") {
+                  resetIdleTimer();
                   continue;
                 } else if (payload?.op) {
+                  resetIdleTimer();
                   const { op, path, value: value2 } = payload;
                   if (op === "message") {
                     const msgContent = payload.content || value2;

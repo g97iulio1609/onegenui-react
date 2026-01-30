@@ -117,7 +117,20 @@ export function applyPatch(
             }
           }
 
-          newTree.elements[elementKey] = newElement;
+          // Update _meta.turnId when element is modified (not just created)
+          // This enables tracking which turn last modified each element
+          const updatedElement = turnId
+            ? {
+                ...newElement,
+                _meta: {
+                  ...newElement._meta,
+                  turnId,
+                  lastModifiedAt: Date.now(),
+                },
+              }
+            : newElement;
+
+          newTree.elements[elementKey] = updatedElement;
         }
       }
       break;
