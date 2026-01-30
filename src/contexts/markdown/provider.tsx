@@ -93,6 +93,32 @@ export function MarkdownProvider({
   );
 }
 
+// Stable fallback value - created once and reused to avoid hooks order issues
+const fallbackRenderText = (
+  content: string | null | undefined,
+  options: RenderTextOptions = {},
+) => {
+  if (!content) return null;
+  if (options.inline) {
+    return (
+      <span className={options.className} style={options.style}>
+        {content}
+      </span>
+    );
+  }
+  return (
+    <div className={options.className} style={options.style}>
+      {content}
+    </div>
+  );
+};
+
+const fallbackContextValue: MarkdownContextValue = {
+  enabled: false,
+  theme: defaultTheme,
+  renderText: fallbackRenderText,
+};
+
 /**
  * Hook to access the markdown rendering context.
  *
@@ -109,34 +135,8 @@ export function MarkdownProvider({
  */
 export function useMarkdown(): MarkdownContextValue {
   const context = useContext(MarkdownContext);
-
-  // Fallback for when no provider is present - render plain text
-  if (!context) {
-    return {
-      enabled: false,
-      theme: defaultTheme,
-      renderText: (
-        content: string | null | undefined,
-        options: RenderTextOptions = {},
-      ) => {
-        if (!content) return null;
-        if (options.inline) {
-          return (
-            <span className={options.className} style={options.style}>
-              {content}
-            </span>
-          );
-        }
-        return (
-          <div className={options.className} style={options.style}>
-            {content}
-          </div>
-        );
-      },
-    };
-  }
-
-  return context;
+  // Return stable fallback if no provider - avoids hooks order issues
+  return context ?? fallbackContextValue;
 }
 
 /**

@@ -150,6 +150,8 @@ export function ActionProvider({
   useEffect(() => {
     if (typeof document === "undefined") return;
 
+    let focusOutTimeout: ReturnType<typeof setTimeout> | null = null;
+
     const handleFocusOut = (e: FocusEvent) => {
       const target = e.target as HTMLElement;
       const tag = target?.tagName?.toLowerCase();
@@ -161,7 +163,7 @@ export function ActionProvider({
 
       if (!isEditable) return;
 
-      setTimeout(() => {
+      focusOutTimeout = setTimeout(() => {
         if (!isUserCurrentlyEditing() && pendingActionsRef.current.length > 0) {
           scheduleFlush(options.debounceMs ?? 2500);
         }
@@ -169,7 +171,10 @@ export function ActionProvider({
     };
 
     document.addEventListener("focusout", handleFocusOut, true);
-    return () => document.removeEventListener("focusout", handleFocusOut, true);
+    return () => {
+      document.removeEventListener("focusout", handleFocusOut, true);
+      if (focusOutTimeout) clearTimeout(focusOutTimeout);
+    };
   }, [options.debounceMs, scheduleFlush]);
 
   const value: ActionContextValue = {

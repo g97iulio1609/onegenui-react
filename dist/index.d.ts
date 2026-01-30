@@ -2482,6 +2482,8 @@ interface CanvasBlockComponentProps {
         editable?: boolean;
         enableFloatingToolbar?: boolean;
         enableDragDrop?: boolean;
+        enableAI?: boolean;
+        enableProactiveSuggestions?: boolean;
         className?: string;
     }>;
 }

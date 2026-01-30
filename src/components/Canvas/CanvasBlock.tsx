@@ -51,6 +51,8 @@ interface CanvasBlockComponentProps {
     editable?: boolean;
     enableFloatingToolbar?: boolean;
     enableDragDrop?: boolean;
+    enableAI?: boolean;
+    enableProactiveSuggestions?: boolean;
     className?: string;
   }>;
 }
@@ -217,6 +219,8 @@ export const CanvasBlock = memo(function CanvasBlock({
           editable={mode !== "view"}
           enableFloatingToolbar={showToolbar && mode === "edit"}
           enableDragDrop={mode === "edit"}
+          enableAI={mode === "edit"}
+          enableProactiveSuggestions={mode === "edit"}
           className="prose prose-invert max-w-none p-4"
         />
       </div>

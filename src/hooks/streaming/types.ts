@@ -51,6 +51,7 @@ export type StreamPayload =
       type: "document-index-ui";
       uiComponent: { type: string; props: DocumentIndex };
     }
+  | { type: "citations"; citations: unknown[] }
   | { type: "level-started"; level: number }
   | { type: "step-started"; stepId: number }
   | { type: "subtask-started"; stepId: number }

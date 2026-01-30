@@ -6,6 +6,7 @@
  */
 "use client";
 
+import DOMPurify from "dompurify";
 import { memo, useMemo } from "react";
 import type { UIElement } from "@onegenui/core";
 
@@ -54,7 +55,7 @@ export const DocumentBlock = memo(function DocumentBlock({
       return (
         <div
           className="prose prose-invert max-w-none"
-          dangerouslySetInnerHTML={{ __html: content }}
+          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(content) }}
         />
       );
     }
