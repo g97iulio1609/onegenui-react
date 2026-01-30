@@ -347,6 +347,7 @@ export function useUIStream({
         isProactive,
         attachments,
         isLoading: true, // Mark as loading during streaming
+        status: "pending", // Initial status
       };
       setConversation((prev) => [...prev, pendingTurn]);
 
@@ -473,6 +474,13 @@ export function useUIStream({
         let patchCount = 0;
         let messageCount = 0;
 
+        // Update status to streaming
+        setConversation((prev) =>
+          prev.map((t) =>
+            t.id === turnId ? { ...t, status: "streaming" as const } : t,
+          ),
+        );
+
         // Helper to update the pending turn
         const updateTurnData = () => {
           setConversation((prev) =>
@@ -497,11 +505,29 @@ export function useUIStream({
 
         streamLog.debug("Starting stream processing");
 
-        // Process incoming stream data
+        // Process incoming stream data with timeout protection
         let buffer = "";
+        const STREAM_TIMEOUT_MS = 60000; // 60 second timeout between chunks
+        let lastChunkTime = Date.now();
+
         while (true) {
-          const { done, value } = await reader.read();
+          // Create read with timeout
+          const readPromise = reader.read();
+          const timeoutPromise = new Promise<{ done: true; value: undefined }>((_, reject) => {
+            const checkInterval = setInterval(() => {
+              if (Date.now() - lastChunkTime > STREAM_TIMEOUT_MS) {
+                clearInterval(checkInterval);
+                reject(new Error(`Stream timeout: no data received for ${STREAM_TIMEOUT_MS / 1000}s`));
+              }
+            }, 5000);
+            // Clear interval when read completes
+            readPromise.finally(() => clearInterval(checkInterval));
+          });
+
+          const { done, value } = await Promise.race([readPromise, timeoutPromise]);
           if (done) break;
+
+          lastChunkTime = Date.now();
 
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split("\n");
@@ -772,7 +798,12 @@ export function useUIStream({
                 }
               }
             } catch (e) {
-              // Parse error - skip line
+              // Log parse errors for debugging but don't crash the stream
+              streamLog.warn("Parse error on stream line", { 
+                error: e instanceof Error ? e.message : String(e),
+                lineType,
+                contentPreview: content.slice(0, 100) 
+              });
             }
           }
         }
@@ -837,6 +868,7 @@ export function useUIStream({
                   treeSnapshot: JSON.parse(JSON.stringify(currentTree)),
                   documentIndex: currentDocumentIndex ?? t.documentIndex,
                   isLoading: false, // Loading complete
+                  status: "complete", // Successful completion
                 } as ConversationTurn)
               : t,
           ),
@@ -867,6 +899,8 @@ export function useUIStream({
               ? ({
                   ...t,
                   error: error.message,
+                  isLoading: false,
+                  status: "failed", // Mark as failed
                 } as ConversationTurn)
               : t,
           ),

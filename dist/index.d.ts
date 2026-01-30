@@ -1278,6 +1278,8 @@ interface ConversationTurn {
     error?: string;
     /** Whether turn is still loading */
     isLoading?: boolean;
+    /** Turn completion status for detailed state tracking */
+    status?: "pending" | "streaming" | "complete" | "failed" | "partial";
 }
 /**
  * Minimal message format for AI SDK multi-turn conversations.

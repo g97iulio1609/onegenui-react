@@ -6202,8 +6202,10 @@ function useUIStream({
         timestamp: Date.now(),
         isProactive,
         attachments,
-        isLoading: true
+        isLoading: true,
         // Mark as loading during streaming
+        status: "pending"
+        // Initial status
       };
       setConversation((prev) => [...prev, pendingTurn]);
       let patchBuffer = [];
@@ -6299,6 +6301,11 @@ function useUIStream({
         let currentDocumentIndex = void 0;
         let patchCount = 0;
         let messageCount = 0;
+        setConversation(
+          (prev) => prev.map(
+            (t) => t.id === turnId ? { ...t, status: "streaming" } : t
+          )
+        );
         const updateTurnData = () => {
           setConversation(
             (prev) => prev.map(
@@ -6316,9 +6323,22 @@ function useUIStream({
         };
         streamLog.debug("Starting stream processing");
         let buffer = "";
+        const STREAM_TIMEOUT_MS = 6e4;
+        let lastChunkTime = Date.now();
         while (true) {
-          const { done, value } = await reader.read();
+          const readPromise = reader.read();
+          const timeoutPromise = new Promise((_, reject) => {
+            const checkInterval = setInterval(() => {
+              if (Date.now() - lastChunkTime > STREAM_TIMEOUT_MS) {
+                clearInterval(checkInterval);
+                reject(new Error(`Stream timeout: no data received for ${STREAM_TIMEOUT_MS / 1e3}s`));
+              }
+            }, 5e3);
+            readPromise.finally(() => clearInterval(checkInterval));
+          });
+          const { done, value } = await Promise.race([readPromise, timeoutPromise]);
           if (done) break;
+          lastChunkTime = Date.now();
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split("\n");
           buffer = lines.pop() ?? "";
@@ -6519,6 +6539,11 @@ function useUIStream({
                 }
               }
             } catch (e) {
+              streamLog.warn("Parse error on stream line", {
+                error: e instanceof Error ? e.message : String(e),
+                lineType,
+                contentPreview: content.slice(0, 100)
+              });
             }
           }
         }
@@ -6566,8 +6591,10 @@ function useUIStream({
               suggestions: [...currentSuggestions],
               treeSnapshot: JSON.parse(JSON.stringify(currentTree)),
               documentIndex: currentDocumentIndex ?? t.documentIndex,
-              isLoading: false
+              isLoading: false,
               // Loading complete
+              status: "complete"
+              // Successful completion
             } : t
           )
         );
@@ -6591,7 +6618,10 @@ function useUIStream({
           (prev) => prev.map(
             (t) => t.id === turnId ? {
               ...t,
-              error: error2.message
+              error: error2.message,
+              isLoading: false,
+              status: "failed"
+              // Mark as failed
             } : t
           )
         );
