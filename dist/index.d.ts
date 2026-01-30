@@ -2444,6 +2444,14 @@ interface CanvasBlockProps {
     documentId?: string;
     /** Initial content (serialized state) */
     initialContent?: unknown;
+    /** Markdown content (easier for AI to generate) */
+    markdown?: string;
+    /** Images to embed in document */
+    images?: Array<{
+        url: string;
+        alt?: string;
+        caption?: string;
+    }>;
     /** Editor mode */
     mode?: "view" | "edit" | "collab";
     /** Width (CSS value) */

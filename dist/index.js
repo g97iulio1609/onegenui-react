@@ -7991,6 +7991,8 @@ var CanvasBlock = (0, import_react42.memo)(function CanvasBlock2({
   const {
     documentId,
     initialContent,
+    markdown,
+    images,
     mode = "edit",
     width = "100%",
     height = "300px",
@@ -8000,12 +8002,22 @@ var CanvasBlock = (0, import_react42.memo)(function CanvasBlock2({
   } = element.props;
   const [content, setContent] = (0, import_react42.useState)(initialContent || null);
   const [editorKey, setEditorKey] = (0, import_react42.useState)(0);
+  const processedContent = (0, import_react42.useMemo)(() => {
+    if (initialContent) return initialContent;
+    if (markdown) {
+      return { markdown, images };
+    }
+    if (images && images.length > 0) {
+      return { images };
+    }
+    return null;
+  }, [initialContent, markdown, images]);
   (0, import_react42.useEffect)(() => {
-    if (initialContent !== void 0) {
-      setContent(initialContent);
+    if (processedContent !== void 0 && processedContent !== null) {
+      setContent(processedContent);
       setEditorKey((k) => k + 1);
     }
-  }, [initialContent]);
+  }, [processedContent]);
   const handleChange = (0, import_react42.useCallback)(
     (_state, serialized) => {
       setContent(serialized);

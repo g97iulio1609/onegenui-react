@@ -15,6 +15,14 @@ export interface CanvasBlockProps {
   documentId?: string;
   /** Initial content (serialized state) */
   initialContent?: unknown;
+  /** Markdown content (easier for AI to generate) */
+  markdown?: string;
+  /** Images to embed in document */
+  images?: Array<{
+    url: string;
+    alt?: string;
+    caption?: string;
+  }>;
   /** Editor mode */
   mode?: "view" | "edit" | "collab";
   /** Width (CSS value) */
@@ -64,6 +72,8 @@ export const CanvasBlock = memo(function CanvasBlock({
   const {
     documentId,
     initialContent,
+    markdown,
+    images,
     mode = "edit",
     width = "100%",
     height = "300px",
@@ -76,14 +86,33 @@ export const CanvasBlock = memo(function CanvasBlock({
   // Key to force editor re-render when content is externally updated
   const [editorKey, setEditorKey] = useState(0);
 
-  // Sync with external initialContent changes (from AI updates)
+  // Process markdown into content if provided (easier for AI)
+  const processedContent = useMemo(() => {
+    // If we have initialContent, use it directly
+    if (initialContent) return initialContent;
+
+    // If we have markdown, convert to editor-friendly format
+    // The actual conversion happens in the editor component
+    if (markdown) {
+      return { markdown, images };
+    }
+
+    // If we only have images, create a simple structure
+    if (images && images.length > 0) {
+      return { images };
+    }
+
+    return null;
+  }, [initialContent, markdown, images]);
+
+  // Sync with external content changes (from AI updates)
   useEffect(() => {
-    if (initialContent !== undefined) {
-      setContent(initialContent);
+    if (processedContent !== undefined && processedContent !== null) {
+      setContent(processedContent);
       // Force editor to re-initialize with new content
       setEditorKey((k) => k + 1);
     }
-  }, [initialContent]);
+  }, [processedContent]);
 
   const handleChange = useCallback(
     (_state: unknown, serialized: unknown) => {

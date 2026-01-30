@@ -7890,7 +7890,7 @@ var ToolProgressOverlay = memo4(function ToolProgressOverlay2({
 });
 
 // src/components/Canvas/CanvasBlock.tsx
-import { memo as memo5, useCallback as useCallback28, useState as useState15, useEffect as useEffect18 } from "react";
+import { memo as memo5, useCallback as useCallback28, useState as useState15, useEffect as useEffect18, useMemo as useMemo19 } from "react";
 import { jsx as jsx32, jsxs as jsxs13 } from "react/jsx-runtime";
 function CanvasBlockSkeleton() {
   return /* @__PURE__ */ jsx32("div", { className: "w-full min-h-[200px] bg-zinc-900/50 rounded-xl border border-white/5 flex items-center justify-center", children: /* @__PURE__ */ jsx32("div", { className: "text-zinc-500 text-sm", children: "Loading editor..." }) });
@@ -7904,6 +7904,8 @@ var CanvasBlock = memo5(function CanvasBlock2({
   const {
     documentId,
     initialContent,
+    markdown,
+    images,
     mode = "edit",
     width = "100%",
     height = "300px",
@@ -7913,12 +7915,22 @@ var CanvasBlock = memo5(function CanvasBlock2({
   } = element.props;
   const [content, setContent] = useState15(initialContent || null);
   const [editorKey, setEditorKey] = useState15(0);
+  const processedContent = useMemo19(() => {
+    if (initialContent) return initialContent;
+    if (markdown) {
+      return { markdown, images };
+    }
+    if (images && images.length > 0) {
+      return { images };
+    }
+    return null;
+  }, [initialContent, markdown, images]);
   useEffect18(() => {
-    if (initialContent !== void 0) {
-      setContent(initialContent);
+    if (processedContent !== void 0 && processedContent !== null) {
+      setContent(processedContent);
       setEditorKey((k) => k + 1);
     }
-  }, [initialContent]);
+  }, [processedContent]);
   const handleChange = useCallback28(
     (_state, serialized) => {
       setContent(serialized);
