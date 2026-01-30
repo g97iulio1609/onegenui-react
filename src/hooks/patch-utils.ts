@@ -34,13 +34,30 @@ export function parsePatchLine(line: string): JsonPatch | null {
 }
 
 /**
+ * Options for applying patches
+ */
+export interface ApplyPatchOptions {
+  /** Turn ID for tracking which turn modified elements */
+  turnId?: string;
+  /** Element types that should not be removed by AI (e.g., ["Canvas"]) */
+  protectedTypes?: string[];
+}
+
+/**
  * Apply a JSON patch to the current tree
  */
 export function applyPatch(
   tree: UITree,
   patch: JsonPatch,
-  turnId?: string,
+  turnIdOrOptions?: string | ApplyPatchOptions,
 ): UITree {
+  // Handle legacy turnId parameter or new options object
+  const options: ApplyPatchOptions =
+    typeof turnIdOrOptions === "string"
+      ? { turnId: turnIdOrOptions }
+      : turnIdOrOptions || {};
+  const { turnId, protectedTypes = [] } = options;
+
   const newTree = { ...tree, elements: { ...tree.elements } };
 
   switch (patch.op) {
@@ -147,7 +164,16 @@ export function applyPatch(
 
         if (!elementKey) return newTree;
 
+        // Check if element is protected from removal
         if (pathParts.length === 1) {
+          const element = newTree.elements[elementKey];
+          if (element && protectedTypes.includes(element.type)) {
+            // Skip removal of protected element types
+            console.debug(
+              `[applyPatch] Blocked removal of protected element: ${element.type}`,
+            );
+            return newTree;
+          }
           const { [elementKey]: _, ...rest } = newTree.elements;
           newTree.elements = rest;
         } else {
@@ -201,9 +227,15 @@ export function applyPatch(
 export function applyPatchesBatch(
   tree: UITree,
   patches: JsonPatch[],
-  turnId?: string,
+  turnIdOrOptions?: string | ApplyPatchOptions,
 ): UITree {
   if (patches.length === 0) return tree;
+
+  // Handle legacy turnId parameter or new options object
+  const options: ApplyPatchOptions =
+    typeof turnIdOrOptions === "string"
+      ? { turnId: turnIdOrOptions }
+      : turnIdOrOptions || {};
 
   const rootPatches: JsonPatch[] = [];
   const elementPatches: JsonPatch[] = [];
@@ -231,16 +263,16 @@ export function applyPatchesBatch(
   let newTree = { ...tree, elements: { ...tree.elements } };
 
   for (const patch of rootPatches) {
-    newTree = applyPatch(newTree, patch, turnId);
+    newTree = applyPatch(newTree, patch, options);
   }
   for (const patch of elementPatches) {
-    newTree = applyPatch(newTree, patch, turnId);
+    newTree = applyPatch(newTree, patch, options);
   }
   for (const patch of propPatches) {
-    newTree = applyPatch(newTree, patch, turnId);
+    newTree = applyPatch(newTree, patch, options);
   }
   for (const patch of otherPatches) {
-    newTree = applyPatch(newTree, patch, turnId);
+    newTree = applyPatch(newTree, patch, options);
   }
 
   return newTree;

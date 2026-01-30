@@ -633,10 +633,15 @@ export function useUIStream({
                           // CRITICAL: Use treeRef.current as the base, not the captured currentTree
                           // This ensures we're always working with the latest state
                           const baseTree = treeRef.current ?? currentTree;
+                          
+                          // Protect Canvas from removal when forceCanvasMode is enabled
+                          const protectedTypes =
+                            context?.forceCanvasMode === true ? ["Canvas"] : [];
+                          
                           const updatedTree = applyPatchesBatch(
                             baseTree,
                             patchBuffer,
-                            turnId,
+                            { turnId, protectedTypes },
                           );
                           patchBuffer = [];
                           // Update both ref and state atomically
@@ -841,7 +846,12 @@ export function useUIStream({
           streamLog.debug("Final patch flush", { count: patchBuffer.length });
           // Use treeRef for consistency
           const baseTree = treeRef.current ?? currentTree;
-          currentTree = applyPatchesBatch(baseTree, patchBuffer, turnId);
+          
+          // Protect Canvas from removal when forceCanvasMode is enabled
+          const protectedTypes =
+            context?.forceCanvasMode === true ? ["Canvas"] : [];
+          
+          currentTree = applyPatchesBatch(baseTree, patchBuffer, { turnId, protectedTypes });
           patchBuffer = [];
           treeRef.current = currentTree;
           

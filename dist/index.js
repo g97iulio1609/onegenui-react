@@ -5615,7 +5615,9 @@ function getPatchDepth(patch) {
 }
 
 // src/hooks/patch-utils.ts
-function applyPatch(tree, patch, turnId) {
+function applyPatch(tree, patch, turnIdOrOptions) {
+  const options = typeof turnIdOrOptions === "string" ? { turnId: turnIdOrOptions } : turnIdOrOptions || {};
+  const { turnId, protectedTypes = [] } = options;
   const newTree = { ...tree, elements: { ...tree.elements } };
   switch (patch.op) {
     case "set":
@@ -5701,6 +5703,13 @@ function applyPatch(tree, patch, turnId) {
         const elementKey = pathParts[0];
         if (!elementKey) return newTree;
         if (pathParts.length === 1) {
+          const element = newTree.elements[elementKey];
+          if (element && protectedTypes.includes(element.type)) {
+            console.debug(
+              `[applyPatch] Blocked removal of protected element: ${element.type}`
+            );
+            return newTree;
+          }
           const { [elementKey]: _, ...rest } = newTree.elements;
           newTree.elements = rest;
         } else {
@@ -5744,8 +5753,9 @@ function applyPatch(tree, patch, turnId) {
   }
   return newTree;
 }
-function applyPatchesBatch(tree, patches, turnId) {
+function applyPatchesBatch(tree, patches, turnIdOrOptions) {
   if (patches.length === 0) return tree;
+  const options = typeof turnIdOrOptions === "string" ? { turnId: turnIdOrOptions } : turnIdOrOptions || {};
   const rootPatches = [];
   const elementPatches = [];
   const propPatches = [];
@@ -5768,16 +5778,16 @@ function applyPatchesBatch(tree, patches, turnId) {
   propPatches.sort((a, b) => a.path.localeCompare(b.path));
   let newTree = { ...tree, elements: { ...tree.elements } };
   for (const patch of rootPatches) {
-    newTree = applyPatch(newTree, patch, turnId);
+    newTree = applyPatch(newTree, patch, options);
   }
   for (const patch of elementPatches) {
-    newTree = applyPatch(newTree, patch, turnId);
+    newTree = applyPatch(newTree, patch, options);
   }
   for (const patch of propPatches) {
-    newTree = applyPatch(newTree, patch, turnId);
+    newTree = applyPatch(newTree, patch, options);
   }
   for (const patch of otherPatches) {
-    newTree = applyPatch(newTree, patch, turnId);
+    newTree = applyPatch(newTree, patch, options);
   }
   return newTree;
 }
@@ -6433,10 +6443,11 @@ function useUIStream({
                         if (patchBuffer.length > 0) {
                           streamLog.debug("Flushing patches", { count: patchBuffer.length });
                           const baseTree = treeRef.current ?? currentTree;
+                          const protectedTypes = context?.forceCanvasMode === true ? ["Canvas"] : [];
                           const updatedTree = applyPatchesBatch(
                             baseTree,
                             patchBuffer,
-                            turnId
+                            { turnId, protectedTypes }
                           );
                           patchBuffer = [];
                           treeRef.current = updatedTree;
@@ -6585,7 +6596,8 @@ function useUIStream({
         if (patchBuffer.length > 0) {
           streamLog.debug("Final patch flush", { count: patchBuffer.length });
           const baseTree = treeRef.current ?? currentTree;
-          currentTree = applyPatchesBatch(baseTree, patchBuffer, turnId);
+          const protectedTypes = context?.forceCanvasMode === true ? ["Canvas"] : [];
+          currentTree = applyPatchesBatch(baseTree, patchBuffer, { turnId, protectedTypes });
           patchBuffer = [];
           treeRef.current = currentTree;
           const store = storeRef.current;
