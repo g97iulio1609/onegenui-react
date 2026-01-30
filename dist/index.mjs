@@ -5132,6 +5132,7 @@ var ElementRenderer = React12.memo(function ElementRenderer2({
 }) {
   const isVisible = useIsVisible(element.visible);
   const { execute } = useActions();
+  const { renderText } = useMarkdown();
   if (!isVisible) {
     return null;
   }
@@ -5145,7 +5146,6 @@ var ElementRenderer = React12.memo(function ElementRenderer2({
       element.key
     );
   }
-  const { renderText } = useMarkdown();
   const Component = registry[element.type] ?? fallback;
   if (!Component) {
     console.warn(`No renderer for component type: ${element.type}`);
@@ -5437,15 +5437,23 @@ function removeByPath(target, path) {
       if (!Number.isInteger(index) || index < 0 || index >= current.length)
         return;
       const nextValue = current[index];
-      if (Array.isArray(nextValue) || typeof nextValue === "object") {
-        current = nextValue;
+      if (Array.isArray(nextValue)) {
+        current[index] = [...nextValue];
+        current = current[index];
+      } else if (nextValue && typeof nextValue === "object") {
+        current[index] = { ...nextValue };
+        current = current[index];
       } else {
         return;
       }
     } else {
       const nextValue = current[segment];
-      if (Array.isArray(nextValue) || typeof nextValue === "object") {
-        current = nextValue;
+      if (Array.isArray(nextValue)) {
+        current[segment] = [...nextValue];
+        current = current[segment];
+      } else if (nextValue && typeof nextValue === "object") {
+        current[segment] = { ...nextValue };
+        current = current[segment];
       } else {
         return;
       }

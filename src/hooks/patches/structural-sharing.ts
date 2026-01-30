@@ -75,7 +75,8 @@ export function setByPathWithStructuralSharing<
 }
 
 /**
- * Remove a value from an object/array by JSON Pointer path
+ * Remove a value from an object/array by JSON Pointer path with structural sharing.
+ * Clones objects along the path to avoid mutating frozen/immutable data.
  */
 export function removeByPath(
   target: Record<string, unknown> | unknown[],
@@ -89,6 +90,7 @@ export function removeByPath(
 
   let current: Record<string, unknown> | unknown[] = target;
 
+  // Clone each level along the path to ensure mutability
   for (let i = 0; i < segments.length - 1; i++) {
     const segment = segments[i]!;
 
@@ -96,16 +98,25 @@ export function removeByPath(
       const index = Number(segment);
       if (!Number.isInteger(index) || index < 0 || index >= current.length)
         return;
+      // Clone the array element if it's an object/array
       const nextValue = current[index];
-      if (Array.isArray(nextValue) || typeof nextValue === "object") {
-        current = nextValue as Record<string, unknown> | unknown[];
+      if (Array.isArray(nextValue)) {
+        current[index] = [...nextValue];
+        current = current[index] as unknown[];
+      } else if (nextValue && typeof nextValue === "object") {
+        current[index] = { ...nextValue };
+        current = current[index] as Record<string, unknown>;
       } else {
         return;
       }
     } else {
       const nextValue = current[segment];
-      if (Array.isArray(nextValue) || typeof nextValue === "object") {
-        current = nextValue as Record<string, unknown> | unknown[];
+      if (Array.isArray(nextValue)) {
+        current[segment] = [...nextValue];
+        current = current[segment] as unknown[];
+      } else if (nextValue && typeof nextValue === "object") {
+        current[segment] = { ...nextValue };
+        current = current[segment] as Record<string, unknown>;
       } else {
         return;
       }

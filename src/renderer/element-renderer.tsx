@@ -111,8 +111,10 @@ export const ElementRenderer = React.memo(function ElementRenderer({
   selectedKey,
   onResize,
 }: ElementRendererProps) {
+  // All hooks MUST be called before any conditional returns (Rules of Hooks)
   const isVisible = useIsVisible(element.visible);
   const { execute } = useActions();
+  const { renderText } = useMarkdown();
 
   if (!isVisible) {
     return null;
@@ -130,8 +132,6 @@ export const ElementRenderer = React.memo(function ElementRenderer({
       />
     );
   }
-
-  const { renderText } = useMarkdown();
 
   const Component = registry[element.type] ?? fallback;
 
