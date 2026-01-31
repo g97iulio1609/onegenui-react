@@ -49,13 +49,8 @@ export interface ApplyPatchOptions {
 export function applyPatch(
   tree: UITree,
   patch: JsonPatch,
-  turnIdOrOptions?: string | ApplyPatchOptions,
+  options: ApplyPatchOptions = {},
 ): UITree {
-  // Handle legacy turnId parameter or new options object
-  const options: ApplyPatchOptions =
-    typeof turnIdOrOptions === "string"
-      ? { turnId: turnIdOrOptions }
-      : turnIdOrOptions || {};
   const { turnId, protectedTypes = [] } = options;
 
   const newTree = { ...tree, elements: { ...tree.elements } };
@@ -227,15 +222,9 @@ export function applyPatch(
 export function applyPatchesBatch(
   tree: UITree,
   patches: JsonPatch[],
-  turnIdOrOptions?: string | ApplyPatchOptions,
+  options: ApplyPatchOptions = {},
 ): UITree {
   if (patches.length === 0) return tree;
-
-  // Handle legacy turnId parameter or new options object
-  const options: ApplyPatchOptions =
-    typeof turnIdOrOptions === "string"
-      ? { turnId: turnIdOrOptions }
-      : turnIdOrOptions || {};
 
   const rootPatches: JsonPatch[] = [];
   const elementPatches: JsonPatch[] = [];

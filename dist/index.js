@@ -42,9 +42,10 @@ __export(index_exports, {
   DEFAULT_EXTENDED_SETTINGS: () => DEFAULT_EXTENDED_SETTINGS,
   DataProvider: () => DataProvider,
   DocumentBlock: () => DocumentBlock,
+  EditModeProvider: () => EditModeProvider,
   EditableNumber: () => EditableNumber,
   EditableProvider: () => EditableProvider,
-  EditableText: () => EditableText,
+  EditableText: () => EditableText3,
   ElementRenderer: () => ElementRenderer,
   FreeGridCanvas: () => FreeGridCanvas,
   GridCell: () => GridCell,
@@ -107,6 +108,12 @@ __export(index_exports, {
   useAreSuggestionsEnabled: () => useAreSuggestionsEnabled,
   useAuthenticatedSources: () => useAuthenticatedSources,
   useAutoSave: () => useAutoSave,
+  useCanvasActions: () => useCanvasActions,
+  useCanvasContent: () => useCanvasContent,
+  useCanvasInstance: () => useCanvasInstance,
+  useCanvasInstances: () => useCanvasInstances,
+  useCanvasIsStreaming: () => useCanvasIsStreaming,
+  useCanvasVersion: () => useCanvasVersion,
   useCitations: () => useCitations,
   useData: () => useData,
   useDataBinding: () => useDataBinding,
@@ -117,15 +124,18 @@ __export(index_exports, {
   useDeepSelectionActive: () => useDeepSelectionActive,
   useDeepSelections: () => useDeepSelections,
   useDomainAutoSave: () => useDomainAutoSave,
+  useEditMode: () => useEditMode,
   useEditable: () => useEditable,
   useEditableContext: () => useEditableContext,
   useElementActionTracker: () => useElementActionTracker,
+  useElementEdit: () => useElementEdit,
   useFieldStates: () => useFieldStates,
   useFieldValidation: () => useFieldValidation,
   useFormState: () => useFormState,
   useGeneratingGoal: () => useGeneratingGoal,
   useGranularSelection: () => useGranularSelection,
   useIsAnyToolRunning: () => useIsAnyToolRunning,
+  useIsElementEditing: () => useIsElementEditing,
   useIsGenerating: () => useIsGenerating,
   useIsMobile: () => useIsMobile,
   useIsPlanRunning: () => useIsPlanRunning,
@@ -353,7 +363,7 @@ var createSelectionSlice = (set, get) => ({
 
 // src/store/slices/settings.ts
 var defaultAISettings = {
-  model: "gemini-2.0-flash",
+  model: "gemini-3-flash-preview",
   temperature: 0.7,
   maxTokens: 8192,
   streamingEnabled: true,
@@ -1277,6 +1287,139 @@ var createWorkspaceSlice = (set, get) => ({
   }
 });
 
+// src/store/slices/canvas.ts
+var createCanvasSlice = (set, get) => ({
+  // Initial state
+  canvasInstances: /* @__PURE__ */ new Map(),
+  canvasPendingUpdates: [],
+  // Instance management
+  initCanvas: (canvasId, initialContent = null, options = {}) => {
+    const existing = get().canvasInstances.get(canvasId);
+    if (existing) {
+      return existing;
+    }
+    const instance = {
+      id: canvasId,
+      content: initialContent,
+      isStreaming: false,
+      version: 0,
+      updatedAt: Date.now(),
+      isDirty: false,
+      title: options.title,
+      documentId: options.documentId
+    };
+    set((state) => {
+      state.canvasInstances.set(canvasId, instance);
+    });
+    return instance;
+  },
+  removeCanvas: (canvasId) => {
+    set((state) => {
+      state.canvasInstances.delete(canvasId);
+      state.canvasPendingUpdates = state.canvasPendingUpdates.filter(
+        (u) => u.canvasId !== canvasId
+      );
+    });
+  },
+  hasCanvas: (canvasId) => {
+    return get().canvasInstances.has(canvasId);
+  },
+  getCanvas: (canvasId) => {
+    return get().canvasInstances.get(canvasId);
+  },
+  // Content updates
+  updateCanvasContent: (canvasId, content) => {
+    set((state) => {
+      const instance = state.canvasInstances.get(canvasId);
+      if (instance) {
+        instance.content = content;
+        instance.version += 1;
+        instance.updatedAt = Date.now();
+        instance.isDirty = true;
+      }
+    });
+  },
+  setCanvasStreaming: (canvasId, isStreaming) => {
+    set((state) => {
+      const instance = state.canvasInstances.get(canvasId);
+      if (instance) {
+        instance.isStreaming = isStreaming;
+        if (!isStreaming) {
+          const pendingForCanvas = state.canvasPendingUpdates.filter(
+            (u) => u.canvasId === canvasId
+          );
+          if (pendingForCanvas.length > 0) {
+            const latest = pendingForCanvas[pendingForCanvas.length - 1];
+            if (latest) {
+              instance.content = latest.content;
+              instance.version += 1;
+              instance.updatedAt = Date.now();
+            }
+            state.canvasPendingUpdates = state.canvasPendingUpdates.filter(
+              (u) => u.canvasId !== canvasId
+            );
+          }
+        }
+      }
+    });
+  },
+  setCanvasDirty: (canvasId, isDirty) => {
+    set((state) => {
+      const instance = state.canvasInstances.get(canvasId);
+      if (instance) {
+        instance.isDirty = isDirty;
+      }
+    });
+  },
+  // Batch updates
+  queueCanvasUpdate: (canvasId, content) => {
+    set((state) => {
+      state.canvasPendingUpdates.push({
+        canvasId,
+        content,
+        timestamp: Date.now()
+      });
+    });
+  },
+  flushCanvasUpdates: (canvasId) => {
+    set((state) => {
+      const pendingForCanvas = state.canvasPendingUpdates.filter(
+        (u) => u.canvasId === canvasId
+      );
+      if (pendingForCanvas.length > 0) {
+        const instance = state.canvasInstances.get(canvasId);
+        if (instance) {
+          const latest = pendingForCanvas[pendingForCanvas.length - 1];
+          if (latest) {
+            instance.content = latest.content;
+            instance.version += 1;
+            instance.updatedAt = Date.now();
+          }
+        }
+        state.canvasPendingUpdates = state.canvasPendingUpdates.filter(
+          (u) => u.canvasId !== canvasId
+        );
+      }
+    });
+  },
+  clearCanvasPendingUpdates: (canvasId) => {
+    set((state) => {
+      state.canvasPendingUpdates = state.canvasPendingUpdates.filter(
+        (u) => u.canvasId !== canvasId
+      );
+    });
+  },
+  // Selectors
+  getCanvasIds: () => {
+    return Array.from(get().canvasInstances.keys());
+  },
+  getStreamingCanvases: () => {
+    return Array.from(get().canvasInstances.values()).filter(
+      (c) => c.isStreaming
+    );
+  }
+});
+
 // src/store/index.ts
 (0, import_immer2.enableMapSet)();
 var useStore = (0, import_zustand.create)()(
@@ -1294,7 +1437,8 @@ var useStore = (0, import_zustand.create)()(
         ...createPlanExecutionSlice(...args),
         ...createDeepResearchSlice(...args),
         ...createUITreeSlice(...args),
-        ...createWorkspaceSlice(...args)
+        ...createWorkspaceSlice(...args),
+        ...createCanvasSlice(...args)
       }))
     ),
     {
@@ -1304,7 +1448,7 @@ var useStore = (0, import_zustand.create)()(
   )
 );
 var useUIStore = useStore;
-var useDeepSelections = () => useStore((s) => s.deepSelections);
+var useDeepSelections = () => useStore((0, import_shallow.useShallow)((s) => s.deepSelections));
 var useDeepSelectionActive = () => useStore((s) => s.deepSelectionActive);
 var useGranularSelection = () => useStore(
   (0, import_shallow.useShallow)((s) => {
@@ -1320,10 +1464,10 @@ var useGranularSelection = () => useStore(
     return result;
   })
 );
-var useLoadingActions = () => useStore((s) => s.loadingActions);
-var usePendingConfirmations = () => useStore((s) => s.pendingConfirmations);
-var useActionHistory = () => useStore((s) => s.actionHistory);
-var useFieldStates = () => useStore((s) => s.fieldStates);
+var useLoadingActions = () => useStore((0, import_shallow.useShallow)((s) => s.loadingActions));
+var usePendingConfirmations = () => useStore((0, import_shallow.useShallow)((s) => s.pendingConfirmations));
+var useActionHistory = () => useStore((0, import_shallow.useShallow)((s) => s.actionHistory));
+var useFieldStates = () => useStore((0, import_shallow.useShallow)((s) => s.fieldStates));
 var useIsValidating = () => useStore((s) => s.isValidating);
 var useFormState = () => useStore(
   (0, import_shallow.useShallow)((s) => {
@@ -1430,6 +1574,23 @@ var useWorkspaceActions = () => useStore(
     approvePendingEdit: s.approvePendingEdit,
     rejectPendingEdit: s.rejectPendingEdit,
     clearPendingEdits: s.clearPendingEdits
+  }))
+);
+var useCanvasInstances = () => useStore((0, import_shallow.useShallow)((s) => Array.from(s.canvasInstances.values())));
+var useCanvasInstance = (canvasId) => useStore((s) => s.canvasInstances.get(canvasId));
+var useCanvasContent = (canvasId) => useStore((s) => s.canvasInstances.get(canvasId)?.content ?? null);
+var useCanvasVersion = (canvasId) => useStore((s) => s.canvasInstances.get(canvasId)?.version ?? 0);
+var useCanvasIsStreaming = (canvasId) => useStore((s) => s.canvasInstances.get(canvasId)?.isStreaming ?? false);
+var useCanvasActions = () => useStore(
+  (0, import_shallow.useShallow)((s) => ({
+    initCanvas: s.initCanvas,
+    removeCanvas: s.removeCanvas,
+    updateCanvasContent: s.updateCanvasContent,
+    setCanvasStreaming: s.setCanvasStreaming,
+    setCanvasDirty: s.setCanvasDirty,
+    queueCanvasUpdate: s.queueCanvasUpdate,
+    flushCanvasUpdates: s.flushCanvasUpdates,
+    clearCanvasPendingUpdates: s.clearCanvasPendingUpdates
   }))
 );
 
@@ -4294,8 +4455,132 @@ function useGeneratingGoal() {
   return useStore((s) => s.planExecution.plan?.goal ?? null);
 }
 
-// src/components/InteractionTrackingWrapper.tsx
+// src/contexts/edit-mode.tsx
 var import_react22 = require("react");
+var import_jsx_runtime15 = require("react/jsx-runtime");
+var EditModeContext = (0, import_react22.createContext)(null);
+function EditModeProvider({
+  children,
+  initialEditing = false,
+  onCommit
+}) {
+  const [isEditing, setIsEditing] = (0, import_react22.useState)(initialEditing);
+  const [focusedKey, setFocusedKey] = (0, import_react22.useState)(null);
+  const [pendingChanges, setPendingChanges] = (0, import_react22.useState)(/* @__PURE__ */ new Map());
+  const enableEditing = (0, import_react22.useCallback)(() => setIsEditing(true), []);
+  const disableEditing = (0, import_react22.useCallback)(() => {
+    setIsEditing(false);
+    setFocusedKey(null);
+  }, []);
+  const toggleEditing = (0, import_react22.useCallback)(() => setIsEditing((prev) => !prev), []);
+  const recordChange = (0, import_react22.useCallback)(
+    (elementKey, propName, newValue) => {
+      setPendingChanges((prev) => {
+        const next = new Map(prev);
+        const existing = next.get(elementKey) || {};
+        next.set(elementKey, { ...existing, [propName]: newValue });
+        return next;
+      });
+    },
+    []
+  );
+  const commitChanges = (0, import_react22.useCallback)(() => {
+    if (pendingChanges.size === 0) return;
+    const changes = [];
+    pendingChanges.forEach((props, key) => {
+      changes.push({ key, props });
+    });
+    if (onCommit) {
+      onCommit(changes);
+    }
+    setPendingChanges(/* @__PURE__ */ new Map());
+  }, [pendingChanges, onCommit]);
+  const discardChanges = (0, import_react22.useCallback)(() => {
+    setPendingChanges(/* @__PURE__ */ new Map());
+  }, []);
+  const value = (0, import_react22.useMemo)(
+    () => ({
+      isEditing,
+      enableEditing,
+      disableEditing,
+      toggleEditing,
+      focusedKey,
+      setFocusedKey,
+      pendingChanges,
+      recordChange,
+      commitChanges,
+      discardChanges,
+      onCommit
+    }),
+    [
+      isEditing,
+      enableEditing,
+      disableEditing,
+      toggleEditing,
+      focusedKey,
+      setFocusedKey,
+      pendingChanges,
+      recordChange,
+      commitChanges,
+      discardChanges,
+      onCommit
+    ]
+  );
+  return /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(EditModeContext.Provider, { value, children });
+}
+function useEditMode() {
+  const context = (0, import_react22.useContext)(EditModeContext);
+  if (!context) {
+    return {
+      isEditing: false,
+      enableEditing: () => {
+      },
+      disableEditing: () => {
+      },
+      toggleEditing: () => {
+      },
+      focusedKey: null,
+      setFocusedKey: () => {
+      },
+      pendingChanges: /* @__PURE__ */ new Map(),
+      recordChange: () => {
+      },
+      commitChanges: () => {
+      },
+      discardChanges: () => {
+      }
+    };
+  }
+  return context;
+}
+function useIsElementEditing(elementKey) {
+  const { isEditing, focusedKey } = useEditMode();
+  return isEditing && focusedKey === elementKey;
+}
+function useElementEdit(elementKey) {
+  const { isEditing, recordChange, focusedKey, setFocusedKey } = useEditMode();
+  const handleChange = (0, import_react22.useCallback)(
+    (propName, newValue) => {
+      recordChange(elementKey, propName, newValue);
+    },
+    [elementKey, recordChange]
+  );
+  const handleFocus = (0, import_react22.useCallback)(() => {
+    setFocusedKey(elementKey);
+  }, [elementKey, setFocusedKey]);
+  const handleBlur = (0, import_react22.useCallback)(() => {
+  }, []);
+  return {
+    isEditing,
+    isFocused: focusedKey === elementKey,
+    handleChange,
+    handleFocus,
+    handleBlur
+  };
+}
+
+// src/components/InteractionTrackingWrapper.tsx
+var import_react23 = require("react");
 
 // src/utils/selection.ts
 var DEFAULT_SELECTION_DELAY = 350;
@@ -4312,6 +4597,9 @@ function triggerHaptic(pattern = 50) {
 function isIgnoredTarget(target) {
   if (!(target instanceof HTMLElement)) return false;
   if (target.closest("[data-jsonui-ignore-select]")) return true;
+  if (target.closest(".editable-text-node") || target.closest("[data-editable='true']") || target.closest("[contenteditable='true']")) {
+    return true;
+  }
   const tagName = target.tagName.toLowerCase();
   if (tagName === "input" || tagName === "textarea" || tagName === "select" || tagName === "button" || target.closest("button") || target.isContentEditable || target.getAttribute("role") === "button" || target.getAttribute("role") === "slider" || target.getAttribute("role") === "tab" || target.getAttribute("role") === "checkbox" || target.getAttribute("role") === "switch" || target.getAttribute("role") === "menuitem") {
     return true;
@@ -4394,8 +4682,8 @@ function findClosestElementKey(target) {
 }
 
 // src/components/InteractionTrackingWrapper.tsx
-var import_jsx_runtime15 = require("react/jsx-runtime");
-var InteractionTrackingContext = (0, import_react22.createContext)(null);
+var import_jsx_runtime16 = require("react/jsx-runtime");
+var InteractionTrackingContext = (0, import_react23.createContext)(null);
 function isNonProactiveElement(target) {
   const tagName = target.tagName.toLowerCase();
   if (tagName === "a" || target.closest("a[href]")) return true;
@@ -4417,14 +4705,14 @@ function InteractionTrackingWrapper({
   tree,
   onInteraction
 }) {
-  const containerRef = (0, import_react22.useRef)(null);
+  const containerRef = (0, import_react23.useRef)(null);
   let isDeepSelectionActive;
   try {
     const selectionContext = useSelection();
     isDeepSelectionActive = selectionContext.isDeepSelectionActive;
   } catch {
   }
-  (0, import_react22.useEffect)(() => {
+  (0, import_react23.useEffect)(() => {
     const container = containerRef.current;
     if (!container) return;
     const handleInteraction = (event) => {
@@ -4453,14 +4741,14 @@ function InteractionTrackingWrapper({
       container.removeEventListener("change", handleInteraction, true);
     };
   }, [tree, onInteraction]);
-  return /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(InteractionTrackingContext.Provider, { value: onInteraction, children: /* @__PURE__ */ (0, import_jsx_runtime15.jsx)("div", { ref: containerRef, style: { display: "contents" }, children }) });
+  return /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(InteractionTrackingContext.Provider, { value: onInteraction, children: /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("div", { ref: containerRef, style: { display: "contents" }, children }) });
 }
 
 // src/renderer/element-renderer.tsx
-var import_react27 = __toESM(require("react"));
+var import_react40 = __toESM(require("react"));
 
 // src/components/ResizableWrapper.tsx
-var import_react24 = __toESM(require("react"));
+var import_react25 = __toESM(require("react"));
 
 // src/hooks/resizable/types.ts
 var MOBILE_BREAKPOINT = 768;
@@ -4541,7 +4829,7 @@ function getResizeCursor(handle) {
 }
 
 // src/hooks/resizable/hook.ts
-var import_react23 = require("react");
+var import_react24 = require("react");
 function useResizable({
   initialSize,
   config,
@@ -4555,17 +4843,17 @@ function useResizable({
   const initialWidth = parseSize(initialSize?.width, 0);
   const initialHeight = parseSize(initialSize?.height, 0);
   const hasExplicitSize = initialWidth > 0 || initialHeight > 0;
-  const [state, setState] = (0, import_react23.useState)({
+  const [state, setState] = (0, import_react24.useState)({
     width: initialWidth,
     height: initialHeight,
     isResizing: false,
     activeHandle: null
   });
-  const [hasResized, setHasResized] = (0, import_react23.useState)(hasExplicitSize);
-  const dragStart = (0, import_react23.useRef)({ x: 0, y: 0, width: 0, height: 0 });
-  const containerRef = (0, import_react23.useRef)(null);
-  const lastBreakpointRef = (0, import_react23.useRef)(null);
-  (0, import_react23.useEffect)(() => {
+  const [hasResized, setHasResized] = (0, import_react24.useState)(hasExplicitSize);
+  const dragStart = (0, import_react24.useRef)({ x: 0, y: 0, width: 0, height: 0 });
+  const containerRef = (0, import_react24.useRef)(null);
+  const lastBreakpointRef = (0, import_react24.useRef)(null);
+  (0, import_react24.useEffect)(() => {
     if (typeof window === "undefined") return;
     const checkBreakpoint = () => {
       const currentBreakpoint = window.innerWidth <= MOBILE_BREAKPOINT ? "mobile" : "desktop";
@@ -4587,7 +4875,7 @@ function useResizable({
       mediaQuery.removeEventListener("change", checkBreakpoint);
     };
   }, [initialWidth, initialHeight]);
-  const startResize = (0, import_react23.useCallback)(
+  const startResize = (0, import_react24.useCallback)(
     (handle, e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -4626,7 +4914,7 @@ function useResizable({
       constrainToContainer
     ]
   );
-  const stopResize = (0, import_react23.useCallback)(() => {
+  const stopResize = (0, import_react24.useCallback)(() => {
     setState((prev) => {
       if (!prev.isResizing) return prev;
       const finalState = {
@@ -4644,7 +4932,7 @@ function useResizable({
     });
     containerRef.current = null;
   }, [onResizeEnd]);
-  const reset = (0, import_react23.useCallback)(() => {
+  const reset = (0, import_react24.useCallback)(() => {
     setState({
       width: initialWidth,
       height: initialHeight,
@@ -4653,7 +4941,7 @@ function useResizable({
     });
     setHasResized(hasExplicitSize);
   }, [initialWidth, initialHeight, hasExplicitSize]);
-  (0, import_react23.useEffect)(() => {
+  (0, import_react24.useEffect)(() => {
     if (!state.isResizing || !state.activeHandle) return;
     const handleMove = (e) => {
       const clientX = "touches" in e ? e.touches[0]?.clientX ?? 0 : e.clientX;
@@ -4759,7 +5047,7 @@ function useResizable({
 }
 
 // src/components/ResizableWrapper.tsx
-var import_jsx_runtime16 = require("react/jsx-runtime");
+var import_jsx_runtime17 = require("react/jsx-runtime");
 function ResizeHandleComponent({
   position,
   onMouseDown,
@@ -4767,8 +5055,8 @@ function ResizeHandleComponent({
   isResizing,
   visible
 }) {
-  const [isHovered, setIsHovered] = import_react24.default.useState(false);
-  const [isTouching, setIsTouching] = import_react24.default.useState(false);
+  const [isHovered, setIsHovered] = import_react25.default.useState(false);
+  const [isTouching, setIsTouching] = import_react25.default.useState(false);
   const positionClasses = {
     e: "right-[-4px] top-0 bottom-0 w-2 cursor-ew-resize",
     w: "left-[-4px] top-0 bottom-0 w-2 cursor-ew-resize",
@@ -4779,7 +5067,7 @@ function ResizeHandleComponent({
     ne: "right-[-6px] top-[-6px] w-3 h-3 cursor-nesw-resize rounded-full",
     nw: "left-[-6px] top-[-6px] w-3 h-3 cursor-nwse-resize rounded-full"
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime17.jsx)(
     "div",
     {
       className: cn(
@@ -4812,13 +5100,13 @@ function ResizableWrapper({
   enabled: overrideEnabled,
   showHandles = false
 }) {
-  const wrapperRef = (0, import_react24.useRef)(null);
-  const [isHovered, setIsHovered] = import_react24.default.useState(false);
+  const wrapperRef = (0, import_react25.useRef)(null);
+  const [isHovered, setIsHovered] = import_react25.default.useState(false);
   const layout = overrideLayout ?? element.layout;
   const resizableConfig = layout?.resizable;
   const isEnabled = overrideEnabled !== void 0 ? overrideEnabled : resizableConfig !== false;
   const normalizedConfig = resizableConfig === void 0 ? true : resizableConfig;
-  const handleResizeEnd = (0, import_react24.useCallback)(
+  const handleResizeEnd = (0, import_react25.useCallback)(
     (state2) => {
       if (!onResize) return;
       onResize(element.key, { width: state2.width, height: state2.height });
@@ -4837,9 +5125,9 @@ function ResizableWrapper({
     elementRef: wrapperRef
   });
   if (!isEnabled) {
-    return /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(import_jsx_runtime16.Fragment, { children });
+    return /* @__PURE__ */ (0, import_jsx_runtime17.jsx)(import_jsx_runtime17.Fragment, { children });
   }
-  const handles = (0, import_react24.useMemo)(() => {
+  const handles = (0, import_react25.useMemo)(() => {
     const result = [];
     if (resizeConfig.horizontal) {
       result.push("e", "w");
@@ -4887,7 +5175,7 @@ function ResizableWrapper({
     ...gridRowStyle && { gridRow: gridRowStyle }
   };
   const shouldShowHandles = showHandles || isHovered || state.isResizing;
-  return /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime17.jsxs)(
     "div",
     {
       ref: wrapperRef,
@@ -4903,7 +5191,7 @@ function ResizableWrapper({
       "data-element-key": element.key,
       children: [
         children,
-        handles.map((handle) => /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(
+        handles.map((handle) => /* @__PURE__ */ (0, import_jsx_runtime17.jsx)(
           ResizeHandleComponent,
           {
             position: handle,
@@ -4914,7 +5202,7 @@ function ResizableWrapper({
           },
           handle
         )),
-        state.isResizing && /* @__PURE__ */ (0, import_jsx_runtime16.jsxs)("div", { className: "absolute bottom-2 right-2 px-2 py-1 bg-primary text-white text-[11px] font-medium rounded pointer-events-none z-11", children: [
+        state.isResizing && /* @__PURE__ */ (0, import_jsx_runtime17.jsxs)("div", { className: "absolute bottom-2 right-2 px-2 py-1 bg-primary text-white text-[11px] font-medium rounded pointer-events-none z-11", children: [
           Math.round(state.width),
           " x ",
           Math.round(state.height)
@@ -4925,12 +5213,12 @@ function ResizableWrapper({
 }
 
 // src/components/SelectionWrapper.tsx
-var import_react26 = require("react");
+var import_react27 = require("react");
 
 // src/components/LongPressIndicator.tsx
-var import_react25 = require("react");
+var import_react26 = require("react");
 var import_react_dom = require("react-dom");
-var import_jsx_runtime17 = require("react/jsx-runtime");
+var import_jsx_runtime18 = require("react/jsx-runtime");
 var RING_SIZE = 48;
 var STROKE_WIDTH = 3;
 var RADIUS = (RING_SIZE - STROKE_WIDTH) / 2;
@@ -4941,12 +5229,12 @@ function LongPressIndicator({
   durationMs,
   onComplete
 }) {
-  const [mounted, setMounted] = (0, import_react25.useState)(false);
-  const timerRef = (0, import_react25.useRef)(null);
-  const startTimeRef = (0, import_react25.useRef)(0);
-  const animationFrameRef = (0, import_react25.useRef)(null);
-  const circleRef = (0, import_react25.useRef)(null);
-  (0, import_react25.useEffect)(() => {
+  const [mounted, setMounted] = (0, import_react26.useState)(false);
+  const timerRef = (0, import_react26.useRef)(null);
+  const startTimeRef = (0, import_react26.useRef)(0);
+  const animationFrameRef = (0, import_react26.useRef)(null);
+  const circleRef = (0, import_react26.useRef)(null);
+  (0, import_react26.useEffect)(() => {
     setMounted(true);
     startTimeRef.current = performance.now();
     const animate = () => {
@@ -4972,7 +5260,7 @@ function LongPressIndicator({
   }, [durationMs, onComplete]);
   if (!mounted || typeof document === "undefined") return null;
   return (0, import_react_dom.createPortal)(
-    /* @__PURE__ */ (0, import_jsx_runtime17.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime18.jsx)(
       "div",
       {
         style: {
@@ -4987,14 +5275,14 @@ function LongPressIndicator({
           transition: "opacity 150ms ease-out"
         },
         "data-long-press-indicator": true,
-        children: /* @__PURE__ */ (0, import_jsx_runtime17.jsxs)(
+        children: /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)(
           "svg",
           {
             width: RING_SIZE,
             height: RING_SIZE,
             style: { transform: "rotate(-90deg)" },
             children: [
-              /* @__PURE__ */ (0, import_jsx_runtime17.jsx)(
+              /* @__PURE__ */ (0, import_jsx_runtime18.jsx)(
                 "circle",
                 {
                   cx: RING_SIZE / 2,
@@ -5005,7 +5293,7 @@ function LongPressIndicator({
                   strokeWidth: STROKE_WIDTH
                 }
               ),
-              /* @__PURE__ */ (0, import_jsx_runtime17.jsx)(
+              /* @__PURE__ */ (0, import_jsx_runtime18.jsx)(
                 "circle",
                 {
                   ref: circleRef,
@@ -5033,7 +5321,7 @@ function LongPressIndicator({
 }
 
 // src/components/SelectionWrapper.tsx
-var import_jsx_runtime18 = require("react/jsx-runtime");
+var import_jsx_runtime19 = require("react/jsx-runtime");
 function SelectionWrapper({
   element,
   enabled,
@@ -5042,12 +5330,13 @@ function SelectionWrapper({
   isSelected,
   children
 }) {
-  const [pressing, setPressing] = (0, import_react26.useState)(false);
-  const [pressPosition, setPressPosition] = (0, import_react26.useState)(null);
-  const startPositionRef = (0, import_react26.useRef)(null);
-  const longPressCompletedRef = (0, import_react26.useRef)(false);
-  const onSelectableItemRef = (0, import_react26.useRef)(false);
-  const wrapperRef = (0, import_react26.useRef)(null);
+  const [pressing, setPressing] = (0, import_react27.useState)(false);
+  const [pressPosition, setPressPosition] = (0, import_react27.useState)(null);
+  const startPositionRef = (0, import_react27.useRef)(null);
+  const longPressCompletedRef = (0, import_react27.useRef)(false);
+  const onSelectableItemRef = (0, import_react27.useRef)(false);
+  const wrapperRef = (0, import_react27.useRef)(null);
+  const { isEditing } = useEditMode();
   let isDeepSelectionActive;
   try {
     const selectionContext = useSelection();
@@ -5055,7 +5344,7 @@ function SelectionWrapper({
   } catch {
     isDeepSelectionActive = () => typeof document !== "undefined" && document.__jsonuiDeepSelectionActive === true;
   }
-  const handleComplete = (0, import_react26.useCallback)(() => {
+  const handleComplete = (0, import_react27.useCallback)(() => {
     if (isDeepSelectionActive()) {
       setPressing(false);
       setPressPosition(null);
@@ -5069,15 +5358,22 @@ function SelectionWrapper({
     setPressing(false);
     setPressPosition(null);
   }, [element, enabled, onSelect, isDeepSelectionActive]);
-  const handleCancel = (0, import_react26.useCallback)(() => {
+  const handleCancel = (0, import_react27.useCallback)(() => {
     setPressing(false);
     setPressPosition(null);
     startPositionRef.current = null;
   }, []);
-  const handlePointerDown = (0, import_react26.useCallback)(
+  const handlePointerDown = (0, import_react27.useCallback)(
     (event) => {
       if (!enabled || !onSelect) return;
       if (isIgnoredTarget(event.target)) return;
+      if (isEditing) {
+        const target2 = event.target;
+        const isEditableTarget = target2.closest(".editable-text-node") || target2.closest("[data-editable='true']") || target2.hasAttribute("contenteditable");
+        if (isEditableTarget) {
+          return;
+        }
+      }
       const wrapper = wrapperRef.current;
       if (!wrapper) return;
       const firstChild = wrapper.querySelector(":scope > *");
@@ -5098,9 +5394,9 @@ function SelectionWrapper({
         document.body.classList.add("select-none");
       }
     },
-    [enabled, onSelect, isSelected]
+    [enabled, onSelect, isSelected, isEditing]
   );
-  const handlePointerUp = (0, import_react26.useCallback)(
+  const handlePointerUp = (0, import_react27.useCallback)(
     (_event) => {
       if (typeof document !== "undefined") {
         document.body.classList.remove("select-none");
@@ -5109,7 +5405,7 @@ function SelectionWrapper({
     },
     [handleCancel]
   );
-  const handlePointerMove = (0, import_react26.useCallback)(
+  const handlePointerMove = (0, import_react27.useCallback)(
     (event) => {
       if (!pressing || !startPositionRef.current) return;
       const dx = event.clientX - startPositionRef.current.x;
@@ -5121,7 +5417,7 @@ function SelectionWrapper({
     },
     [pressing, handleCancel]
   );
-  const handleClickCapture = (0, import_react26.useCallback)(
+  const handleClickCapture = (0, import_react27.useCallback)(
     (event) => {
       if (longPressCompletedRef.current) {
         longPressCompletedRef.current = false;
@@ -5131,7 +5427,7 @@ function SelectionWrapper({
     },
     []
   );
-  (0, import_react26.useEffect)(() => {
+  (0, import_react27.useEffect)(() => {
     return () => {
       if (typeof document !== "undefined") {
         document.body.style.userSelect = "";
@@ -5141,7 +5437,7 @@ function SelectionWrapper({
       setPressPosition(null);
     };
   }, []);
-  return /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime19.jsxs)(
     "div",
     {
       ref: wrapperRef,
@@ -5156,7 +5452,7 @@ function SelectionWrapper({
       "data-jsonui-element-key": element.key,
       children: [
         children,
-        pressing && pressPosition && /* @__PURE__ */ (0, import_jsx_runtime18.jsx)(
+        pressing && pressPosition && /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(
           LongPressIndicator,
           {
             x: pressPosition.x,
@@ -5170,307 +5466,12 @@ function SelectionWrapper({
   );
 }
 
-// src/renderer/element-renderer.tsx
-var import_jsx_runtime19 = require("react/jsx-runtime");
-function hasDescendantChanged(elementKey, prevTree, nextTree, visited = /* @__PURE__ */ new Set()) {
-  if (visited.has(elementKey)) return false;
-  visited.add(elementKey);
-  const prevElement = prevTree.elements[elementKey];
-  const nextElement = nextTree.elements[elementKey];
-  if (prevElement !== nextElement) {
-    return true;
-  }
-  const children = prevElement?.children;
-  if (children) {
-    for (const childKey of children) {
-      if (hasDescendantChanged(childKey, prevTree, nextTree, visited)) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-function elementRendererPropsAreEqual(prevProps, nextProps) {
-  if (prevProps.element !== nextProps.element) {
-    return false;
-  }
-  const wasSelected = prevProps.selectedKey === prevProps.element.key;
-  const isSelected = nextProps.selectedKey === nextProps.element.key;
-  if (wasSelected !== isSelected) {
-    return false;
-  }
-  if (prevProps.loading !== nextProps.loading) {
-    return false;
-  }
-  if (prevProps.tree !== nextProps.tree) {
-    if (hasDescendantChanged(
-      prevProps.element.key,
-      prevProps.tree,
-      nextProps.tree
-    )) {
-      return false;
-    }
-  }
-  return true;
-}
-var ElementRenderer = import_react27.default.memo(function ElementRenderer2({
-  element,
-  tree,
-  registry,
-  loading,
-  fallback,
-  selectable,
-  onElementSelect,
-  selectionDelayMs,
-  selectedKey,
-  onResize
-}) {
-  const isVisible = useIsVisible(element.visible);
-  const { execute } = useActions();
-  const { renderText } = useMarkdown();
-  if (!isVisible) {
-    return null;
-  }
-  if (element.type === "__placeholder__" || element._meta?.isPlaceholder) {
-    return /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(
-      "div",
-      {
-        className: "w-full h-16 bg-muted/10 animate-pulse rounded-lg my-2 border border-border/20",
-        "data-placeholder-for": element.key
-      },
-      element.key
-    );
-  }
-  const Component = registry[element.type] ?? fallback;
-  if (!Component) {
-    console.warn(`No renderer for component type: ${element.type}`);
-    return null;
-  }
-  const children = element.children?.map((childKey, index) => {
-    const childElement = tree.elements[childKey];
-    if (!childElement) {
-      if (loading) {
-        return /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(
-          "div",
-          {
-            className: "w-full h-12 bg-muted/10 animate-pulse rounded-md my-1"
-          },
-          `${childKey}-skeleton`
-        );
-      }
-      return null;
-    }
-    return /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(
-      ElementRenderer2,
-      {
-        element: childElement,
-        tree,
-        registry,
-        loading,
-        fallback,
-        selectable,
-        onElementSelect,
-        selectionDelayMs,
-        selectedKey,
-        onResize
-      },
-      `${childKey}-${index}`
-    );
-  });
-  const isResizable = element.layout?.resizable !== false;
-  const content = /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(
-    Component,
-    {
-      element,
-      onAction: execute,
-      loading,
-      renderText,
-      children
-    }
-  );
-  if (selectable && onElementSelect) {
-    const selectionContent = /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(
-      SelectionWrapper,
-      {
-        element,
-        enabled: selectable,
-        onSelect: onElementSelect,
-        delayMs: selectionDelayMs,
-        isSelected: selectedKey === element.key,
-        children: content
-      }
-    );
-    if (isResizable) {
-      return /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(
-        ResizableWrapper,
-        {
-          element,
-          onResize,
-          showHandles: selectedKey === element.key,
-          children: selectionContent
-        }
-      );
-    }
-    return selectionContent;
-  }
-  if (isResizable) {
-    return /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(ResizableWrapper, { element, onResize, children: content });
-  }
-  return content;
-}, elementRendererPropsAreEqual);
-
-// src/renderer/provider.tsx
-var import_jsx_runtime20 = require("react/jsx-runtime");
-function ConfirmationDialogManager() {
-  const { pendingConfirmation, confirm, cancel } = useActions();
-  if (!pendingConfirmation?.action.confirm) {
-    return null;
-  }
-  return /* @__PURE__ */ (0, import_jsx_runtime20.jsx)(
-    ConfirmDialog,
-    {
-      confirm: pendingConfirmation.action.confirm,
-      onConfirm: confirm,
-      onCancel: cancel
-    }
-  );
-}
-function JSONUIProvider({
-  registry,
-  initialData,
-  authState,
-  actionHandlers,
-  navigate,
-  validationFunctions,
-  onDataChange,
-  children
-}) {
-  return /* @__PURE__ */ (0, import_jsx_runtime20.jsx)(MarkdownProvider, { children: /* @__PURE__ */ (0, import_jsx_runtime20.jsx)(
-    DataProvider,
-    {
-      initialData,
-      authState,
-      onDataChange,
-      children: /* @__PURE__ */ (0, import_jsx_runtime20.jsx)(VisibilityProvider, { children: /* @__PURE__ */ (0, import_jsx_runtime20.jsx)(ActionProvider, { handlers: actionHandlers, navigate, children: /* @__PURE__ */ (0, import_jsx_runtime20.jsxs)(ValidationProvider, { customFunctions: validationFunctions, children: [
-        children,
-        /* @__PURE__ */ (0, import_jsx_runtime20.jsx)(ConfirmationDialogManager, {})
-      ] }) }) })
-    }
-  ) });
-}
-
-// src/renderer.tsx
-var import_jsx_runtime21 = require("react/jsx-runtime");
-function Renderer({
-  tree,
-  registry,
-  loading,
-  fallback,
-  selectable = false,
-  onElementSelect,
-  selectionDelayMs = DEFAULT_SELECTION_DELAY,
-  selectedKey,
-  trackInteractions = false,
-  onInteraction,
-  onResize,
-  autoGrid = true
-}) {
-  if (!tree || !tree.root) return null;
-  const rootElement = tree.elements[tree.root];
-  if (!rootElement) return null;
-  const content = /* @__PURE__ */ (0, import_jsx_runtime21.jsx)(
-    ElementRenderer,
-    {
-      element: rootElement,
-      tree,
-      registry,
-      loading,
-      fallback,
-      selectable,
-      onElementSelect,
-      selectionDelayMs,
-      selectedKey,
-      onResize
-    }
-  );
-  const gridContent = autoGrid ? /* @__PURE__ */ (0, import_jsx_runtime21.jsx)(
-    "div",
-    {
-      style: {
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(min(400px, 100%), 1fr))",
-        gap: 24,
-        width: "100%",
-        alignItems: "stretch"
-      },
-      "data-renderer-auto-grid": true,
-      children: content
-    }
-  ) : content;
-  if (trackInteractions && onInteraction) {
-    return /* @__PURE__ */ (0, import_jsx_runtime21.jsx)(InteractionTrackingWrapper, { tree, onInteraction, children: gridContent });
-  }
-  return gridContent;
-}
-function createRendererFromCatalog(_catalog, registry) {
-  return function CatalogRenderer(props) {
-    return /* @__PURE__ */ (0, import_jsx_runtime21.jsx)(Renderer, { ...props, registry });
-  };
-}
-
-// src/renderer/memo-utils.ts
-function elementRendererPropsAreEqual2(prevProps, nextProps) {
-  if (prevProps.element !== nextProps.element) {
-    return false;
-  }
-  const wasSelected = prevProps.selectedKey === prevProps.element.key;
-  const isSelected = nextProps.selectedKey === nextProps.element.key;
-  if (wasSelected !== isSelected) {
-    return false;
-  }
-  if (prevProps.loading !== nextProps.loading) {
-    return false;
-  }
-  if (prevProps.tree !== nextProps.tree) {
-    const children = prevProps.element.children;
-    if (children) {
-      for (const childKey of children) {
-        if (prevProps.tree.elements[childKey] !== nextProps.tree.elements[childKey]) {
-          return false;
-        }
-      }
-    }
-  }
-  return true;
-}
-
-// src/renderer/skeleton-loader.tsx
-var import_jsx_runtime22 = require("react/jsx-runtime");
-function PlaceholderSkeleton({ elementKey }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime22.jsx)(
-    "div",
-    {
-      className: "w-full h-16 bg-muted/10 animate-pulse rounded-lg my-2 border border-border/20",
-      "data-placeholder-for": elementKey
-    },
-    elementKey
-  );
-}
-function ChildSkeleton({ elementKey }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime22.jsx)(
-    "div",
-    {
-      className: "w-full h-12 bg-muted/10 animate-pulse rounded-md my-1"
-    },
-    `${elementKey}-skeleton`
-  );
-}
-function isPlaceholderElement(element) {
-  return element.type === "__placeholder__" || element._meta?.isPlaceholder === true;
-}
+// src/components/EditableWrapper.tsx
+var import_react39 = __toESM(require("react"));
 
 // src/hooks/useUIStream.ts
-var import_react29 = require("react");
+var import_react30 = require("react");
+var import_shallow4 = require("zustand/shallow");
 
 // src/hooks/patches/structural-sharing.ts
 function setByPathWithStructuralSharing(obj, path, value) {
@@ -5618,8 +5619,7 @@ function getPatchDepth(patch) {
 }
 
 // src/hooks/patch-utils.ts
-function applyPatch(tree, patch, turnIdOrOptions) {
-  const options = typeof turnIdOrOptions === "string" ? { turnId: turnIdOrOptions } : turnIdOrOptions || {};
+function applyPatch(tree, patch, options = {}) {
   const { turnId, protectedTypes = [] } = options;
   const newTree = { ...tree, elements: { ...tree.elements } };
   switch (patch.op) {
@@ -5756,9 +5756,8 @@ function applyPatch(tree, patch, turnIdOrOptions) {
   }
   return newTree;
 }
-function applyPatchesBatch(tree, patches, turnIdOrOptions) {
+function applyPatchesBatch(tree, patches, options = {}) {
   if (patches.length === 0) return tree;
-  const options = typeof turnIdOrOptions === "string" ? { turnId: turnIdOrOptions } : turnIdOrOptions || {};
   const rootPatches = [];
   const elementPatches = [];
   const propPatches = [];
@@ -5979,7 +5978,7 @@ function useHistory(tree, conversation, setTree, setConversation, treeRef) {
   };
 }
 
-// src/hooks/useUIStream.ts
+// src/hooks/ui-stream/logger.ts
 var LOG_ENDPOINT = "/api/debug-log";
 var LOG_BUFFER = [];
 var flushTimer = null;
@@ -6030,49 +6029,196 @@ var streamLog = {
     scheduleFlush();
   }
 };
-function useUIStream({
-  api,
-  onComplete,
-  onError,
-  getHeaders
-}) {
-  const storeTree = useStore((s) => s.uiTree);
-  const treeVersion = useStore((s) => s.treeVersion);
+
+// src/hooks/ui-stream/plan-handler.ts
+function handlePlanCreated(payload, store) {
+  const { plan } = payload;
+  store.setPlanCreated(
+    plan.goal,
+    plan.steps.map((s) => ({
+      id: s.id,
+      task: s.task,
+      agent: s.agent,
+      dependencies: s.dependencies ?? [],
+      parallel: s.parallel,
+      subtasks: s.subtasks?.map((st) => ({
+        id: st.id,
+        task: st.task,
+        agent: st.agent
+      }))
+    }))
+  );
+}
+function handleStepStarted(payload, store) {
+  store.setStepStarted(payload.stepId);
+}
+function handleStepDone(payload, store) {
+  store.setStepDone(payload.stepId, payload.result);
+}
+function handleSubtaskStarted(payload, store) {
+  store.setSubtaskStarted(payload.parentId, payload.stepId);
+}
+function handleSubtaskDone(payload, store) {
+  store.setSubtaskDone(payload.parentId, payload.stepId, payload.result);
+}
+function handleLevelStarted(payload, store) {
+  store.setLevelStarted(payload.level);
+}
+function handleOrchestrationDone(payload, store) {
+  store.setOrchestrationDone(payload.finalResult);
+}
+function processPlanEvent(payload, store) {
+  const type = payload.type;
+  switch (type) {
+    case "plan-created":
+      handlePlanCreated(payload, store);
+      return true;
+    case "step-started":
+      handleStepStarted(payload, store);
+      return true;
+    case "step-done":
+      handleStepDone(payload, store);
+      return true;
+    case "subtask-started":
+      handleSubtaskStarted(
+        payload,
+        store
+      );
+      return true;
+    case "subtask-done":
+      handleSubtaskDone(
+        payload,
+        store
+      );
+      return true;
+    case "level-started":
+      handleLevelStarted(payload, store);
+      return true;
+    case "orchestration-done":
+      handleOrchestrationDone(payload, store);
+      return true;
+    default:
+      return false;
+  }
+}
+
+// src/hooks/ui-stream/request-builder.ts
+function generateIdempotencyKey() {
+  return `req_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+}
+function isFileAttachment2(a) {
+  return a.type !== "library-document" && "file" in a && a.file instanceof File;
+}
+function isLibraryAttachment2(a) {
+  return a.type === "library-document" && "documentId" in a;
+}
+function buildConversationMessages2(conversation) {
+  const messages = [];
+  for (const turn of conversation) {
+    if (turn.isLoading) continue;
+    if (turn.userMessage) {
+      messages.push({ role: "user", content: turn.userMessage });
+    }
+    const assistantContent = turn.assistantMessages.filter((m) => m.type === "text" && m.text).map((m) => m.text).join("\n");
+    if (assistantContent) {
+      messages.push({ role: "assistant", content: assistantContent });
+    }
+  }
+  return messages;
+}
+function buildRequest(input) {
+  const { prompt, context, currentTree, conversation, attachments } = input;
+  const headers = {};
+  const idempotencyKey = generateIdempotencyKey();
+  headers["X-Idempotency-Key"] = idempotencyKey;
+  const hasTreeContext = context && typeof context === "object" && "tree" in context;
+  const conversationMessages = buildConversationMessages2(conversation);
+  const fileAttachments = attachments?.filter(isFileAttachment2) ?? [];
+  const libraryAttachments = attachments?.filter(isLibraryAttachment2) ?? [];
+  if (fileAttachments.length > 0) {
+    const formData = new FormData();
+    formData.append("prompt", prompt);
+    formData.append("idempotencyKey", idempotencyKey);
+    if (context) {
+      formData.append("context", JSON.stringify(context));
+    }
+    if (!hasTreeContext) {
+      formData.append("currentTree", JSON.stringify(currentTree));
+    }
+    if (conversationMessages.length > 0) {
+      formData.append("messages", JSON.stringify(conversationMessages));
+    }
+    fileAttachments.forEach((att) => {
+      formData.append("files", att.file);
+    });
+    if (libraryAttachments.length > 0) {
+      formData.append(
+        "libraryDocumentIds",
+        JSON.stringify(libraryAttachments.map((a) => a.documentId))
+      );
+    }
+    return { body: formData, headers };
+  }
+  if (libraryAttachments.length > 0) {
+    const bodyPayload2 = {
+      prompt,
+      context,
+      idempotencyKey,
+      libraryDocumentIds: libraryAttachments.map((a) => a.documentId)
+    };
+    if (!hasTreeContext) {
+      bodyPayload2.currentTree = currentTree;
+    }
+    if (conversationMessages.length > 0) {
+      bodyPayload2.messages = conversationMessages;
+    }
+    headers["Content-Type"] = "application/json";
+    return { body: JSON.stringify(bodyPayload2), headers };
+  }
+  const bodyPayload = { prompt, context, idempotencyKey };
+  if (!hasTreeContext) {
+    bodyPayload.currentTree = currentTree;
+  }
+  if (conversationMessages.length > 0) {
+    bodyPayload.messages = conversationMessages;
+  }
+  headers["Content-Type"] = "application/json";
+  return { body: JSON.stringify(bodyPayload), headers };
+}
+
+// src/hooks/ui-stream/document-index-handler.ts
+function processDocumentIndex(uiComponent, currentIndex) {
+  if (!uiComponent?.props) return currentIndex;
+  if (!currentIndex) {
+    return uiComponent.props;
+  }
+  const newDoc = uiComponent.props;
+  return {
+    title: `${currentIndex.title} + ${newDoc.title}`,
+    description: [currentIndex.description, newDoc.description].filter(Boolean).join("\n\n---\n\n"),
+    pageCount: currentIndex.pageCount + newDoc.pageCount,
+    nodes: [
+      ...currentIndex.nodes,
+      // Add separator node for clarity
+      {
+        title: `\u{1F4C4} ${newDoc.title}`,
+        nodeId: `doc-${Date.now()}`,
+        startPage: 1,
+        endPage: newDoc.pageCount,
+        summary: newDoc.description,
+        children: newDoc.nodes
+      }
+    ]
+  };
+}
+
+// src/hooks/ui-stream/use-store-refs.ts
+var import_react29 = require("react");
+function useStoreRefs() {
   const storeSetUITree = useStore((s) => s.setUITree);
   const storeClearUITree = useStore((s) => s.clearUITree);
   const storeSetTreeStreaming = useStore((s) => s.setTreeStreaming);
   const storeBumpTreeVersion = useStore((s) => s.bumpTreeVersion);
-  const tree = (0, import_react29.useMemo)(() => {
-    if (!storeTree) return null;
-    return {
-      ...storeTree,
-      elements: { ...storeTree.elements }
-    };
-  }, [storeTree, treeVersion]);
-  const [localTree, setLocalTree] = (0, import_react29.useState)(null);
-  const [conversation, setConversation] = (0, import_react29.useState)([]);
-  const treeRef = (0, import_react29.useRef)(null);
-  const storeSetUITreeRef = (0, import_react29.useRef)(storeSetUITree);
-  (0, import_react29.useEffect)(() => {
-    storeSetUITreeRef.current = storeSetUITree;
-  }, [storeSetUITree]);
-  (0, import_react29.useEffect)(() => {
-    if (tree && tree !== localTree) {
-      setLocalTree(tree);
-      treeRef.current = tree;
-    }
-  }, [tree, treeVersion]);
-  const setTree = (0, import_react29.useCallback)((newTree) => {
-    if (typeof newTree === "function") {
-      const currentTree = treeRef.current;
-      const updatedTree = newTree(currentTree);
-      treeRef.current = updatedTree;
-      storeSetUITreeRef.current(updatedTree);
-    } else {
-      treeRef.current = newTree;
-      storeSetUITreeRef.current(newTree);
-    }
-  }, []);
   const addProgressEvent = useStore((s) => s.addProgressEvent);
   const setPlanCreated = useStore((s) => s.setPlanCreated);
   const setStepStarted = useStore((s) => s.setStepStarted);
@@ -6128,6 +6274,334 @@ function useUIStream({
     setLevelStarted,
     setOrchestrationDone
   ]);
+  const storeSetUITreeRef = (0, import_react29.useRef)(storeSetUITree);
+  (0, import_react29.useEffect)(() => {
+    storeSetUITreeRef.current = storeSetUITree;
+  }, [storeSetUITree]);
+  return {
+    storeRef,
+    planStoreRef,
+    addProgressRef,
+    storeSetUITreeRef,
+    resetPlanExecution
+  };
+}
+
+// src/hooks/ui-stream/turn-manager.ts
+function createPendingTurn(prompt, options = {}) {
+  const { isProactive = false, attachments } = options;
+  return {
+    id: `turn-${Date.now()}`,
+    userMessage: prompt,
+    assistantMessages: [],
+    treeSnapshot: null,
+    timestamp: Date.now(),
+    isProactive,
+    attachments,
+    isLoading: true,
+    status: "streaming"
+  };
+}
+function finalizeTurn(turns, turnId, finalData) {
+  return turns.map(
+    (t) => t.id === turnId ? {
+      ...t,
+      assistantMessages: [...finalData.messages],
+      questions: [...finalData.questions],
+      suggestions: [...finalData.suggestions],
+      treeSnapshot: JSON.parse(JSON.stringify(finalData.treeSnapshot)),
+      documentIndex: finalData.documentIndex ?? t.documentIndex,
+      isLoading: false,
+      status: "complete"
+    } : t
+  );
+}
+function markTurnFailed(turns, turnId, errorMessage) {
+  return turns.map(
+    (t) => t.id === turnId ? {
+      ...t,
+      error: errorMessage,
+      isLoading: false,
+      status: "failed"
+    } : t
+  );
+}
+function removeTurn(turns, turnId) {
+  return turns.filter((t) => t.id !== turnId);
+}
+function rollbackToTurn(turns, turnId) {
+  const turnIndex = turns.findIndex((t) => t.id === turnId);
+  if (turnIndex === -1) return null;
+  const newConversation = turns.slice(0, turnIndex);
+  const previousTurn = newConversation[newConversation.length - 1];
+  const restoredTree = previousTurn?.treeSnapshot ?? null;
+  return { newConversation, restoredTree };
+}
+
+// src/hooks/ui-stream/question-handler.ts
+function collectPreviousAnswers(conversation, currentTurnId) {
+  const allPreviousAnswers = {};
+  for (const t of conversation) {
+    if (t.questionAnswers) {
+      for (const qAnswers of Object.values(t.questionAnswers)) {
+        if (typeof qAnswers === "object" && qAnswers !== null) {
+          Object.assign(allPreviousAnswers, qAnswers);
+        }
+      }
+    }
+  }
+  if (currentTurnId) {
+    const currentTurn = conversation.find((t) => t.id === currentTurnId);
+    if (currentTurn?.questionAnswers) {
+      for (const qAnswers of Object.values(currentTurn.questionAnswers)) {
+        if (typeof qAnswers === "object" && qAnswers !== null) {
+          Object.assign(
+            allPreviousAnswers,
+            qAnswers
+          );
+        }
+      }
+    }
+  }
+  return allPreviousAnswers;
+}
+function formatAnswerSummary(answers) {
+  return Object.entries(answers).map(([key, value]) => `${key}: ${value}`).join(", ");
+}
+function buildQuestionResponsePrompt(questionText, answers) {
+  const answerSummary = formatAnswerSummary(answers);
+  return `[User Response] ${questionText}
+Answer: ${answerSummary}`;
+}
+function buildQuestionResponseContext(question, turnId, answers, previousAnswers) {
+  return {
+    isQuestionResponse: true,
+    questionId: question.id,
+    turnId,
+    originalQuestion: question.text,
+    answers,
+    previousAnswers,
+    allCollectedData: { ...previousAnswers, ...answers },
+    hideUserMessage: true
+  };
+}
+function addQuestionAnswer(turns, turnId, questionId, answers) {
+  return turns.map((t) => {
+    if (t.id !== turnId) return t;
+    const existing = t.questionAnswers ?? {};
+    return {
+      ...t,
+      questionAnswers: {
+        ...existing,
+        [questionId]: answers
+      }
+    };
+  });
+}
+
+// src/hooks/ui-stream/stream-parser.ts
+function parseSSELine(line) {
+  if (!line) return null;
+  const colIdx = line.indexOf(":");
+  if (colIdx === -1) return null;
+  const lineType = line.slice(0, colIdx);
+  const content = line.slice(colIdx + 1);
+  if (lineType !== "d" && lineType !== "data") {
+    return null;
+  }
+  if (content.trim() === "[DONE]") {
+    streamLog.debug("Stream DONE received");
+    return { type: "done" };
+  }
+  try {
+    const data = JSON.parse(content);
+    const payload = data?.type === "data" ? data.data : data;
+    return parsePayload(payload);
+  } catch {
+    streamLog.warn("Failed to parse SSE line", { content: content.slice(0, 100) });
+    return null;
+  }
+}
+function parsePayload(payload) {
+  if (!payload) return null;
+  if (payload.type === "text-delta") {
+    return { type: "text-delta" };
+  }
+  if (payload.type === "plan-created") {
+    return { type: "plan-created", plan: payload.plan };
+  }
+  if (payload.type === "persisted-attachments") {
+    return { type: "persisted-attachments", attachments: payload.attachments };
+  }
+  if (payload.type === "tool-progress") {
+    return {
+      type: "tool-progress",
+      progress: {
+        toolName: payload.toolName,
+        toolCallId: payload.toolCallId,
+        status: payload.status,
+        message: payload.message,
+        data: payload.data
+      }
+    };
+  }
+  if (payload.type === "document-index-ui") {
+    return { type: "document-index-ui", uiComponent: payload.uiComponent };
+  }
+  if (payload.type === "level-started") {
+    return { type: "level-started", level: payload.level };
+  }
+  if (payload.type === "step-started") {
+    return { type: "step-started", stepId: payload.stepId };
+  }
+  if (payload.type === "subtask-started") {
+    return {
+      type: "subtask-started",
+      parentId: payload.parentId,
+      stepId: payload.stepId
+    };
+  }
+  if (payload.type === "subtask-done") {
+    return {
+      type: "subtask-done",
+      parentId: payload.parentId,
+      stepId: payload.stepId,
+      result: payload.result
+    };
+  }
+  if (payload.type === "step-done") {
+    return {
+      type: "step-done",
+      stepId: payload.stepId,
+      result: payload.result
+    };
+  }
+  if (payload.type === "level-completed") {
+    return { type: "level-completed", level: payload.level };
+  }
+  if (payload.type === "orchestration-done") {
+    return { type: "orchestration-done", finalResult: payload.finalResult };
+  }
+  if (payload.type === "citations") {
+    return { type: "citations", citations: payload.citations };
+  }
+  if (payload.op) {
+    const { op, path, value } = payload;
+    if (op === "message") {
+      const content = payload.content || value;
+      if (content) {
+        return {
+          type: "message",
+          message: {
+            role: payload.role || "assistant",
+            content
+          }
+        };
+      }
+    }
+    if (op === "question") {
+      const question = value || payload.question;
+      if (question) {
+        return { type: "question", question };
+      }
+    }
+    if (op === "suggestion") {
+      const suggestions = value || payload.suggestions;
+      if (Array.isArray(suggestions)) {
+        return { type: "suggestion", suggestions };
+      }
+    }
+    if (op === "tool-progress") {
+      return {
+        type: "tool-progress",
+        progress: {
+          toolName: payload.toolName,
+          toolCallId: payload.toolCallId,
+          status: payload.status,
+          message: payload.message,
+          data: payload.data
+        }
+      };
+    }
+    if (path) {
+      return {
+        type: "patch",
+        patch: { op, path, value }
+      };
+    }
+  }
+  return { type: "unknown", payload };
+}
+
+// src/hooks/ui-stream/stream-reader.ts
+var IDLE_TIMEOUT_MS = 9e4;
+async function* readStreamWithTimeout(reader) {
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let lastActivityTime = Date.now();
+  const resetIdleTimer = () => {
+    lastActivityTime = Date.now();
+  };
+  while (true) {
+    const readPromise = reader.read();
+    const timeoutPromise = new Promise((_, reject) => {
+      const checkInterval = setInterval(() => {
+        if (Date.now() - lastActivityTime > IDLE_TIMEOUT_MS) {
+          clearInterval(checkInterval);
+          reject(new Error(`Stream idle timeout: no activity for ${IDLE_TIMEOUT_MS / 1e3}s`));
+        }
+      }, 5e3);
+      readPromise.finally(() => clearInterval(checkInterval));
+    });
+    const { done, value } = await Promise.race([readPromise, timeoutPromise]);
+    if (done) break;
+    resetIdleTimer();
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line) continue;
+      const event = parseSSELine(line);
+      if (event) {
+        yield event;
+      }
+    }
+  }
+}
+
+// src/hooks/useUIStream.ts
+function useUIStream({
+  api,
+  onComplete,
+  onError,
+  getHeaders
+}) {
+  const { storeTree, treeVersion } = useStore(
+    (0, import_shallow4.useShallow)((s) => ({
+      storeTree: s.uiTree,
+      treeVersion: s.treeVersion
+    }))
+  );
+  const { storeRef, planStoreRef, addProgressRef, storeSetUITreeRef, resetPlanExecution } = useStoreRefs();
+  const tree = (0, import_react30.useMemo)(() => {
+    if (!storeTree) return null;
+    return { ...storeTree, elements: { ...storeTree.elements } };
+  }, [storeTree, treeVersion]);
+  const [conversation, setConversation] = (0, import_react30.useState)([]);
+  const treeRef = (0, import_react30.useRef)(null);
+  (0, import_react30.useEffect)(() => {
+    treeRef.current = tree;
+  }, [tree, treeVersion]);
+  const setTree = (0, import_react30.useCallback)((newTree) => {
+    if (typeof newTree === "function") {
+      const updatedTree = newTree(treeRef.current);
+      treeRef.current = updatedTree;
+      storeSetUITreeRef.current(updatedTree);
+    } else {
+      treeRef.current = newTree;
+      storeSetUITreeRef.current(newTree);
+    }
+  }, [storeSetUITreeRef]);
   const {
     pushHistory,
     undo,
@@ -6137,22 +6611,22 @@ function useUIStream({
     setHistory,
     setHistoryIndex
   } = useHistory(tree, conversation, setTree, setConversation, treeRef);
-  (0, import_react29.useEffect)(() => {
+  (0, import_react30.useEffect)(() => {
     treeRef.current = tree;
   }, [tree]);
-  const [isStreaming, setIsStreaming] = (0, import_react29.useState)(false);
-  const [error, setError] = (0, import_react29.useState)(null);
-  const abortControllerRef = (0, import_react29.useRef)(null);
-  const sendingRef = (0, import_react29.useRef)(false);
-  const clear = (0, import_react29.useCallback)(() => {
+  const [isStreaming, setIsStreaming] = (0, import_react30.useState)(false);
+  const [error, setError] = (0, import_react30.useState)(null);
+  const abortControllerRef = (0, import_react30.useRef)(null);
+  const sendingRef = (0, import_react30.useRef)(false);
+  const clear = (0, import_react30.useCallback)(() => {
     setTree(null);
     setConversation([]);
     treeRef.current = null;
     setError(null);
     resetPlanExecution();
     storeRef.current.clearUITree();
-  }, [resetPlanExecution, setTree]);
-  const loadSession = (0, import_react29.useCallback)(
+  }, [resetPlanExecution, setTree, storeRef]);
+  const loadSession = (0, import_react30.useCallback)(
     (session) => {
       setTree(session.tree);
       treeRef.current = session.tree;
@@ -6162,14 +6636,14 @@ function useUIStream({
     },
     [setTree, setHistory, setHistoryIndex]
   );
-  const removeElement = (0, import_react29.useCallback)(
+  const removeElement = (0, import_react30.useCallback)(
     (key) => {
       pushHistory();
       setTree((prev) => prev ? removeElementFromTree(prev, key) : null);
     },
     [pushHistory, setTree]
   );
-  const removeSubItems = (0, import_react29.useCallback)(
+  const removeSubItems = (0, import_react30.useCallback)(
     (elementKey, identifiers) => {
       if (identifiers.length === 0) return;
       pushHistory();
@@ -6179,7 +6653,7 @@ function useUIStream({
     },
     [pushHistory, setTree]
   );
-  const updateElement = (0, import_react29.useCallback)(
+  const updateElement = (0, import_react30.useCallback)(
     (elementKey, updates) => {
       setTree(
         (prev) => prev ? updateElementInTree(prev, elementKey, updates) : null
@@ -6187,7 +6661,7 @@ function useUIStream({
     },
     [setTree]
   );
-  const updateElementLayout = (0, import_react29.useCallback)(
+  const updateElementLayout = (0, import_react30.useCallback)(
     (elementKey, layoutUpdates) => {
       pushHistory();
       setTree(
@@ -6196,7 +6670,7 @@ function useUIStream({
     },
     [pushHistory, setTree]
   );
-  const send = (0, import_react29.useCallback)(
+  const send = (0, import_react30.useCallback)(
     async (prompt, context, attachments) => {
       if (sendingRef.current) {
         streamLog.warn("Ignoring concurrent send request", { prompt: prompt.slice(0, 100) });
@@ -6220,88 +6694,31 @@ function useUIStream({
         treeRef.current = currentTree;
       }
       const isProactive = context?.hideUserMessage === true;
-      const turnId = `turn-${Date.now()}`;
+      const pendingTurn = createPendingTurn(prompt, { isProactive, attachments });
+      const turnId = pendingTurn.id;
       streamLog.debug("Creating turn", { turnId, isProactive });
-      const pendingTurn = {
-        id: turnId,
-        userMessage: prompt,
-        assistantMessages: [],
-        treeSnapshot: null,
-        // Will be set on completion
-        timestamp: Date.now(),
-        isProactive,
-        attachments,
-        isLoading: true,
-        // Mark as loading during streaming
-        status: "pending"
-        // Initial status
-      };
       setConversation((prev) => [...prev, pendingTurn]);
       let patchBuffer = [];
       let patchFlushTimer = null;
       try {
-        const hasTreeContext = context && typeof context === "object" && "tree" in context;
-        const conversationMessages = buildConversationMessages(conversation);
-        let body;
-        const headers = {};
-        const fileAttachments = attachments?.filter(isFileAttachment) ?? [];
-        const libraryAttachments = attachments?.filter(isLibraryAttachment) ?? [];
+        const fileAttachments = attachments?.filter(isFileAttachment2) ?? [];
         if (fileAttachments.length > 0) {
-          console.debug("[useUIStream] Uploading attachments:", {
+          streamLog.debug("Uploading attachments", {
             count: fileAttachments.length,
             files: fileAttachments.map((att) => ({
               name: att.file.name,
               type: att.file.type,
               size: att.file.size
-            })),
-            libraryDocs: libraryAttachments.map((att) => att.documentId)
+            }))
           });
-          const formData = new FormData();
-          formData.append("prompt", prompt);
-          if (context) {
-            formData.append("context", JSON.stringify(context));
-          }
-          if (!hasTreeContext) {
-            formData.append("currentTree", JSON.stringify(currentTree));
-          }
-          if (conversationMessages.length > 0) {
-            formData.append("messages", JSON.stringify(conversationMessages));
-          }
-          fileAttachments.forEach((att) => {
-            formData.append("files", att.file);
-          });
-          if (libraryAttachments.length > 0) {
-            formData.append(
-              "libraryDocumentIds",
-              JSON.stringify(libraryAttachments.map((a) => a.documentId))
-            );
-          }
-          body = formData;
-        } else if (libraryAttachments.length > 0) {
-          const bodyPayload = {
-            prompt,
-            context,
-            libraryDocumentIds: libraryAttachments.map((a) => a.documentId)
-          };
-          if (!hasTreeContext) {
-            bodyPayload.currentTree = currentTree;
-          }
-          if (conversationMessages.length > 0) {
-            bodyPayload.messages = conversationMessages;
-          }
-          body = JSON.stringify(bodyPayload);
-          headers["Content-Type"] = "application/json";
-        } else {
-          const bodyPayload = { prompt, context };
-          if (!hasTreeContext) {
-            bodyPayload.currentTree = currentTree;
-          }
-          if (conversationMessages.length > 0) {
-            bodyPayload.messages = conversationMessages;
-          }
-          body = JSON.stringify(bodyPayload);
-          headers["Content-Type"] = "application/json";
         }
+        const { body, headers } = buildRequest({
+          prompt,
+          context,
+          currentTree,
+          conversation,
+          attachments
+        });
         if (getHeaders) {
           const dynamicHeaders = await getHeaders();
           Object.assign(headers, dynamicHeaders);
@@ -6321,7 +6738,6 @@ function useUIStream({
           throw new Error("No response body");
         }
         const reader = response.body.getReader();
-        const decoder = new TextDecoder();
         const currentMessages = [];
         const currentQuestions = [];
         const currentSuggestions = [];
@@ -6351,235 +6767,88 @@ function useUIStream({
           );
         };
         streamLog.debug("Starting stream processing");
-        let buffer = "";
-        const IDLE_TIMEOUT_MS = 9e4;
-        let lastActivityTime = Date.now();
-        const resetIdleTimer = () => {
-          lastActivityTime = Date.now();
-        };
-        while (true) {
-          const readPromise = reader.read();
-          const timeoutPromise = new Promise((_, reject) => {
-            const checkInterval = setInterval(() => {
-              if (Date.now() - lastActivityTime > IDLE_TIMEOUT_MS) {
-                clearInterval(checkInterval);
-                reject(new Error(`Stream idle timeout: no activity for ${IDLE_TIMEOUT_MS / 1e3}s`));
-              }
-            }, 5e3);
-            readPromise.finally(() => clearInterval(checkInterval));
-          });
-          const { done, value } = await Promise.race([readPromise, timeoutPromise]);
-          if (done) break;
-          resetIdleTimer();
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
-          for (const line of lines) {
-            if (!line) continue;
-            const colIdx = line.indexOf(":");
-            if (colIdx === -1) continue;
-            const lineType = line.slice(0, colIdx);
-            const content = line.slice(colIdx + 1);
-            try {
-              if (lineType === "d" || lineType === "data") {
-                if (content.trim() === "[DONE]") {
-                  streamLog.debug("Stream DONE received");
-                  continue;
-                }
-                const data = JSON.parse(content);
-                const payload = data?.type === "data" ? data.data : data;
-                if (payload?.type === "text-delta") {
-                  resetIdleTimer();
-                  continue;
-                } else if (payload?.op) {
-                  resetIdleTimer();
-                  const { op, path, value: value2 } = payload;
-                  if (op === "message") {
-                    const msgContent = payload.content || value2;
-                    if (msgContent) {
-                      messageCount++;
-                      streamLog.debug("Message received", { messageCount, contentLength: msgContent.length });
-                      currentMessages.push({
-                        role: payload.role || "assistant",
-                        content: msgContent
-                      });
-                      updateTurnData();
-                    }
-                  } else if (op === "question") {
-                    const question = value2 || payload.question;
-                    if (question)
-                      currentQuestions.push(question);
-                    updateTurnData();
-                  } else if (op === "suggestion") {
-                    const suggestions = value2 || payload.suggestions;
-                    if (Array.isArray(suggestions))
-                      currentSuggestions.push(...suggestions);
-                    updateTurnData();
-                  } else if (op === "tool-progress") {
-                    const progress = {
-                      toolName: payload.toolName,
-                      toolCallId: payload.toolCallId,
-                      status: payload.status,
-                      message: payload.message,
-                      data: payload.data
-                    };
-                    streamLog.debug("Tool progress", { toolName: progress.toolName, status: progress.status });
-                    currentToolProgress.push(progress);
-                    updateTurnData();
-                    addProgressRef.current({
-                      toolCallId: progress.toolCallId,
-                      toolName: progress.toolName,
-                      status: progress.status,
-                      message: progress.message,
-                      data: progress.data
-                    });
-                  } else if (path) {
-                    patchCount++;
-                    patchBuffer.push({
-                      op,
-                      path,
-                      value: value2
-                    });
-                    if (!patchFlushTimer) {
-                      patchFlushTimer = setTimeout(() => {
-                        patchFlushTimer = null;
-                        if (patchBuffer.length > 0) {
-                          streamLog.debug("Flushing patches", { count: patchBuffer.length });
-                          const baseTree = treeRef.current ?? currentTree;
-                          const protectedTypes = context?.forceCanvasMode === true ? ["Canvas"] : [];
-                          const updatedTree = applyPatchesBatch(
-                            baseTree,
-                            patchBuffer,
-                            { turnId, protectedTypes }
-                          );
-                          patchBuffer = [];
-                          treeRef.current = updatedTree;
-                          currentTree = updatedTree;
-                          const store = storeRef.current;
-                          store.setUITree({
-                            root: updatedTree.root,
-                            elements: { ...updatedTree.elements }
-                          });
-                          store.bumpTreeVersion();
-                          streamLog.debug("Tree updated", {
-                            elementCount: Object.keys(updatedTree.elements).length
-                          });
-                        }
-                      }, 50);
-                    }
-                  }
-                } else if (payload?.type === "plan-created") {
-                  const plan = payload.plan;
-                  const store = planStoreRef.current;
-                  store.setPlanCreated(
-                    plan.goal,
-                    plan.steps.map((s) => ({
-                      id: s.id,
-                      task: s.task,
-                      agent: s.agent,
-                      dependencies: s.dependencies ?? [],
-                      parallel: s.parallel,
-                      subtasks: s.subtasks?.map((st) => ({
-                        id: st.id,
-                        task: st.task,
-                        agent: st.agent
-                      }))
-                    }))
-                  );
-                } else if (payload?.type === "persisted-attachments") {
-                  const attachments2 = payload.attachments;
-                  currentPersistedAttachments.push(...attachments2);
-                  updateTurnData();
-                } else if (payload?.type === "tool-progress") {
-                  const progress = {
-                    toolName: payload.toolName,
-                    toolCallId: payload.toolCallId,
-                    status: payload.status,
-                    message: payload.message,
-                    data: payload.data
-                  };
-                  currentToolProgress.push(progress);
-                  updateTurnData();
-                  console.debug("[useUIStream] Tool progress received:", {
-                    toolName: progress.toolName,
-                    status: progress.status
-                  });
-                  addProgressRef.current({
-                    toolCallId: progress.toolCallId,
-                    toolName: progress.toolName,
-                    status: progress.status,
-                    message: progress.message,
-                    data: progress.data
-                  });
-                } else if (payload?.type === "document-index-ui") {
-                  const uiComponent = payload.uiComponent;
-                  if (uiComponent?.props) {
-                    if (!currentDocumentIndex) {
-                      currentDocumentIndex = uiComponent.props;
-                    } else {
-                      const newDoc = uiComponent.props;
-                      currentDocumentIndex = {
-                        title: `${currentDocumentIndex.title} + ${newDoc.title}`,
-                        description: [
-                          currentDocumentIndex.description,
-                          newDoc.description
-                        ].filter(Boolean).join("\n\n---\n\n"),
-                        pageCount: currentDocumentIndex.pageCount + newDoc.pageCount,
-                        nodes: [
-                          ...currentDocumentIndex.nodes,
-                          // Add separator node for clarity
-                          {
-                            title: `\u{1F4C4} ${newDoc.title}`,
-                            nodeId: `doc-${Date.now()}`,
-                            startPage: 1,
-                            endPage: newDoc.pageCount,
-                            summary: newDoc.description,
-                            children: newDoc.nodes
-                          }
-                        ]
-                      };
-                    }
-                    updateTurnData();
-                  }
-                } else if (payload?.type === "level-started") {
-                  planStoreRef.current.setLevelStarted(payload.level);
-                } else if (payload?.type === "step-started") {
-                  planStoreRef.current.setStepStarted(payload.stepId);
-                } else if (payload?.type === "subtask-started") {
-                  planStoreRef.current.setSubtaskStarted(
-                    payload.parentId,
-                    payload.stepId
-                  );
-                } else if (payload?.type === "step-done") {
-                  planStoreRef.current.setStepDone(
-                    payload.stepId,
-                    payload.result
-                  );
-                } else if (payload?.type === "subtask-done") {
-                  planStoreRef.current.setSubtaskDone(
-                    payload.parentId,
-                    payload.stepId,
-                    payload.result
-                  );
-                } else if (payload?.type === "orchestration-done") {
-                  planStoreRef.current.setOrchestrationDone();
-                } else if (payload?.type === "citations") {
-                  if (payload.citations && Array.isArray(payload.citations) && typeof window !== "undefined") {
-                    window.dispatchEvent(
-                      new CustomEvent("onegenui:citations", {
-                        detail: { citations: payload.citations }
-                      })
-                    );
-                  }
-                }
-              }
-            } catch (e) {
-              streamLog.warn("Parse error on stream line", {
-                error: e instanceof Error ? e.message : String(e),
-                lineType,
-                contentPreview: content.slice(0, 100)
-              });
+        for await (const event of readStreamWithTimeout(reader)) {
+          try {
+            if (event.type === "done" || event.type === "text-delta") {
+              continue;
             }
+            if (event.type === "message") {
+              messageCount++;
+              streamLog.debug("Message received", { messageCount, contentLength: event.message.content?.length ?? 0 });
+              currentMessages.push(event.message);
+              updateTurnData();
+            } else if (event.type === "question") {
+              currentQuestions.push(event.question);
+              updateTurnData();
+            } else if (event.type === "suggestion") {
+              currentSuggestions.push(...event.suggestions);
+              updateTurnData();
+            } else if (event.type === "tool-progress") {
+              currentToolProgress.push(event.progress);
+              updateTurnData();
+              addProgressRef.current({
+                toolCallId: event.progress.toolCallId,
+                toolName: event.progress.toolName,
+                status: event.progress.status,
+                message: event.progress.message,
+                data: event.progress.data
+              });
+            } else if (event.type === "patch") {
+              patchCount++;
+              patchBuffer.push(event.patch);
+              if (!patchFlushTimer) {
+                patchFlushTimer = setTimeout(() => {
+                  patchFlushTimer = null;
+                  if (patchBuffer.length > 0) {
+                    streamLog.debug("Flushing patches", { count: patchBuffer.length });
+                    const baseTree = treeRef.current ?? currentTree;
+                    const protectedTypes = context?.forceCanvasMode === true ? ["Canvas"] : [];
+                    const updatedTree = applyPatchesBatch(
+                      baseTree,
+                      patchBuffer,
+                      { turnId, protectedTypes }
+                    );
+                    patchBuffer = [];
+                    treeRef.current = updatedTree;
+                    currentTree = updatedTree;
+                    const store = storeRef.current;
+                    store.setUITree({
+                      root: updatedTree.root,
+                      elements: { ...updatedTree.elements }
+                    });
+                    store.bumpTreeVersion();
+                    streamLog.debug("Tree updated", {
+                      elementCount: Object.keys(updatedTree.elements).length
+                    });
+                  }
+                }, 16);
+              }
+            } else if (event.type === "plan-created" || event.type === "step-started" || event.type === "step-done" || event.type === "subtask-started" || event.type === "subtask-done" || event.type === "level-started" || event.type === "level-completed" || event.type === "orchestration-done") {
+              processPlanEvent(event, planStoreRef.current);
+            } else if (event.type === "persisted-attachments") {
+              currentPersistedAttachments.push(...event.attachments);
+              updateTurnData();
+            } else if (event.type === "document-index-ui") {
+              const uiComponent = event.uiComponent;
+              const updated = processDocumentIndex(uiComponent, currentDocumentIndex);
+              if (updated) {
+                currentDocumentIndex = updated;
+                updateTurnData();
+              }
+            } else if (event.type === "citations") {
+              if (Array.isArray(event.citations) && typeof window !== "undefined") {
+                window.dispatchEvent(
+                  new CustomEvent("onegenui:citations", {
+                    detail: { citations: event.citations }
+                  })
+                );
+              }
+            }
+          } catch (e) {
+            streamLog.warn("Event processing error", {
+              error: e instanceof Error ? e.message : String(e),
+              eventType: event.type
+            });
           }
         }
         streamLog.info("Stream completed", {
@@ -6619,20 +6888,13 @@ function useUIStream({
         }
         streamLog.debug("Finalizing turn", { turnId });
         setConversation(
-          (prev) => prev.map(
-            (t) => t.id === turnId ? {
-              ...t,
-              assistantMessages: [...currentMessages],
-              questions: [...currentQuestions],
-              suggestions: [...currentSuggestions],
-              treeSnapshot: JSON.parse(JSON.stringify(currentTree)),
-              documentIndex: currentDocumentIndex ?? t.documentIndex,
-              isLoading: false,
-              // Loading complete
-              status: "complete"
-              // Successful completion
-            } : t
-          )
+          (prev) => finalizeTurn(prev, turnId, {
+            messages: currentMessages,
+            questions: currentQuestions,
+            suggestions: currentSuggestions,
+            treeSnapshot: currentTree,
+            documentIndex: currentDocumentIndex
+          })
         );
         onComplete?.(currentTree);
       } catch (err) {
@@ -6643,24 +6905,14 @@ function useUIStream({
         patchBuffer = [];
         if (err.name === "AbortError") {
           streamLog.info("Request aborted", { turnId });
-          setConversation((prev) => prev.filter((t) => t.id !== turnId));
+          setConversation((prev) => removeTurn(prev, turnId));
           return;
         }
         const error2 = err instanceof Error ? err : new Error(String(err));
         streamLog.error("Stream error", { error: error2.message, turnId });
         setError(error2);
         onError?.(error2);
-        setConversation(
-          (prev) => prev.map(
-            (t) => t.id === turnId ? {
-              ...t,
-              error: error2.message,
-              isLoading: false,
-              status: "failed"
-              // Mark as failed
-            } : t
-          )
-        );
+        setConversation((prev) => markTurnFailed(prev, turnId, error2.message));
       } finally {
         sendingRef.current = false;
         setIsStreaming(false);
@@ -6669,94 +6921,51 @@ function useUIStream({
     },
     [api, onComplete, onError, setTree]
   );
-  const answerQuestion = (0, import_react29.useCallback)(
+  const answerQuestion = (0, import_react30.useCallback)(
     (turnId, questionId, answers) => {
       const turn = conversation.find((t) => t.id === turnId);
       const question = turn?.questions?.find((q) => q.id === questionId);
-      const allPreviousAnswers = {};
-      for (const t of conversation) {
-        if (t.questionAnswers) {
-          for (const [qId, qAnswers] of Object.entries(t.questionAnswers)) {
-            if (typeof qAnswers === "object" && qAnswers !== null) {
-              Object.assign(allPreviousAnswers, qAnswers);
-            }
-          }
-        }
-      }
-      if (turn?.questionAnswers) {
-        for (const qAnswers of Object.values(turn.questionAnswers)) {
-          if (typeof qAnswers === "object" && qAnswers !== null) {
-            Object.assign(
-              allPreviousAnswers,
-              qAnswers
-            );
-          }
-        }
-      }
-      setConversation(
-        (prev) => prev.map((t) => {
-          if (t.id !== turnId) return t;
-          const existing = t.questionAnswers ?? {};
-          return {
-            ...t,
-            questionAnswers: {
-              ...existing,
-              [questionId]: answers
-            }
-          };
-        })
-      );
+      const allPreviousAnswers = collectPreviousAnswers(conversation, turnId);
+      setConversation((prev) => addQuestionAnswer(prev, turnId, questionId, answers));
       if (question) {
-        const answerSummary = Object.entries(answers).map(([key, value]) => `${key}: ${value}`).join(", ");
-        const prompt = `[User Response] ${question.text}
-Answer: ${answerSummary}`;
-        const combinedAnswers = { ...allPreviousAnswers, ...answers };
-        send(prompt, {
-          isQuestionResponse: true,
-          questionId,
+        const prompt = buildQuestionResponsePrompt(question.text, answers);
+        const context = buildQuestionResponseContext(
+          question,
           turnId,
-          originalQuestion: question.text,
           answers,
-          previousAnswers: allPreviousAnswers,
-          allCollectedData: combinedAnswers,
-          hideUserMessage: true
-        });
+          allPreviousAnswers
+        );
+        send(prompt, context);
       }
     },
     [conversation, send]
   );
-  (0, import_react29.useEffect)(() => {
+  (0, import_react30.useEffect)(() => {
     return () => {
       abortControllerRef.current?.abort();
     };
   }, []);
-  const deleteTurn = (0, import_react29.useCallback)(
+  const deleteTurn = (0, import_react30.useCallback)(
     (turnId) => {
       pushHistory();
-      const currentConversation = conversation;
-      const turnIndex = currentConversation.findIndex((t) => t.id === turnId);
-      if (turnIndex === -1) return;
-      const newConversation = currentConversation.slice(0, turnIndex);
-      const previousTurn = newConversation[newConversation.length - 1];
-      const restoredTree = previousTurn?.treeSnapshot ?? null;
-      setTree(restoredTree);
-      treeRef.current = restoredTree;
-      setConversation(newConversation);
+      const result = rollbackToTurn(conversation, turnId);
+      if (!result) return;
+      const treeToRestore = result.restoredTree ?? { root: "", elements: {} };
+      setTree(treeToRestore);
+      treeRef.current = treeToRestore;
+      setConversation(result.newConversation);
     },
     [conversation, pushHistory, setTree]
   );
-  const editTurn = (0, import_react29.useCallback)(
+  const editTurn = (0, import_react30.useCallback)(
     async (turnId, newMessage) => {
       pushHistory();
-      const turnIndex = conversation.findIndex((t) => t.id === turnId);
-      if (turnIndex === -1) return;
-      const newConversation = conversation.slice(0, turnIndex);
-      const previousTurn = newConversation[newConversation.length - 1];
-      const restoredTree = previousTurn?.treeSnapshot ?? null;
-      setTree(restoredTree);
-      treeRef.current = restoredTree;
-      setConversation(newConversation);
-      await send(newMessage, restoredTree ? { tree: restoredTree } : void 0);
+      const result = rollbackToTurn(conversation, turnId);
+      if (!result) return;
+      setTree(result.restoredTree);
+      treeRef.current = result.restoredTree;
+      setConversation(result.newConversation);
+      await send(newMessage, result.restoredTree ? { tree: result.restoredTree } : void 0);
     },
     [conversation, send, pushHistory, setTree]
   );
@@ -6783,9 +6992,9 @@ Answer: ${answerSummary}`;
 }
 
 // src/hooks/useTextSelection.ts
-var import_react30 = require("react");
+var import_react31 = require("react");
 function useTextSelection() {
-  const getTextSelection = (0, import_react30.useCallback)(() => {
+  const getTextSelection = (0, import_react31.useCallback)(() => {
     if (typeof window === "undefined") return null;
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed) return null;
@@ -6804,19 +7013,19 @@ function useTextSelection() {
       elementType
     };
   }, []);
-  const restoreTextSelection = (0, import_react30.useCallback)((range) => {
+  const restoreTextSelection = (0, import_react31.useCallback)((range) => {
     if (typeof window === "undefined") return;
     const selection = window.getSelection();
     if (!selection) return;
     selection.removeAllRanges();
     selection.addRange(range);
   }, []);
-  const clearTextSelection = (0, import_react30.useCallback)(() => {
+  const clearTextSelection = (0, import_react31.useCallback)(() => {
     if (typeof window === "undefined") return;
     window.getSelection()?.removeAllRanges();
     document.dispatchEvent(new CustomEvent("jsonui-text-selection-cleared"));
   }, []);
-  const hasTextSelection = (0, import_react30.useCallback)(() => {
+  const hasTextSelection = (0, import_react31.useCallback)(() => {
     if (typeof window === "undefined") return false;
     const selection = window.getSelection();
     return !!(selection && !selection.isCollapsed && selection.toString().trim());
@@ -6830,10 +7039,10 @@ function useTextSelection() {
 }
 
 // src/hooks/useIsMobile.ts
-var import_react31 = require("react");
+var import_react32 = require("react");
 function useIsMobile(breakpoint = 768) {
-  const [isMobile, setIsMobile] = (0, import_react31.useState)(false);
-  (0, import_react31.useEffect)(() => {
+  const [isMobile, setIsMobile] = (0, import_react32.useState)(false);
+  (0, import_react32.useEffect)(() => {
     if (typeof window === "undefined") return;
     const media = window.matchMedia(`(max-width: ${breakpoint}px)`);
     const update = () => setIsMobile(media.matches);
@@ -6845,13 +7054,13 @@ function useIsMobile(breakpoint = 768) {
 }
 
 // src/hooks/usePreservedSelection.ts
-var import_react32 = require("react");
+var import_react33 = require("react");
 function usePreservedSelection() {
-  const [preserved, setPreserved] = (0, import_react32.useState)(
+  const [preserved, setPreserved] = (0, import_react33.useState)(
     null
   );
-  const rangeRef = (0, import_react32.useRef)(null);
-  const preserve = (0, import_react32.useCallback)(async () => {
+  const rangeRef = (0, import_react33.useRef)(null);
+  const preserve = (0, import_react33.useCallback)(async () => {
     if (typeof window === "undefined") return;
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed) return;
@@ -6887,7 +7096,7 @@ function usePreservedSelection() {
       copiedToClipboard
     });
   }, []);
-  const restore = (0, import_react32.useCallback)(() => {
+  const restore = (0, import_react33.useCallback)(() => {
     if (typeof window === "undefined") return false;
     if (!rangeRef.current) return false;
     const selection = window.getSelection();
@@ -6900,11 +7109,11 @@ function usePreservedSelection() {
       return false;
     }
   }, []);
-  const clear = (0, import_react32.useCallback)(() => {
+  const clear = (0, import_react33.useCallback)(() => {
     setPreserved(null);
     rangeRef.current = null;
   }, []);
-  const copyToClipboard = (0, import_react32.useCallback)(async () => {
+  const copyToClipboard = (0, import_react33.useCallback)(async () => {
     if (!preserved?.text) return false;
     try {
       await navigator.clipboard.writeText(preserved.text);
@@ -6916,7 +7125,7 @@ function usePreservedSelection() {
       return false;
     }
   }, [preserved]);
-  (0, import_react32.useEffect)(() => {
+  (0, import_react33.useEffect)(() => {
     if (!preserved) return;
     const timeout = setTimeout(
       () => {
@@ -6937,13 +7146,13 @@ function usePreservedSelection() {
 }
 
 // src/hooks/useLayoutManager.ts
-var import_react33 = require("react");
+var import_react34 = require("react");
 function useLayoutManager({
   tree,
   onTreeUpdate,
   onLayoutChange
 }) {
-  const updateLayout = (0, import_react33.useCallback)(
+  const updateLayout = (0, import_react34.useCallback)(
     (elementKey, layoutUpdate) => {
       if (!tree || !onTreeUpdate) return;
       onTreeUpdate((currentTree) => {
@@ -6973,7 +7182,7 @@ function useLayoutManager({
     },
     [tree, onTreeUpdate, onLayoutChange]
   );
-  const updateSize = (0, import_react33.useCallback)(
+  const updateSize = (0, import_react34.useCallback)(
     (elementKey, width, height) => {
       updateLayout(elementKey, {
         size: { width, height }
@@ -6981,7 +7190,7 @@ function useLayoutManager({
     },
     [updateLayout]
   );
-  const updateGridPosition = (0, import_react33.useCallback)(
+  const updateGridPosition = (0, import_react34.useCallback)(
     (elementKey, position) => {
       updateLayout(elementKey, {
         grid: position
@@ -6989,20 +7198,20 @@ function useLayoutManager({
     },
     [updateLayout]
   );
-  const setResizable = (0, import_react33.useCallback)(
+  const setResizable = (0, import_react34.useCallback)(
     (elementKey, resizable) => {
       updateLayout(elementKey, { resizable });
     },
     [updateLayout]
   );
-  const getLayout = (0, import_react33.useCallback)(
+  const getLayout = (0, import_react34.useCallback)(
     (elementKey) => {
       if (!tree) return void 0;
       return tree.elements[elementKey]?.layout;
     },
     [tree]
   );
-  const getLayoutElements = (0, import_react33.useMemo)(() => {
+  const getLayoutElements = (0, import_react34.useMemo)(() => {
     return () => {
       if (!tree) return [];
       return Object.entries(tree.elements).filter(([, element]) => element.layout !== void 0).map(([key, element]) => ({
@@ -7022,10 +7231,146 @@ function useLayoutManager({
 }
 
 // src/hooks/useHistory.ts
-var import_react34 = require("react");
+var import_react35 = require("react");
 
 // src/hooks/useDeepResearch.ts
-var import_react35 = require("react");
+var import_react36 = require("react");
+
+// src/hooks/useRenderEditableText.tsx
+var import_react38 = __toESM(require("react"));
+
+// src/components/EditableText.tsx
+var import_react37 = require("react");
+var import_jsx_runtime20 = require("react/jsx-runtime");
+var EditableText = (0, import_react37.memo)(function EditableText2({
+  elementKey,
+  propName,
+  value,
+  className = "",
+  as: Tag = "span",
+  placeholder = "Click to edit...",
+  disabled = false,
+  multiline = false,
+  style,
+  onValueChange
+}) {
+  const ref = (0, import_react37.useRef)(null);
+  const [localValue, setLocalValue] = (0, import_react37.useState)(value);
+  const { isEditing, isFocused, handleChange, handleFocus } = useElementEdit(elementKey);
+  (0, import_react37.useEffect)(() => {
+    setLocalValue(value);
+    if (ref.current && !isFocused) {
+      ref.current.textContent = value || "";
+    }
+  }, [value, isFocused]);
+  const handleInput = (0, import_react37.useCallback)(() => {
+    if (ref.current) {
+      const newValue = ref.current.textContent || "";
+      setLocalValue(newValue);
+      handleChange(propName, newValue);
+      onValueChange?.(newValue);
+    }
+  }, [handleChange, propName, onValueChange]);
+  const handleKeyDown = (0, import_react37.useCallback)(
+    (e) => {
+      if (!multiline && e.key === "Enter") {
+        e.preventDefault();
+        ref.current?.blur();
+      }
+      if (e.key === "Escape") {
+        if (ref.current) {
+          ref.current.textContent = value;
+          setLocalValue(value);
+        }
+        ref.current?.blur();
+      }
+    },
+    [multiline, value]
+  );
+  const handleBlur = (0, import_react37.useCallback)(
+    (e) => {
+      if (ref.current) {
+        const finalValue = ref.current.textContent || "";
+        if (finalValue !== value) {
+          handleChange(propName, finalValue);
+          onValueChange?.(finalValue);
+        }
+      }
+    },
+    [handleChange, propName, value, onValueChange]
+  );
+  const handleFocusEvent = (0, import_react37.useCallback)(() => {
+    handleFocus();
+    if (ref.current && document.activeElement === ref.current) {
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(ref.current);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    }
+  }, [handleFocus]);
+  const canEdit = isEditing && !disabled;
+  const isEmpty = !localValue || localValue.trim() === "";
+  const ActualTag = multiline ? "div" : Tag;
+  return /* @__PURE__ */ (0, import_jsx_runtime20.jsx)(
+    ActualTag,
+    {
+      ref,
+      className: `editable-text ${className} ${canEdit ? "editable-text--active" : ""} ${isFocused ? "editable-text--focused" : ""} ${isEmpty ? "editable-text--empty" : ""}`,
+      contentEditable: canEdit,
+      suppressContentEditableWarning: true,
+      onInput: handleInput,
+      onKeyDown: handleKeyDown,
+      onFocus: handleFocusEvent,
+      onBlur: handleBlur,
+      "data-placeholder": placeholder,
+      "data-element-key": elementKey,
+      "data-prop-name": propName,
+      style: {
+        ...style,
+        outline: canEdit ? void 0 : "none",
+        cursor: canEdit ? "text" : "inherit",
+        minWidth: canEdit ? "1ch" : void 0
+      },
+      children: localValue || (canEdit ? "" : value)
+    }
+  );
+});
+
+// src/hooks/useRenderEditableText.tsx
+var import_jsx_runtime21 = require("react/jsx-runtime");
+function createRenderEditableText(element, isEditing) {
+  const canEdit = isEditing && element.editable !== false && !element.locked;
+  return (propName, value, options) => {
+    if (value === null || value === void 0 || value === "") {
+      if (canEdit && options?.placeholder) {
+        return import_react38.default.createElement(EditableText, {
+          elementKey: element.key,
+          propName,
+          value: "",
+          placeholder: options.placeholder,
+          as: options.as,
+          multiline: options.multiline,
+          className: options.className
+        });
+      }
+      return null;
+    }
+    if (!canEdit) {
+      const Tag = options?.as || "span";
+      return import_react38.default.createElement(Tag, { className: options?.className }, value);
+    }
+    return import_react38.default.createElement(EditableText, {
+      elementKey: element.key,
+      propName,
+      value,
+      placeholder: options?.placeholder,
+      as: options?.as,
+      multiline: options?.multiline,
+      className: options?.className
+    });
+  };
+}
 
 // src/hooks/flat-to-tree.ts
 function flatToTree(elements) {
@@ -7057,21 +7402,556 @@ function flatToTree(elements) {
   return { root, elements: elementMap };
 }
 
-// src/editable.tsx
-var import_react36 = __toESM(require("react"));
+// src/components/EditableWrapper.tsx
+var import_jsx_runtime22 = require("react/jsx-runtime");
+var EditableTextNode = (0, import_react39.memo)(function EditableTextNode2({
+  elementKey,
+  propName,
+  value,
+  isMobile,
+  onTextChange
+}) {
+  const ref = (0, import_react39.useRef)(null);
+  const { isEditing, recordChange, focusedKey, setFocusedKey } = useEditMode();
+  const [localValue, setLocalValue] = (0, import_react39.useState)(value);
+  const [isActive, setIsActive] = (0, import_react39.useState)(false);
+  const canEdit = isEditing && (isMobile ? focusedKey === elementKey : true);
+  (0, import_react39.useEffect)(() => {
+    setLocalValue(value);
+  }, [value]);
+  const handleClick = (0, import_react39.useCallback)(
+    (e) => {
+      if (!isEditing) return;
+      e.stopPropagation();
+      if (isMobile) {
+        setFocusedKey(elementKey);
+      } else {
+        setIsActive(true);
+        setFocusedKey(elementKey);
+        setTimeout(() => {
+          if (ref.current) {
+            ref.current.focus();
+            const range = document.createRange();
+            range.selectNodeContents(ref.current);
+            const sel = window.getSelection();
+            sel?.removeAllRanges();
+            sel?.addRange(range);
+          }
+        }, 0);
+      }
+    },
+    [isEditing, isMobile, elementKey, setFocusedKey]
+  );
+  const handleDoubleClick = (0, import_react39.useCallback)(
+    (e) => {
+      if (!isEditing || !isMobile) return;
+      e.stopPropagation();
+      setIsActive(true);
+      setTimeout(() => {
+        if (ref.current) {
+          ref.current.focus();
+        }
+      }, 0);
+    },
+    [isEditing, isMobile]
+  );
+  const handleInput = (0, import_react39.useCallback)(() => {
+    if (ref.current) {
+      const newValue = ref.current.textContent || "";
+      setLocalValue(newValue);
+      recordChange(elementKey, propName, newValue);
+      onTextChange?.(propName, newValue);
+    }
+  }, [elementKey, propName, recordChange, onTextChange]);
+  const handleBlur = (0, import_react39.useCallback)(() => {
+    setIsActive(false);
+    if (!isMobile) {
+      setFocusedKey(null);
+    }
+  }, [isMobile, setFocusedKey]);
+  const handleKeyDown = (0, import_react39.useCallback)(
+    (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setLocalValue(value);
+        if (ref.current) {
+          ref.current.textContent = value;
+        }
+        ref.current?.blur();
+      } else if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        ref.current?.blur();
+      }
+    },
+    [value]
+  );
+  const isFocused = focusedKey === elementKey;
+  return /* @__PURE__ */ (0, import_jsx_runtime22.jsx)(
+    "span",
+    {
+      ref,
+      contentEditable: canEdit && isActive,
+      suppressContentEditableWarning: true,
+      onClick: handleClick,
+      onDoubleClick: handleDoubleClick,
+      onInput: handleInput,
+      onBlur: handleBlur,
+      onKeyDown: handleKeyDown,
+      "data-editable": isEditing,
+      "data-active": isActive,
+      "data-focused": isFocused,
+      "data-prop": propName,
+      className: `
+        editable-text-node
+        ${isEditing ? "editable-text-node--edit-mode" : ""}
+        ${isActive ? "editable-text-node--active" : ""}
+        ${isFocused ? "editable-text-node--focused" : ""}
+      `,
+      style: {
+        cursor: isEditing ? "text" : "inherit",
+        outline: "none",
+        position: "relative",
+        display: "inline",
+        borderRadius: "2px",
+        transition: "background-color 0.15s, box-shadow 0.15s"
+      },
+      children: localValue
+    }
+  );
+});
+var EditableWrapper = (0, import_react39.memo)(function EditableWrapper2({
+  element,
+  children,
+  onTextChange,
+  forceEditable,
+  className = ""
+}) {
+  const isMobile = useIsMobile();
+  const { isEditing, focusedKey, setFocusedKey, recordChange } = useEditMode();
+  const containerRef = (0, import_react39.useRef)(null);
+  const [isActiveEditing, setIsActiveEditing] = (0, import_react39.useState)(false);
+  const isElementEditable = forceEditable !== void 0 ? forceEditable : element.editable !== false;
+  if (!isEditing || !isElementEditable || element.locked) {
+    return /* @__PURE__ */ (0, import_jsx_runtime22.jsx)(import_jsx_runtime22.Fragment, { children });
+  }
+  const isFocused = focusedKey === element.key;
+  const handleContainerClick = (0, import_react39.useCallback)(
+    (e) => {
+      e.stopPropagation();
+      setFocusedKey(element.key);
+      if (!isMobile) {
+        setIsActiveEditing(true);
+      }
+    },
+    [isMobile, element.key, setFocusedKey]
+  );
+  const handleDoubleClick = (0, import_react39.useCallback)(
+    (e) => {
+      e.stopPropagation();
+      if (isMobile) {
+        setIsActiveEditing(true);
+      }
+    },
+    [isMobile]
+  );
+  const handleBlur = (0, import_react39.useCallback)(() => {
+    setIsActiveEditing(false);
+    if (containerRef.current) {
+      const textContent = containerRef.current.textContent || "";
+      const propName = element.props?.title ? "title" : element.props?.text ? "text" : element.props?.label ? "label" : element.props?.description ? "description" : "content";
+      recordChange(element.key, propName, textContent);
+      onTextChange?.(propName, textContent);
+    }
+  }, [element.key, element.props, recordChange, onTextChange]);
+  const handleKeyDown = (0, import_react39.useCallback)(
+    (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setIsActiveEditing(false);
+        containerRef.current?.blur();
+      }
+    },
+    []
+  );
+  return /* @__PURE__ */ (0, import_jsx_runtime22.jsxs)(
+    "div",
+    {
+      ref: containerRef,
+      className: `editable-wrapper ${isFocused ? "editable-wrapper--focused" : ""} ${isActiveEditing ? "editable-wrapper--active" : ""} ${className}`,
+      onClick: handleContainerClick,
+      onDoubleClick: handleDoubleClick,
+      onBlur: handleBlur,
+      onKeyDown: handleKeyDown,
+      contentEditable: isActiveEditing,
+      suppressContentEditableWarning: true,
+      "data-element-key": element.key,
+      "data-editable": "true",
+      style: {
+        position: "relative",
+        outline: isActiveEditing ? "none" : void 0,
+        cursor: isEditing ? "text" : void 0
+      },
+      children: [
+        isMobile && isFocused && !isActiveEditing && /* @__PURE__ */ (0, import_jsx_runtime22.jsx)(
+          "div",
+          {
+            className: "editable-indicator",
+            style: {
+              position: "absolute",
+              top: -4,
+              right: -4,
+              width: 20,
+              height: 20,
+              borderRadius: "50%",
+              background: "linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 10,
+              boxShadow: "0 2px 8px rgba(14, 165, 233, 0.3)"
+            },
+            children: /* @__PURE__ */ (0, import_jsx_runtime22.jsx)(
+              "svg",
+              {
+                width: "12",
+                height: "12",
+                viewBox: "0 0 24 24",
+                fill: "none",
+                stroke: "white",
+                strokeWidth: "2",
+                children: /* @__PURE__ */ (0, import_jsx_runtime22.jsx)("path", { d: "M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" })
+              }
+            )
+          }
+        ),
+        children
+      ]
+    }
+  );
+});
+
+// src/renderer/element-renderer.tsx
 var import_jsx_runtime23 = require("react/jsx-runtime");
-var EditableContext = (0, import_react36.createContext)(null);
+function hasDescendantChanged(elementKey, prevTree, nextTree, visited = /* @__PURE__ */ new Set()) {
+  if (visited.has(elementKey)) return false;
+  visited.add(elementKey);
+  const prevElement = prevTree.elements[elementKey];
+  const nextElement = nextTree.elements[elementKey];
+  if (prevElement !== nextElement) {
+    return true;
+  }
+  const children = prevElement?.children;
+  if (children) {
+    for (const childKey of children) {
+      if (hasDescendantChanged(childKey, prevTree, nextTree, visited)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+function elementRendererPropsAreEqual(prevProps, nextProps) {
+  if (prevProps.element !== nextProps.element) {
+    return false;
+  }
+  const wasSelected = prevProps.selectedKey === prevProps.element.key;
+  const isSelected = nextProps.selectedKey === nextProps.element.key;
+  if (wasSelected !== isSelected) {
+    return false;
+  }
+  if (prevProps.loading !== nextProps.loading) {
+    return false;
+  }
+  if (prevProps.tree !== nextProps.tree) {
+    if (hasDescendantChanged(
+      prevProps.element.key,
+      prevProps.tree,
+      nextProps.tree
+    )) {
+      return false;
+    }
+  }
+  return true;
+}
+var ElementRenderer = import_react40.default.memo(function ElementRenderer2({
+  element,
+  tree,
+  registry,
+  loading,
+  fallback,
+  selectable,
+  onElementSelect,
+  selectionDelayMs,
+  selectedKey,
+  onResize
+}) {
+  const isVisible = useIsVisible(element.visible);
+  const { execute } = useActions();
+  const { renderText } = useMarkdown();
+  const { isEditing } = useEditMode();
+  const renderEditableText = (0, import_react40.useMemo)(
+    () => createRenderEditableText(element, isEditing),
+    [element, isEditing]
+  );
+  if (!isVisible) {
+    return null;
+  }
+  if (element.type === "__placeholder__" || element._meta?.isPlaceholder) {
+    return /* @__PURE__ */ (0, import_jsx_runtime23.jsx)(
+      "div",
+      {
+        className: "w-full h-16 bg-muted/10 animate-pulse rounded-lg my-2 border border-border/20",
+        "data-placeholder-for": element.key
+      },
+      element.key
+    );
+  }
+  const Component = registry[element.type] ?? fallback;
+  if (!Component) {
+    console.warn(`No renderer for component type: ${element.type}`);
+    return null;
+  }
+  const children = element.children?.map((childKey, index) => {
+    const childElement = tree.elements[childKey];
+    if (!childElement) {
+      if (loading) {
+        return /* @__PURE__ */ (0, import_jsx_runtime23.jsx)(
+          "div",
+          {
+            className: "w-full h-12 bg-muted/10 animate-pulse rounded-md my-1"
+          },
+          `${childKey}-skeleton`
+        );
+      }
+      return null;
+    }
+    return /* @__PURE__ */ (0, import_jsx_runtime23.jsx)(
+      ElementRenderer2,
+      {
+        element: childElement,
+        tree,
+        registry,
+        loading,
+        fallback,
+        selectable,
+        onElementSelect,
+        selectionDelayMs,
+        selectedKey,
+        onResize
+      },
+      `${childKey}-${index}`
+    );
+  });
+  const isResizable = element.layout?.resizable !== false;
+  const isEditable = isEditing && element.editable !== false && !element.locked;
+  const content = /* @__PURE__ */ (0, import_jsx_runtime23.jsx)(
+    Component,
+    {
+      element,
+      onAction: execute,
+      loading,
+      renderText,
+      renderEditableText,
+      children
+    }
+  );
+  const editableContent = isEditable ? /* @__PURE__ */ (0, import_jsx_runtime23.jsx)(EditableWrapper, { element, children: content }) : content;
+  if (selectable && onElementSelect) {
+    const selectionContent = /* @__PURE__ */ (0, import_jsx_runtime23.jsx)(
+      SelectionWrapper,
+      {
+        element,
+        enabled: selectable,
+        onSelect: onElementSelect,
+        delayMs: selectionDelayMs,
+        isSelected: selectedKey === element.key,
+        children: editableContent
+      }
+    );
+    if (isResizable) {
+      return /* @__PURE__ */ (0, import_jsx_runtime23.jsx)(
+        ResizableWrapper,
+        {
+          element,
+          onResize,
+          showHandles: selectedKey === element.key,
+          children: selectionContent
+        }
+      );
+    }
+    return selectionContent;
+  }
+  if (isResizable) {
+    return /* @__PURE__ */ (0, import_jsx_runtime23.jsx)(ResizableWrapper, { element, onResize, children: editableContent });
+  }
+  return editableContent;
+}, elementRendererPropsAreEqual);
+
+// src/renderer/provider.tsx
+var import_jsx_runtime24 = require("react/jsx-runtime");
+function ConfirmationDialogManager() {
+  const { pendingConfirmation, confirm, cancel } = useActions();
+  if (!pendingConfirmation?.action.confirm) {
+    return null;
+  }
+  return /* @__PURE__ */ (0, import_jsx_runtime24.jsx)(
+    ConfirmDialog,
+    {
+      confirm: pendingConfirmation.action.confirm,
+      onConfirm: confirm,
+      onCancel: cancel
+    }
+  );
+}
+function JSONUIProvider({
+  registry,
+  initialData,
+  authState,
+  actionHandlers,
+  navigate,
+  validationFunctions,
+  onDataChange,
+  children
+}) {
+  return /* @__PURE__ */ (0, import_jsx_runtime24.jsx)(MarkdownProvider, { children: /* @__PURE__ */ (0, import_jsx_runtime24.jsx)(
+    DataProvider,
+    {
+      initialData,
+      authState,
+      onDataChange,
+      children: /* @__PURE__ */ (0, import_jsx_runtime24.jsx)(VisibilityProvider, { children: /* @__PURE__ */ (0, import_jsx_runtime24.jsx)(ActionProvider, { handlers: actionHandlers, navigate, children: /* @__PURE__ */ (0, import_jsx_runtime24.jsxs)(ValidationProvider, { customFunctions: validationFunctions, children: [
+        children,
+        /* @__PURE__ */ (0, import_jsx_runtime24.jsx)(ConfirmationDialogManager, {})
+      ] }) }) })
+    }
+  ) });
+}
+
+// src/renderer.tsx
+var import_jsx_runtime25 = require("react/jsx-runtime");
+function Renderer({
+  tree,
+  registry,
+  loading,
+  fallback,
+  selectable = false,
+  onElementSelect,
+  selectionDelayMs = DEFAULT_SELECTION_DELAY,
+  selectedKey,
+  trackInteractions = false,
+  onInteraction,
+  onResize,
+  autoGrid = true
+}) {
+  if (!tree || !tree.root) return null;
+  const rootElement = tree.elements[tree.root];
+  if (!rootElement) return null;
+  const content = /* @__PURE__ */ (0, import_jsx_runtime25.jsx)(
+    ElementRenderer,
+    {
+      element: rootElement,
+      tree,
+      registry,
+      loading,
+      fallback,
+      selectable,
+      onElementSelect,
+      selectionDelayMs,
+      selectedKey,
+      onResize
+    }
+  );
+  const gridContent = autoGrid ? /* @__PURE__ */ (0, import_jsx_runtime25.jsx)(
+    "div",
+    {
+      style: {
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(min(400px, 100%), 1fr))",
+        gap: 24,
+        width: "100%",
+        alignItems: "stretch"
+      },
+      "data-renderer-auto-grid": true,
+      children: content
+    }
+  ) : content;
+  if (trackInteractions && onInteraction) {
+    return /* @__PURE__ */ (0, import_jsx_runtime25.jsx)(InteractionTrackingWrapper, { tree, onInteraction, children: gridContent });
+  }
+  return gridContent;
+}
+function createRendererFromCatalog(_catalog, registry) {
+  return function CatalogRenderer(props) {
+    return /* @__PURE__ */ (0, import_jsx_runtime25.jsx)(Renderer, { ...props, registry });
+  };
+}
+
+// src/renderer/memo-utils.ts
+function elementRendererPropsAreEqual2(prevProps, nextProps) {
+  if (prevProps.element !== nextProps.element) {
+    return false;
+  }
+  const wasSelected = prevProps.selectedKey === prevProps.element.key;
+  const isSelected = nextProps.selectedKey === nextProps.element.key;
+  if (wasSelected !== isSelected) {
+    return false;
+  }
+  if (prevProps.loading !== nextProps.loading) {
+    return false;
+  }
+  if (prevProps.tree !== nextProps.tree) {
+    const children = prevProps.element.children;
+    if (children) {
+      for (const childKey of children) {
+        if (prevProps.tree.elements[childKey] !== nextProps.tree.elements[childKey]) {
+          return false;
+        }
+      }
+    }
+  }
+  return true;
+}
+
+// src/renderer/skeleton-loader.tsx
+var import_jsx_runtime26 = require("react/jsx-runtime");
+function PlaceholderSkeleton({ elementKey }) {
+  return /* @__PURE__ */ (0, import_jsx_runtime26.jsx)(
+    "div",
+    {
+      className: "w-full h-16 bg-muted/10 animate-pulse rounded-lg my-2 border border-border/20",
+      "data-placeholder-for": elementKey
+    },
+    elementKey
+  );
+}
+function ChildSkeleton({ elementKey }) {
+  return /* @__PURE__ */ (0, import_jsx_runtime26.jsx)(
+    "div",
+    {
+      className: "w-full h-12 bg-muted/10 animate-pulse rounded-md my-1"
+    },
+    `${elementKey}-skeleton`
+  );
+}
+function isPlaceholderElement(element) {
+  return element.type === "__placeholder__" || element._meta?.isPlaceholder === true;
+}
+
+// src/editable.tsx
+var import_react41 = __toESM(require("react"));
+var import_jsx_runtime27 = require("react/jsx-runtime");
+var EditableContext = (0, import_react41.createContext)(null);
 function EditableProvider({
   children,
   onValueChange
 }) {
-  const [editingPath, setEditingPath] = (0, import_react36.useState)(null);
-  const [editingValue, setEditingValue] = (0, import_react36.useState)(null);
-  const startEdit = (0, import_react36.useCallback)((path, currentValue) => {
+  const [editingPath, setEditingPath] = (0, import_react41.useState)(null);
+  const [editingValue, setEditingValue] = (0, import_react41.useState)(null);
+  const startEdit = (0, import_react41.useCallback)((path, currentValue) => {
     setEditingPath(path);
     setEditingValue(currentValue);
   }, []);
-  const commitEdit = (0, import_react36.useCallback)(
+  const commitEdit = (0, import_react41.useCallback)(
     (path, newValue) => {
       onValueChange?.(path, newValue);
       setEditingPath(null);
@@ -7079,11 +7959,11 @@ function EditableProvider({
     },
     [onValueChange]
   );
-  const cancelEdit = (0, import_react36.useCallback)(() => {
+  const cancelEdit = (0, import_react41.useCallback)(() => {
     setEditingPath(null);
     setEditingValue(null);
   }, []);
-  return /* @__PURE__ */ (0, import_jsx_runtime23.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(
     EditableContext.Provider,
     {
       value: {
@@ -7099,24 +7979,24 @@ function EditableProvider({
   );
 }
 function useEditableContext() {
-  return (0, import_react36.useContext)(EditableContext);
+  return (0, import_react41.useContext)(EditableContext);
 }
 function useEditable(path, currentValue, locked = false) {
   const ctx = useEditableContext();
   const isEditing = ctx?.editingPath === path;
   const value = isEditing ? ctx?.editingValue : currentValue;
-  const onStartEdit = (0, import_react36.useCallback)(() => {
+  const onStartEdit = (0, import_react41.useCallback)(() => {
     if (locked || !ctx) return;
     ctx.startEdit(path, currentValue);
   }, [ctx, path, currentValue, locked]);
-  const onCommit = (0, import_react36.useCallback)(
+  const onCommit = (0, import_react41.useCallback)(
     (newValue) => {
       if (!ctx) return;
       ctx.commitEdit(path, newValue);
     },
     [ctx, path]
   );
-  const onCancel = (0, import_react36.useCallback)(() => {
+  const onCancel = (0, import_react41.useCallback)(() => {
     ctx?.cancelEdit();
   }, [ctx]);
   const editableClassName = locked ? "" : "cursor-text rounded transition-[background-color,box-shadow] duration-150 hover:bg-black/5";
@@ -7129,7 +8009,7 @@ function useEditable(path, currentValue, locked = false) {
     editableClassName
   };
 }
-function EditableText({
+function EditableText3({
   path,
   value,
   locked = false,
@@ -7137,14 +8017,14 @@ function EditableText({
   className
 }) {
   const { isEditing, onStartEdit, onCommit, onCancel, editableClassName } = useEditable(path, value, locked);
-  const [localValue, setLocalValue] = (0, import_react36.useState)(value);
-  import_react36.default.useEffect(() => {
+  const [localValue, setLocalValue] = (0, import_react41.useState)(value);
+  import_react41.default.useEffect(() => {
     if (!isEditing) {
       setLocalValue(value);
     }
   }, [value, isEditing]);
   if (isEditing) {
-    return /* @__PURE__ */ (0, import_jsx_runtime23.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(
       "input",
       {
         type: "text",
@@ -7169,7 +8049,7 @@ function EditableText({
       }
     );
   }
-  return /* @__PURE__ */ (0, import_jsx_runtime23.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(
     Component,
     {
       className: cn(editableClassName, className),
@@ -7186,14 +8066,14 @@ function EditableNumber({
   className
 }) {
   const { isEditing, onStartEdit, onCommit, onCancel, editableClassName } = useEditable(path, value, locked);
-  const [localValue, setLocalValue] = (0, import_react36.useState)(String(value));
-  import_react36.default.useEffect(() => {
+  const [localValue, setLocalValue] = (0, import_react41.useState)(String(value));
+  import_react41.default.useEffect(() => {
     if (!isEditing) {
       setLocalValue(String(value));
     }
   }, [value, isEditing]);
   if (isEditing) {
-    return /* @__PURE__ */ (0, import_jsx_runtime23.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(
       "input",
       {
         type: "number",
@@ -7218,7 +8098,7 @@ function EditableNumber({
       }
     );
   }
-  return /* @__PURE__ */ (0, import_jsx_runtime23.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(
     "span",
     {
       className: cn(editableClassName, className),
@@ -7230,11 +8110,11 @@ function EditableNumber({
 }
 
 // src/components/MarkdownText.tsx
-var import_react37 = require("react");
+var import_react42 = require("react");
 var import_react_markdown2 = __toESM(require("react-markdown"));
 var import_remark_math = __toESM(require("remark-math"));
 var import_rehype_katex = __toESM(require("rehype-katex"));
-var import_jsx_runtime24 = require("react/jsx-runtime");
+var import_jsx_runtime28 = require("react/jsx-runtime");
 var defaultTheme2 = {
   codeBlockBg: "rgba(0, 0, 0, 0.3)",
   codeBlockBorder: "rgba(255, 255, 255, 0.08)",
@@ -7243,7 +8123,7 @@ var defaultTheme2 = {
   blockquoteBorder: "var(--primary, #3b82f6)",
   hrColor: "rgba(255, 255, 255, 0.1)"
 };
-var MarkdownText = (0, import_react37.memo)(function MarkdownText2({
+var MarkdownText = (0, import_react42.memo)(function MarkdownText2({
   content,
   className,
   style,
@@ -7262,18 +8142,18 @@ var MarkdownText = (0, import_react37.memo)(function MarkdownText2({
     ...style
   };
   const components = {
-    pre: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime24.jsx)("pre", { className: "bg-[var(--markdown-code-bg)] rounded-lg p-3 overflow-x-auto text-[13px] font-mono border border-[var(--markdown-code-border)] my-2", children }),
+    pre: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("pre", { className: "bg-[var(--markdown-code-bg)] rounded-lg p-3 overflow-x-auto text-[13px] font-mono border border-[var(--markdown-code-border)] my-2", children }),
     code: ({
       children,
       className: codeClassName
     }) => {
       const isInline = !codeClassName;
       if (isInline) {
-        return /* @__PURE__ */ (0, import_jsx_runtime24.jsx)("code", { className: "bg-[var(--markdown-inline-code-bg)] rounded px-1.5 py-0.5 text-[0.9em] font-mono", children });
+        return /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("code", { className: "bg-[var(--markdown-inline-code-bg)] rounded px-1.5 py-0.5 text-[0.9em] font-mono", children });
       }
-      return /* @__PURE__ */ (0, import_jsx_runtime24.jsx)("code", { children });
+      return /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("code", { children });
     },
-    a: ({ href, children }) => /* @__PURE__ */ (0, import_jsx_runtime24.jsx)(
+    a: ({ href, children }) => /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(
       "a",
       {
         href,
@@ -7283,25 +8163,25 @@ var MarkdownText = (0, import_react37.memo)(function MarkdownText2({
         children
       }
     ),
-    ul: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime24.jsx)("ul", { className: "my-2 pl-5 list-disc", children }),
-    ol: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime24.jsx)("ol", { className: "my-2 pl-5 list-decimal", children }),
-    li: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime24.jsx)("li", { className: "mb-1", children }),
-    h1: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime24.jsx)("h1", { className: "font-semibold mt-3 mb-2 text-lg", children }),
-    h2: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime24.jsx)("h2", { className: "font-semibold mt-3 mb-2 text-base", children }),
-    h3: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime24.jsx)("h3", { className: "font-semibold mt-3 mb-2 text-[15px]", children }),
-    h4: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime24.jsx)("h4", { className: "font-semibold mt-3 mb-2 text-sm", children }),
-    h5: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime24.jsx)("h5", { className: "font-semibold mt-3 mb-2 text-[13px]", children }),
-    h6: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime24.jsx)("h6", { className: "font-semibold mt-3 mb-2 text-xs", children }),
-    p: ({ children }) => inline ? /* @__PURE__ */ (0, import_jsx_runtime24.jsx)("span", { children }) : /* @__PURE__ */ (0, import_jsx_runtime24.jsx)("p", { className: "my-1.5 leading-relaxed", children }),
-    blockquote: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime24.jsx)("blockquote", { className: "border-l-[3px] border-[var(--markdown-quote-border)] pl-3 my-2 opacity-90 italic", children }),
-    hr: () => /* @__PURE__ */ (0, import_jsx_runtime24.jsx)("hr", { className: "border-none border-t border-[var(--markdown-hr-color)] my-3" }),
-    strong: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime24.jsx)("strong", { className: "font-semibold", children }),
-    em: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime24.jsx)("em", { className: "italic", children })
+    ul: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("ul", { className: "my-2 pl-5 list-disc", children }),
+    ol: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("ol", { className: "my-2 pl-5 list-decimal", children }),
+    li: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("li", { className: "mb-1", children }),
+    h1: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("h1", { className: "font-semibold mt-3 mb-2 text-lg", children }),
+    h2: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("h2", { className: "font-semibold mt-3 mb-2 text-base", children }),
+    h3: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("h3", { className: "font-semibold mt-3 mb-2 text-[15px]", children }),
+    h4: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("h4", { className: "font-semibold mt-3 mb-2 text-sm", children }),
+    h5: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("h5", { className: "font-semibold mt-3 mb-2 text-[13px]", children }),
+    h6: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("h6", { className: "font-semibold mt-3 mb-2 text-xs", children }),
+    p: ({ children }) => inline ? /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("span", { children }) : /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("p", { className: "my-1.5 leading-relaxed", children }),
+    blockquote: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("blockquote", { className: "border-l-[3px] border-[var(--markdown-quote-border)] pl-3 my-2 opacity-90 italic", children }),
+    hr: () => /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("hr", { className: "border-none border-t border-[var(--markdown-hr-color)] my-3" }),
+    strong: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("strong", { className: "font-semibold", children }),
+    em: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("em", { className: "italic", children })
   };
   const Wrapper = inline ? "span" : "div";
   const remarkPlugins = enableMath ? [import_remark_math.default] : [];
   const rehypePlugins = enableMath ? [import_rehype_katex.default] : [];
-  return /* @__PURE__ */ (0, import_jsx_runtime24.jsx)(Wrapper, { className: cn("markdown-content", className), style: wrapperStyle, children: /* @__PURE__ */ (0, import_jsx_runtime24.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(Wrapper, { className: cn("markdown-content", className), style: wrapperStyle, children: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(
     import_react_markdown2.default,
     {
       components,
@@ -7313,7 +8193,7 @@ var MarkdownText = (0, import_react37.memo)(function MarkdownText2({
 });
 
 // src/components/TextSelectionBadge.tsx
-var import_jsx_runtime25 = require("react/jsx-runtime");
+var import_jsx_runtime29 = require("react/jsx-runtime");
 function TextSelectionBadge({
   selection,
   onClear,
@@ -7322,7 +8202,7 @@ function TextSelectionBadge({
   className
 }) {
   const truncatedText = selection.text.length > maxLength ? `${selection.text.substring(0, maxLength)}...` : selection.text;
-  return /* @__PURE__ */ (0, import_jsx_runtime25.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(
     "div",
     {
       className: cn(
@@ -7331,7 +8211,7 @@ function TextSelectionBadge({
         className
       ),
       children: [
-        /* @__PURE__ */ (0, import_jsx_runtime25.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(
           "svg",
           {
             width: "14",
@@ -7344,13 +8224,13 @@ function TextSelectionBadge({
             strokeLinejoin: "round",
             className: "shrink-0 text-primary",
             children: [
-              /* @__PURE__ */ (0, import_jsx_runtime25.jsx)("path", { d: "M17 6.1H3" }),
-              /* @__PURE__ */ (0, import_jsx_runtime25.jsx)("path", { d: "M21 12.1H3" }),
-              /* @__PURE__ */ (0, import_jsx_runtime25.jsx)("path", { d: "M15.1 18H3" })
+              /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("path", { d: "M17 6.1H3" }),
+              /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("path", { d: "M21 12.1H3" }),
+              /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("path", { d: "M15.1 18H3" })
             ]
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime25.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(
           "span",
           {
             className: "flex-1 overflow-hidden text-ellipsis whitespace-nowrap italic text-muted-foreground",
@@ -7362,9 +8242,9 @@ function TextSelectionBadge({
             ]
           }
         ),
-        selection.copiedToClipboard && /* @__PURE__ */ (0, import_jsx_runtime25.jsx)("span", { className: "text-[10px] px-1.5 py-0.5 bg-green-500/20 text-green-500 rounded font-medium", children: "Copied" }),
-        selection.elementType && /* @__PURE__ */ (0, import_jsx_runtime25.jsx)("span", { className: "text-[10px] px-1.5 py-0.5 bg-violet-500/20 text-violet-500 rounded", children: selection.elementType }),
-        onRestore && /* @__PURE__ */ (0, import_jsx_runtime25.jsx)(
+        selection.copiedToClipboard && /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("span", { className: "text-[10px] px-1.5 py-0.5 bg-green-500/20 text-green-500 rounded font-medium", children: "Copied" }),
+        selection.elementType && /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("span", { className: "text-[10px] px-1.5 py-0.5 bg-violet-500/20 text-violet-500 rounded", children: selection.elementType }),
+        onRestore && /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(
           "button",
           {
             type: "button",
@@ -7375,7 +8255,7 @@ function TextSelectionBadge({
             },
             title: "Restore selection",
             className: "flex items-center justify-center p-1 border-none rounded bg-transparent text-muted-foreground cursor-pointer transition-all hover:bg-primary/20 hover:text-primary",
-            children: /* @__PURE__ */ (0, import_jsx_runtime25.jsxs)(
+            children: /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(
               "svg",
               {
                 width: "12",
@@ -7387,14 +8267,14 @@ function TextSelectionBadge({
                 strokeLinecap: "round",
                 strokeLinejoin: "round",
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime25.jsx)("path", { d: "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" }),
-                  /* @__PURE__ */ (0, import_jsx_runtime25.jsx)("path", { d: "M3 3v5h5" })
+                  /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("path", { d: "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" }),
+                  /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("path", { d: "M3 3v5h5" })
                 ]
               }
             )
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime25.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(
           "button",
           {
             type: "button",
@@ -7405,7 +8285,7 @@ function TextSelectionBadge({
             },
             title: "Clear",
             className: "flex items-center justify-center p-1 border-none rounded bg-transparent text-muted-foreground cursor-pointer transition-all hover:bg-destructive/20 hover:text-destructive",
-            children: /* @__PURE__ */ (0, import_jsx_runtime25.jsxs)(
+            children: /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(
               "svg",
               {
                 width: "12",
@@ -7417,8 +8297,8 @@ function TextSelectionBadge({
                 strokeLinecap: "round",
                 strokeLinejoin: "round",
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime25.jsx)("path", { d: "M18 6 6 18" }),
-                  /* @__PURE__ */ (0, import_jsx_runtime25.jsx)("path", { d: "m6 6 12 12" })
+                  /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("path", { d: "M18 6 6 18" }),
+                  /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("path", { d: "m6 6 12 12" })
                 ]
               }
             )
@@ -7430,7 +8310,7 @@ function TextSelectionBadge({
 }
 
 // src/components/free-grid/canvas.tsx
-var import_react39 = require("react");
+var import_react44 = require("react");
 
 // src/components/free-grid/styles.ts
 var gridContainerBaseStyle = {
@@ -7454,22 +8334,22 @@ var gridCellBaseStyle = {
 };
 
 // src/components/free-grid/grid-lines.tsx
-var import_react38 = require("react");
-var import_jsx_runtime26 = require("react/jsx-runtime");
+var import_react43 = require("react");
+var import_jsx_runtime30 = require("react/jsx-runtime");
 function GridLines({ columns, rows, color }) {
-  const patternId = (0, import_react38.useMemo)(
+  const patternId = (0, import_react43.useMemo)(
     () => `grid-pattern-${Math.random().toString(36).substr(2, 9)}`,
     []
   );
-  return /* @__PURE__ */ (0, import_jsx_runtime26.jsxs)("svg", { style: gridLinesOverlayStyle, "aria-hidden": "true", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime26.jsx)("defs", { children: /* @__PURE__ */ (0, import_jsx_runtime26.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)("svg", { style: gridLinesOverlayStyle, "aria-hidden": "true", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("defs", { children: /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(
       "pattern",
       {
         id: patternId,
         width: `${100 / columns}%`,
         height: `${100 / Math.max(rows, 1)}%`,
         patternUnits: "objectBoundingBox",
-        children: /* @__PURE__ */ (0, import_jsx_runtime26.jsx)(
+        children: /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(
           "rect",
           {
             width: "100%",
@@ -7482,12 +8362,12 @@ function GridLines({ columns, rows, color }) {
         )
       }
     ) }),
-    /* @__PURE__ */ (0, import_jsx_runtime26.jsx)("rect", { width: "100%", height: "100%", fill: `url(#${patternId})` })
+    /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("rect", { width: "100%", height: "100%", fill: `url(#${patternId})` })
   ] });
 }
 
 // src/components/free-grid/canvas.tsx
-var import_jsx_runtime27 = require("react/jsx-runtime");
+var import_jsx_runtime31 = require("react/jsx-runtime");
 function FreeGridCanvas({
   columns = 12,
   rows,
@@ -7502,13 +8382,13 @@ function FreeGridCanvas({
   className,
   style
 }) {
-  const gridTemplateColumns = (0, import_react39.useMemo)(() => {
+  const gridTemplateColumns = (0, import_react44.useMemo)(() => {
     if (cellSize) {
       return `repeat(${columns}, ${cellSize}px)`;
     }
     return `repeat(${columns}, 1fr)`;
   }, [columns, cellSize]);
-  const gridTemplateRows = (0, import_react39.useMemo)(() => {
+  const gridTemplateRows = (0, import_react44.useMemo)(() => {
     if (rows) {
       if (cellSize) {
         return `repeat(${rows}, ${cellSize}px)`;
@@ -7525,7 +8405,7 @@ function FreeGridCanvas({
     backgroundColor,
     ...style
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime27.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)(
     "div",
     {
       style: containerStyle,
@@ -7534,7 +8414,7 @@ function FreeGridCanvas({
       "data-columns": columns,
       "data-rows": rows,
       children: [
-        showGrid && /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(GridLines, { columns, rows: rows ?? 4, color: gridLineColor }),
+        showGrid && /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(GridLines, { columns, rows: rows ?? 4, color: gridLineColor }),
         children
       ]
     }
@@ -7542,7 +8422,7 @@ function FreeGridCanvas({
 }
 
 // src/components/free-grid/grid-cell.tsx
-var import_jsx_runtime28 = require("react/jsx-runtime");
+var import_jsx_runtime32 = require("react/jsx-runtime");
 function GridCell({
   column,
   row,
@@ -7560,7 +8440,7 @@ function GridCell({
     gridRowEnd: rowSpan > 1 ? `span ${rowSpan}` : void 0,
     ...style
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("div", { style: cellStyle, className, "data-grid-cell": true, children });
+  return /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("div", { style: cellStyle, className, "data-grid-cell": true, children });
 }
 
 // src/components/free-grid/layout-utils.ts
@@ -7612,12 +8492,12 @@ function createLayout(options = {}) {
 }
 
 // src/components/ToolProgressOverlay.tsx
-var import_react41 = require("react");
+var import_react46 = require("react");
 
 // src/components/tool-progress/icons.tsx
-var import_jsx_runtime29 = require("react/jsx-runtime");
+var import_jsx_runtime33 = require("react/jsx-runtime");
 var toolIcons = {
-  "web-search": /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(
+  "web-search": /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(
     "svg",
     {
       width: "16",
@@ -7629,12 +8509,12 @@ var toolIcons = {
       strokeLinecap: "round",
       strokeLinejoin: "round",
       children: [
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("circle", { cx: "11", cy: "11", r: "8" }),
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("path", { d: "m21 21-4.3-4.3" })
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("circle", { cx: "11", cy: "11", r: "8" }),
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("path", { d: "m21 21-4.3-4.3" })
       ]
     }
   ),
-  "web-scrape": /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(
+  "web-scrape": /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(
     "svg",
     {
       width: "16",
@@ -7646,14 +8526,14 @@ var toolIcons = {
       strokeLinecap: "round",
       strokeLinejoin: "round",
       children: [
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("polyline", { points: "14,2 14,8 20,8" }),
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("line", { x1: "16", y1: "13", x2: "8", y2: "13" }),
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("line", { x1: "16", y1: "17", x2: "8", y2: "17" })
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("polyline", { points: "14,2 14,8 20,8" }),
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("line", { x1: "16", y1: "13", x2: "8", y2: "13" }),
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("line", { x1: "16", y1: "17", x2: "8", y2: "17" })
       ]
     }
   ),
-  "search-flight": /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(
+  "search-flight": /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(
     "svg",
     {
       width: "16",
@@ -7664,10 +8544,10 @@ var toolIcons = {
       strokeWidth: "2",
       strokeLinecap: "round",
       strokeLinejoin: "round",
-      children: /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("path", { d: "M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" })
+      children: /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("path", { d: "M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" })
     }
   ),
-  "search-hotel": /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(
+  "search-hotel": /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(
     "svg",
     {
       width: "16",
@@ -7679,17 +8559,17 @@ var toolIcons = {
       strokeLinecap: "round",
       strokeLinejoin: "round",
       children: [
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("path", { d: "M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z" }),
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("path", { d: "M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2" }),
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("path", { d: "M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2" }),
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("path", { d: "M10 6h4" }),
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("path", { d: "M10 10h4" }),
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("path", { d: "M10 14h4" }),
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("path", { d: "M10 18h4" })
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("path", { d: "M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z" }),
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("path", { d: "M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2" }),
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("path", { d: "M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2" }),
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("path", { d: "M10 6h4" }),
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("path", { d: "M10 10h4" }),
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("path", { d: "M10 14h4" }),
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("path", { d: "M10 18h4" })
       ]
     }
   ),
-  "document-index": /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(
+  "document-index": /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(
     "svg",
     {
       width: "16",
@@ -7701,14 +8581,14 @@ var toolIcons = {
       strokeLinecap: "round",
       strokeLinejoin: "round",
       children: [
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("polyline", { points: "14,2 14,8 20,8" }),
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("path", { d: "M12 18v-6" }),
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("path", { d: "M9 15l3 3 3-3" })
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("polyline", { points: "14,2 14,8 20,8" }),
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("path", { d: "M12 18v-6" }),
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("path", { d: "M9 15l3 3 3-3" })
       ]
     }
   ),
-  "document-index-cache": /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(
+  "document-index-cache": /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(
     "svg",
     {
       width: "16",
@@ -7720,13 +8600,13 @@ var toolIcons = {
       strokeLinecap: "round",
       strokeLinejoin: "round",
       children: [
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("polyline", { points: "14,2 14,8 20,8" }),
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("path", { d: "M9 15l2 2 4-4" })
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("polyline", { points: "14,2 14,8 20,8" }),
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("path", { d: "M9 15l2 2 4-4" })
       ]
     }
   ),
-  "document-search": /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(
+  "document-search": /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(
     "svg",
     {
       width: "16",
@@ -7738,14 +8618,14 @@ var toolIcons = {
       strokeLinecap: "round",
       strokeLinejoin: "round",
       children: [
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("polyline", { points: "14,2 14,8 20,8" }),
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("circle", { cx: "11.5", cy: "14.5", r: "2.5" }),
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("path", { d: "M13.3 16.3 15 18" })
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("polyline", { points: "14,2 14,8 20,8" }),
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("circle", { cx: "11.5", cy: "14.5", r: "2.5" }),
+        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("path", { d: "M13.3 16.3 15 18" })
       ]
     }
   ),
-  default: /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(
+  default: /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(
     "svg",
     {
       width: "16",
@@ -7756,7 +8636,7 @@ var toolIcons = {
       strokeWidth: "2",
       strokeLinecap: "round",
       strokeLinejoin: "round",
-      children: /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("polygon", { points: "13,2 3,14 12,14 11,22 21,10 12,10 13,2" })
+      children: /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("polygon", { points: "13,2 3,14 12,14 11,22 21,10 12,10 13,2" })
     }
   )
 };
@@ -7814,15 +8694,15 @@ var progressAnimations = `
 `;
 
 // src/components/tool-progress/progress-item.tsx
-var import_react40 = require("react");
-var import_jsx_runtime30 = require("react/jsx-runtime");
-var DefaultProgressItem = (0, import_react40.memo)(function DefaultProgressItem2({
+var import_react45 = require("react");
+var import_jsx_runtime34 = require("react/jsx-runtime");
+var DefaultProgressItem = (0, import_react45.memo)(function DefaultProgressItem2({
   progress
 }) {
   const label = toolLabels[progress.toolName] || progress.toolName;
   const icon = toolIcons[progress.toolName] || toolIcons.default;
   const isActive = progress.status === "starting" || progress.status === "progress";
-  return /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime34.jsxs)(
     "div",
     {
       style: {
@@ -7839,8 +8719,8 @@ var DefaultProgressItem = (0, import_react40.memo)(function DefaultProgressItem2
         animation: "slideIn 0.3s ease-out"
       },
       children: [
-        /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)("div", { style: { position: "relative" }, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime34.jsxs)("div", { style: { position: "relative" }, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(
             "div",
             {
               style: {
@@ -7856,7 +8736,7 @@ var DefaultProgressItem = (0, import_react40.memo)(function DefaultProgressItem2
               children: icon
             }
           ),
-          isActive && /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(
+          isActive && /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(
             "span",
             {
               style: {
@@ -7872,8 +8752,8 @@ var DefaultProgressItem = (0, import_react40.memo)(function DefaultProgressItem2
             }
           )
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)("div", { style: { flex: 1, minWidth: 0 }, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime34.jsxs)("div", { style: { flex: 1, minWidth: 0 }, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime34.jsxs)(
             "div",
             {
               style: {
@@ -7882,7 +8762,7 @@ var DefaultProgressItem = (0, import_react40.memo)(function DefaultProgressItem2
                 gap: 6
               },
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(
+                /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(
                   "span",
                   {
                     style: {
@@ -7893,7 +8773,7 @@ var DefaultProgressItem = (0, import_react40.memo)(function DefaultProgressItem2
                     children: label
                   }
                 ),
-                isActive && /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("span", { style: { display: "flex", gap: 2 }, children: [0, 1, 2].map((i) => /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(
+                isActive && /* @__PURE__ */ (0, import_jsx_runtime34.jsx)("span", { style: { display: "flex", gap: 2 }, children: [0, 1, 2].map((i) => /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(
                   "span",
                   {
                     style: {
@@ -7909,7 +8789,7 @@ var DefaultProgressItem = (0, import_react40.memo)(function DefaultProgressItem2
               ]
             }
           ),
-          progress.message && /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(
+          progress.message && /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(
             "p",
             {
               style: {
@@ -7931,8 +8811,8 @@ var DefaultProgressItem = (0, import_react40.memo)(function DefaultProgressItem2
 });
 
 // src/components/ToolProgressOverlay.tsx
-var import_jsx_runtime31 = require("react/jsx-runtime");
-var ToolProgressOverlay = (0, import_react41.memo)(function ToolProgressOverlay2({
+var import_jsx_runtime35 = require("react/jsx-runtime");
+var ToolProgressOverlay = (0, import_react46.memo)(function ToolProgressOverlay2({
   position = "top-right",
   className,
   show,
@@ -7941,8 +8821,8 @@ var ToolProgressOverlay = (0, import_react41.memo)(function ToolProgressOverlay2
 }) {
   const activeProgress = useActiveToolProgress2();
   const isRunning = useIsToolRunning();
-  const [mounted, setMounted] = (0, import_react41.useState)(false);
-  (0, import_react41.useEffect)(() => {
+  const [mounted, setMounted] = (0, import_react46.useState)(false);
+  (0, import_react46.useEffect)(() => {
     setMounted(true);
   }, []);
   const shouldShow = show ?? isRunning;
@@ -7950,9 +8830,9 @@ var ToolProgressOverlay = (0, import_react41.memo)(function ToolProgressOverlay2
     return null;
   }
   const visibleProgress = activeProgress.slice(0, maxItems);
-  return /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)(import_jsx_runtime31.Fragment, { children: [
-    /* @__PURE__ */ (0, import_jsx_runtime31.jsx)("style", { children: progressAnimations }),
-    /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(import_jsx_runtime35.Fragment, { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime35.jsx)("style", { children: progressAnimations }),
+    /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(
       "div",
       {
         className,
@@ -7966,7 +8846,7 @@ var ToolProgressOverlay = (0, import_react41.memo)(function ToolProgressOverlay2
           ...positionStyles[position]
         },
         children: visibleProgress.map(
-          (progress) => renderItem ? /* @__PURE__ */ (0, import_jsx_runtime31.jsx)("div", { style: { pointerEvents: "auto" }, children: renderItem(progress) }, progress.toolCallId) : /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(
+          (progress) => renderItem ? /* @__PURE__ */ (0, import_jsx_runtime35.jsx)("div", { style: { pointerEvents: "auto" }, children: renderItem(progress) }, progress.toolCallId) : /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(
             DefaultProgressItem,
             {
               progress
@@ -7980,12 +8860,12 @@ var ToolProgressOverlay = (0, import_react41.memo)(function ToolProgressOverlay2
 });
 
 // src/components/Canvas/CanvasBlock.tsx
-var import_react42 = require("react");
-var import_jsx_runtime32 = require("react/jsx-runtime");
+var import_react47 = require("react");
+var import_jsx_runtime36 = require("react/jsx-runtime");
 function CanvasBlockSkeleton() {
-  return /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("div", { className: "w-full min-h-[200px] bg-zinc-900/50 rounded-xl border border-white/5 flex items-center justify-center", children: /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("div", { className: "text-zinc-500 text-sm", children: "Loading editor..." }) });
+  return /* @__PURE__ */ (0, import_jsx_runtime36.jsx)("div", { className: "w-full min-h-[200px] bg-zinc-900/50 rounded-xl border border-white/5 flex items-center justify-center", children: /* @__PURE__ */ (0, import_jsx_runtime36.jsx)("div", { className: "text-zinc-500 text-sm", children: "Loading editor..." }) });
 }
-var CanvasBlock = (0, import_react42.memo)(function CanvasBlock2({
+var CanvasBlock = (0, import_react47.memo)(function CanvasBlock2({
   element,
   onAction,
   loading,
@@ -8003,9 +8883,9 @@ var CanvasBlock = (0, import_react42.memo)(function CanvasBlock2({
     placeholder = "Start typing... Use '/' for commands",
     title
   } = element.props;
-  const [content, setContent] = (0, import_react42.useState)(initialContent || null);
-  const [editorKey, setEditorKey] = (0, import_react42.useState)(0);
-  const processedContent = (0, import_react42.useMemo)(() => {
+  const [content, setContent] = (0, import_react47.useState)(initialContent || null);
+  const [editorKey, setEditorKey] = (0, import_react47.useState)(0);
+  const processedContent = (0, import_react47.useMemo)(() => {
     if (initialContent) return initialContent;
     if (markdown) {
       return { markdown, images };
@@ -8015,13 +8895,13 @@ var CanvasBlock = (0, import_react42.memo)(function CanvasBlock2({
     }
     return null;
   }, [initialContent, markdown, images]);
-  (0, import_react42.useEffect)(() => {
+  (0, import_react47.useEffect)(() => {
     if (processedContent !== void 0 && processedContent !== null) {
       setContent(processedContent);
       setEditorKey((k) => k + 1);
     }
   }, [processedContent]);
-  const handleChange = (0, import_react42.useCallback)(
+  const handleChange = (0, import_react47.useCallback)(
     (_state, serialized) => {
       setContent(serialized);
       onAction?.({
@@ -8034,7 +8914,7 @@ var CanvasBlock = (0, import_react42.memo)(function CanvasBlock2({
     },
     [documentId, onAction]
   );
-  const handleSave = (0, import_react42.useCallback)(() => {
+  const handleSave = (0, import_react47.useCallback)(() => {
     if (content) {
       onAction?.({
         type: "canvas:save",
@@ -8045,7 +8925,7 @@ var CanvasBlock = (0, import_react42.memo)(function CanvasBlock2({
       });
     }
   }, [documentId, content, onAction]);
-  const handleOpenInCanvas = (0, import_react42.useCallback)(() => {
+  const handleOpenInCanvas = (0, import_react47.useCallback)(() => {
     onAction?.({
       type: "canvas:open",
       payload: {
@@ -8056,31 +8936,31 @@ var CanvasBlock = (0, import_react42.memo)(function CanvasBlock2({
     });
   }, [documentId, title, initialContent, onAction]);
   if (loading) {
-    return /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(CanvasBlockSkeleton, {});
+    return /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(CanvasBlockSkeleton, {});
   }
   if (!EditorComponent) {
-    return /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(
+    return /* @__PURE__ */ (0, import_jsx_runtime36.jsxs)(
       "div",
       {
         className: "canvas-block w-full bg-zinc-900/50 rounded-xl border border-white/5 overflow-hidden",
         style: { minHeight: height },
         "data-document-id": documentId,
         children: [
-          title && /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("div", { className: "px-4 py-3 border-b border-white/5", children: /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("h3", { className: "text-lg font-semibold text-white", children: title }) }),
-          /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(
+          title && /* @__PURE__ */ (0, import_jsx_runtime36.jsx)("div", { className: "px-4 py-3 border-b border-white/5", children: /* @__PURE__ */ (0, import_jsx_runtime36.jsx)("h3", { className: "text-lg font-semibold text-white", children: title }) }),
+          /* @__PURE__ */ (0, import_jsx_runtime36.jsxs)(
             "div",
             {
               className: "flex flex-col items-center justify-center gap-4 p-8",
               style: { minHeight: "200px" },
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("p", { className: "text-zinc-400 text-sm", children: initialContent ? "Document content available" : "Empty document" }),
-                /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(
+                /* @__PURE__ */ (0, import_jsx_runtime36.jsx)("p", { className: "text-zinc-400 text-sm", children: initialContent ? "Document content available" : "Empty document" }),
+                /* @__PURE__ */ (0, import_jsx_runtime36.jsxs)(
                   "button",
                   {
                     onClick: handleOpenInCanvas,
                     className: "flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-sm font-medium transition-colors border-none cursor-pointer",
                     children: [
-                      /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(
+                      /* @__PURE__ */ (0, import_jsx_runtime36.jsxs)(
                         "svg",
                         {
                           width: "16",
@@ -8092,8 +8972,8 @@ var CanvasBlock = (0, import_react42.memo)(function CanvasBlock2({
                           strokeLinecap: "round",
                           strokeLinejoin: "round",
                           children: [
-                            /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("path", { d: "M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" }),
-                            /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("path", { d: "M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" })
+                            /* @__PURE__ */ (0, import_jsx_runtime36.jsx)("path", { d: "M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" }),
+                            /* @__PURE__ */ (0, import_jsx_runtime36.jsx)("path", { d: "M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" })
                           ]
                         }
                       ),
@@ -8108,15 +8988,15 @@ var CanvasBlock = (0, import_react42.memo)(function CanvasBlock2({
       }
     );
   }
-  return /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime36.jsxs)(
     "div",
     {
       className: "canvas-block",
       style: { width, minHeight: height },
       "data-document-id": documentId,
       children: [
-        title && /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("h3", { className: "text-lg font-semibold text-white mb-3", children: title }),
-        /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("div", { className: "bg-zinc-900/50 rounded-xl border border-white/5 overflow-hidden", children: /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(
+        title && /* @__PURE__ */ (0, import_jsx_runtime36.jsx)("h3", { className: "text-lg font-semibold text-white mb-3", children: title }),
+        /* @__PURE__ */ (0, import_jsx_runtime36.jsx)("div", { className: "bg-zinc-900/50 rounded-xl border border-white/5 overflow-hidden", children: /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(
           EditorComponent,
           {
             initialState: content,
@@ -8131,7 +9011,7 @@ var CanvasBlock = (0, import_react42.memo)(function CanvasBlock2({
           },
           editorKey
         ) }),
-        mode === "edit" && /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("div", { className: "flex justify-end mt-2", children: /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(
+        mode === "edit" && /* @__PURE__ */ (0, import_jsx_runtime36.jsx)("div", { className: "flex justify-end mt-2", children: /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(
           "button",
           {
             onClick: handleSave,
@@ -9164,9 +10044,9 @@ function createDOMPurify() {
 var purify = createDOMPurify();
 
 // src/components/Document/DocumentBlock.tsx
-var import_react43 = require("react");
-var import_jsx_runtime33 = require("react/jsx-runtime");
-var DocumentBlock = (0, import_react43.memo)(function DocumentBlock2({
+var import_react48 = require("react");
+var import_jsx_runtime37 = require("react/jsx-runtime");
+var DocumentBlock = (0, import_react48.memo)(function DocumentBlock2({
   element,
   onAction,
   renderText,
@@ -9180,9 +10060,9 @@ var DocumentBlock = (0, import_react43.memo)(function DocumentBlock2({
     documentId,
     showOpenInCanvas = true
   } = element.props;
-  const renderedContent = (0, import_react43.useMemo)(() => {
+  const renderedContent = (0, import_react48.useMemo)(() => {
     if (format === "html") {
-      return /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(
+      return /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(
         "div",
         {
           className: "prose prose-invert max-w-none",
@@ -9193,7 +10073,7 @@ var DocumentBlock = (0, import_react43.memo)(function DocumentBlock2({
     if (format === "markdown" && renderText) {
       return renderText(content, { markdown: true });
     }
-    return /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("pre", { className: "whitespace-pre-wrap text-sm", children: content });
+    return /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("pre", { className: "whitespace-pre-wrap text-sm", children: content });
   }, [content, format, renderText]);
   const handleOpenInCanvas = () => {
     onAction?.({
@@ -9207,19 +10087,19 @@ var DocumentBlock = (0, import_react43.memo)(function DocumentBlock2({
     });
   };
   if (loading) {
-    return /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)("div", { className: "w-full p-6 bg-zinc-900/50 rounded-xl border border-white/5 animate-pulse", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("div", { className: "h-6 w-1/3 bg-zinc-800 rounded mb-4" }),
-      /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)("div", { className: "space-y-2", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("div", { className: "h-4 bg-zinc-800 rounded w-full" }),
-        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("div", { className: "h-4 bg-zinc-800 rounded w-5/6" }),
-        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("div", { className: "h-4 bg-zinc-800 rounded w-4/6" })
+    return /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)("div", { className: "w-full p-6 bg-zinc-900/50 rounded-xl border border-white/5 animate-pulse", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("div", { className: "h-6 w-1/3 bg-zinc-800 rounded mb-4" }),
+      /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)("div", { className: "space-y-2", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("div", { className: "h-4 bg-zinc-800 rounded w-full" }),
+        /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("div", { className: "h-4 bg-zinc-800 rounded w-5/6" }),
+        /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("div", { className: "h-4 bg-zinc-800 rounded w-4/6" })
       ] })
     ] });
   }
-  return /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)("div", { className: "document-block w-full bg-zinc-900/50 rounded-xl border border-white/5 overflow-hidden", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)("div", { className: "flex items-center justify-between px-4 py-3 border-b border-white/5 bg-zinc-900/30", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)("div", { className: "flex items-center gap-2", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)("div", { className: "document-block w-full bg-zinc-900/50 rounded-xl border border-white/5 overflow-hidden", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)("div", { className: "flex items-center justify-between px-4 py-3 border-b border-white/5 bg-zinc-900/30", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)("div", { className: "flex items-center gap-2", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)(
           "svg",
           {
             width: "16",
@@ -9232,23 +10112,23 @@ var DocumentBlock = (0, import_react43.memo)(function DocumentBlock2({
             strokeLinejoin: "round",
             className: "text-zinc-400",
             children: [
-              /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
-              /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("polyline", { points: "14 2 14 8 20 8" }),
-              /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("line", { x1: "16", x2: "8", y1: "13", y2: "13" }),
-              /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("line", { x1: "16", x2: "8", y1: "17", y2: "17" }),
-              /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("line", { x1: "10", x2: "8", y1: "9", y2: "9" })
+              /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
+              /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("polyline", { points: "14 2 14 8 20 8" }),
+              /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("line", { x1: "16", x2: "8", y1: "13", y2: "13" }),
+              /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("line", { x1: "16", x2: "8", y1: "17", y2: "17" }),
+              /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("line", { x1: "10", x2: "8", y1: "9", y2: "9" })
             ]
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("h3", { className: "text-sm font-medium text-white", children: title })
+        /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("h3", { className: "text-sm font-medium text-white", children: title })
       ] }),
-      showOpenInCanvas && /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(
+      showOpenInCanvas && /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)(
         "button",
         {
           onClick: handleOpenInCanvas,
           className: "flex items-center gap-1.5 px-2.5 py-1 text-xs text-zinc-400 hover:text-white bg-zinc-800 hover:bg-zinc-700 rounded-md transition-colors border-none cursor-pointer",
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(
+            /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)(
               "svg",
               {
                 width: "12",
@@ -9260,8 +10140,8 @@ var DocumentBlock = (0, import_react43.memo)(function DocumentBlock2({
                 strokeLinecap: "round",
                 strokeLinejoin: "round",
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("path", { d: "M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" }),
-                  /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("path", { d: "M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" })
+                  /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("path", { d: "M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" }),
+                  /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("path", { d: "M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" })
                 ]
               }
             ),
@@ -9270,7 +10150,7 @@ var DocumentBlock = (0, import_react43.memo)(function DocumentBlock2({
         }
       )
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("div", { className: "p-4", children: renderedContent })
+    /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("div", { className: "p-4", children: renderedContent })
   ] });
 });
 
@@ -9463,6 +10343,7 @@ function groupDeepSelectionsByElement(selections) {
   DEFAULT_EXTENDED_SETTINGS,
   DataProvider,
   DocumentBlock,
+  EditModeProvider,
   EditableNumber,
   EditableProvider,
   EditableText,
@@ -9528,6 +10409,12 @@ function groupDeepSelectionsByElement(selections) {
   useAreSuggestionsEnabled,
   useAuthenticatedSources,
   useAutoSave,
+  useCanvasActions,
+  useCanvasContent,
+  useCanvasInstance,
+  useCanvasInstances,
+  useCanvasIsStreaming,
+  useCanvasVersion,
   useCitations,
   useData,
   useDataBinding,
@@ -9538,15 +10425,18 @@ function groupDeepSelectionsByElement(selections) {
   useDeepSelectionActive,
   useDeepSelections,
   useDomainAutoSave,
+  useEditMode,
   useEditable,
   useEditableContext,
   useElementActionTracker,
+  useElementEdit,
   useFieldStates,
   useFieldValidation,
   useFormState,
   useGeneratingGoal,
   useGranularSelection,
   useIsAnyToolRunning,
+  useIsElementEditing,
   useIsGenerating,
   useIsMobile,
   useIsPlanRunning,

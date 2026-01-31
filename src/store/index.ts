@@ -27,6 +27,7 @@ import {
   createDeepResearchSlice,
   createUITreeSlice,
   createWorkspaceSlice,
+  createCanvasSlice,
 } from "./slices";
 
 import type { StoreState } from "./types";
@@ -89,6 +90,7 @@ export const useStore: OneGenUIStore = create<StoreState>()(
         ...createDeepResearchSlice(...args),
         ...createUITreeSlice(...args),
         ...createWorkspaceSlice(...args),
+        ...createCanvasSlice(...args),
       })),
     ),
     {
@@ -112,20 +114,25 @@ export const useDataModel = () => useStore((s) => s.dataModel);
 export const useAuth = () => useStore((s) => s.auth);
 export const useIsLoading = () => useStore((s) => s.isLoading);
 
-// UI selectors
-export const useConfirmations = () => useStore((s) => s.confirmations);
-export const useToolProgress = () => useStore((s) => s.toolProgress);
+// UI selectors - useShallow for collections to prevent re-renders
+export const useConfirmations = () =>
+  useStore(useShallow((s) => s.confirmations));
+export const useToolProgress = () =>
+  useStore(useShallow((s) => s.toolProgress));
 export const useGlobalLoading = () => useStore((s) => s.globalLoading);
 export const useSidebarOpen = () => useStore((s) => s.sidebarOpen);
 
-// Selection selectors - Component level
+// Selection selectors - useShallow for arrays/objects
 export const useSelectedKey = () => useStore((s) => s.selectedKey);
-export const useSelectedElement = () => useStore((s) => s.selectedElement);
-export const useMultiSelectedKeys = () => useStore((s) => s.multiSelectedKeys);
+export const useSelectedElement = () =>
+  useStore(useShallow((s) => s.selectedElement));
+export const useMultiSelectedKeys = () =>
+  useStore(useShallow((s) => s.multiSelectedKeys));
 export const useHoveredKey = () => useStore((s) => s.hoveredKey);
 
-// Selection selectors - Deep selection
-export const useDeepSelections = () => useStore((s) => s.deepSelections);
+// Selection selectors - Deep selection (useShallow for array)
+export const useDeepSelections = () =>
+  useStore(useShallow((s) => s.deepSelections));
 export const useDeepSelectionActive = () =>
   useStore((s) => s.deepSelectionActive);
 // Use useShallow for derived objects that are computed on every call
@@ -147,21 +154,25 @@ export const useGranularSelection = () =>
 
 // Settings selectors
 export const useTheme = () => useStore((s) => s.theme);
-export const useAISettings = () => useStore((s) => s.aiSettings);
+export const useAISettings = () =>
+  useStore(useShallow((s) => s.aiSettings));
 export const useCompactMode = () => useStore((s) => s.compactMode);
 
 // Analytics selectors - use useShallow for array slicing
 export const useRecentActions = (count = 10) =>
   useStore(useShallow((s) => s.actions.slice(0, count)));
 
-// Actions selectors
-export const useLoadingActions = () => useStore((s) => s.loadingActions);
+// Actions selectors - useShallow for collections
+export const useLoadingActions = () =>
+  useStore(useShallow((s) => s.loadingActions));
 export const usePendingConfirmations = () =>
-  useStore((s) => s.pendingConfirmations);
-export const useActionHistory = () => useStore((s) => s.actionHistory);
+  useStore(useShallow((s) => s.pendingConfirmations));
+export const useActionHistory = () =>
+  useStore(useShallow((s) => s.actionHistory));
 
-// Validation selectors
-export const useFieldStates = () => useStore((s) => s.fieldStates);
+// Validation selectors - useShallow for Map/Record
+export const useFieldStates = () =>
+  useStore(useShallow((s) => s.fieldStates));
 export const useIsValidating = () => useStore((s) => s.isValidating);
 // Use useShallow for derived form state
 export const useFormState = () =>
@@ -320,6 +331,31 @@ export const useWorkspaceActions = () =>
     })),
   );
 
+// Canvas selectors
+export const useCanvasInstances = () =>
+  useStore(useShallow((s) => Array.from(s.canvasInstances.values())));
+export const useCanvasInstance = (canvasId: string) =>
+  useStore((s) => s.canvasInstances.get(canvasId));
+export const useCanvasContent = (canvasId: string) =>
+  useStore((s) => s.canvasInstances.get(canvasId)?.content ?? null);
+export const useCanvasVersion = (canvasId: string) =>
+  useStore((s) => s.canvasInstances.get(canvasId)?.version ?? 0);
+export const useCanvasIsStreaming = (canvasId: string) =>
+  useStore((s) => s.canvasInstances.get(canvasId)?.isStreaming ?? false);
+export const useCanvasActions = () =>
+  useStore(
+    useShallow((s) => ({
+      initCanvas: s.initCanvas,
+      removeCanvas: s.removeCanvas,
+      updateCanvasContent: s.updateCanvasContent,
+      setCanvasStreaming: s.setCanvasStreaming,
+      setCanvasDirty: s.setCanvasDirty,
+      queueCanvasUpdate: s.queueCanvasUpdate,
+      flushCanvasUpdates: s.flushCanvasUpdates,
+      clearCanvasPendingUpdates: s.clearCanvasPendingUpdates,
+    })),
+  );
+
 // =============================================================================
 // Re-export slice creators for direct use
 // =============================================================================
@@ -337,6 +373,7 @@ export {
   createDeepResearchSlice,
   createUITreeSlice,
   createWorkspaceSlice,
+  createCanvasSlice,
 } from "./slices";
 
 export type {
@@ -345,3 +382,10 @@ export type {
   PendingAIEdit,
   WorkspaceLayout,
 } from "./slices/workspace";
+
+export type {
+  CanvasSlice,
+  CanvasInstance,
+  CanvasEditorState,
+  CanvasPendingUpdate,
+} from "./slices/canvas";

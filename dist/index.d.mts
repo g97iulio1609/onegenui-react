@@ -1,6 +1,6 @@
 import * as react_jsx_runtime from 'react/jsx-runtime';
-import * as react from 'react';
-import react__default, { ReactNode, CSSProperties, ComponentType } from 'react';
+import * as React$1 from 'react';
+import React__default, { ReactNode, CSSProperties, ComponentType } from 'react';
 import { DataModel, AuthState, VisibilityCondition, VisibilityContext, ActionHandler, ResolvedAction, Action, ActionConfirm, ValidationFunction, ValidationResult, ValidationConfig, ToolProgressEvent, UITree, UIElement, JsonPatch, DocumentIndex, Catalog, ComponentDefinition, ElementSize, ElementResizeConfig, ElementLayout } from '@onegenui/core';
 export { DocumentIndex, DocumentIndexNode, ToolProgressEvent, ToolProgressStatus } from '@onegenui/core';
 import { UseBoundStore, StoreApi } from 'zustand';
@@ -275,10 +275,15 @@ interface UISlice {
 
 /**
  * Settings Slice - AI settings, theme, preferences
+ *
+ * NOTE: Model selection is now centralized server-side in `lib/services/model-config.ts`.
+ * The AIModel type here is kept for backward compatibility but new code should use
+ * the server-side `getModelForTask()` function.
  */
 
 type ThemeMode = "light" | "dark" | "system";
-type AIModel = "gemini-2.0-flash" | "gemini-2.5-pro" | "gpt-4o" | "claude-3.5-sonnet";
+/** @deprecated Use server-side model config from `lib/services/model-config.ts` */
+type AIModel = "gemini-3-flash-preview" | "gemini-3-pro-preview" | "gpt-5.2" | "claude-haiku-4.5" | "claude-sonnet-4.5" | "claude-opus-4.5";
 interface AISettings {
     model: AIModel;
     temperature: number;
@@ -771,6 +776,92 @@ interface WorkspaceSlice {
 }
 
 /**
+ * Canvas Slice
+ *
+ * Manages inline Canvas editor state for GenUI components.
+ * Separate from WorkspaceSlice which handles standalone documents.
+ *
+ * Key features:
+ * - Per-canvas state management by canvasId (usually element.key)
+ * - Streaming-safe updates without forcing re-mount
+ * - Lexical editor state synchronization
+ * - Pending AI edits queue
+ */
+
+/** Serialized Lexical editor state */
+type CanvasEditorState = {
+    root: {
+        children: unknown[];
+        direction: string | null;
+        format: string;
+        indent: number;
+        type: string;
+        version: number;
+    };
+};
+/** Canvas instance state */
+interface CanvasInstance {
+    /** Unique canvas ID (usually element.key from GenUI tree) */
+    id: string;
+    /** Current editor content */
+    content: CanvasEditorState | null;
+    /** Is content being streamed from AI */
+    isStreaming: boolean;
+    /** Content version (increments on each update) */
+    version: number;
+    /** Last update timestamp */
+    updatedAt: number;
+    /** Has unsaved local changes */
+    isDirty: boolean;
+    /** Document title (optional) */
+    title?: string;
+    /** Associated document ID for persistence */
+    documentId?: string;
+}
+/** Pending AI content update */
+interface CanvasPendingUpdate {
+    /** Canvas ID */
+    canvasId: string;
+    /** New content */
+    content: CanvasEditorState;
+    /** Update timestamp */
+    timestamp: number;
+}
+interface CanvasSlice {
+    /** Map of canvas instances by ID */
+    canvasInstances: Map<string, CanvasInstance>;
+    /** Pending updates queue (for batching during streaming) */
+    canvasPendingUpdates: CanvasPendingUpdate[];
+    /** Initialize or get a canvas instance */
+    initCanvas: (canvasId: string, initialContent?: CanvasEditorState | null, options?: {
+        title?: string;
+        documentId?: string;
+    }) => CanvasInstance;
+    /** Remove a canvas instance */
+    removeCanvas: (canvasId: string) => void;
+    /** Check if canvas exists */
+    hasCanvas: (canvasId: string) => boolean;
+    /** Get canvas instance */
+    getCanvas: (canvasId: string) => CanvasInstance | undefined;
+    /** Update canvas content (streaming-safe) */
+    updateCanvasContent: (canvasId: string, content: CanvasEditorState | null) => void;
+    /** Set streaming state */
+    setCanvasStreaming: (canvasId: string, isStreaming: boolean) => void;
+    /** Mark canvas as dirty (has unsaved changes) */
+    setCanvasDirty: (canvasId: string, isDirty: boolean) => void;
+    /** Queue an update for later application */
+    queueCanvasUpdate: (canvasId: string, content: CanvasEditorState) => void;
+    /** Apply all pending updates for a canvas */
+    flushCanvasUpdates: (canvasId: string) => void;
+    /** Clear pending updates without applying */
+    clearCanvasPendingUpdates: (canvasId: string) => void;
+    /** Get all canvas IDs */
+    getCanvasIds: () => string[];
+    /** Get streaming canvases */
+    getStreamingCanvases: () => CanvasInstance[];
+}
+
+/**
  * Store Types - Shared types for Zustand slices with immer middleware
  *
  * This is the official Zustand pattern for typing slices with middleware.
@@ -780,7 +871,7 @@ interface WorkspaceSlice {
 /**
  * The complete store state combining all slices
  */
-type StoreState = DomainSlice & UISlice & SelectionSlice & SettingsSlice & AnalyticsSlice & ActionsSlice & ValidationSlice & ToolProgressSlice & PlanExecutionSlice & DeepResearchSlice & UITreeSlice & WorkspaceSlice;
+type StoreState = DomainSlice & UISlice & SelectionSlice & SettingsSlice & AnalyticsSlice & ActionsSlice & ValidationSlice & ToolProgressSlice & PlanExecutionSlice & DeepResearchSlice & UITreeSlice & WorkspaceSlice & CanvasSlice;
 
 /**
  * Selection Slice - Unified element selection state
@@ -1129,7 +1220,7 @@ interface CitationContextValue {
  */
 declare function CitationProvider({ children }: {
     children: ReactNode;
-}): react.FunctionComponentElement<react.ProviderProps<CitationContextValue | null>>;
+}): React$1.FunctionComponentElement<React$1.ProviderProps<CitationContextValue | null>>;
 /**
  * Hook to access citation context
  */
@@ -1678,6 +1769,58 @@ declare function useIsGenerating(): boolean;
  */
 declare function useGeneratingGoal(): string | null;
 
+interface EditModeContextValue {
+    /** Whether edit mode is active */
+    isEditing: boolean;
+    /** Enable edit mode */
+    enableEditing: () => void;
+    /** Disable edit mode */
+    disableEditing: () => void;
+    /** Toggle edit mode */
+    toggleEditing: () => void;
+    /** Currently focused element key (for highlighting) */
+    focusedKey: string | null;
+    /** Set focused element */
+    setFocusedKey: (key: string | null) => void;
+    /** Track pending changes before commit */
+    pendingChanges: Map<string, Record<string, unknown>>;
+    /** Record a pending change */
+    recordChange: (elementKey: string, propName: string, newValue: unknown) => void;
+    /** Commit all pending changes */
+    commitChanges: () => void;
+    /** Discard all pending changes */
+    discardChanges: () => void;
+    /** Callback when changes are committed */
+    onCommit?: (changes: Array<ElementChange>) => void;
+}
+interface ElementChange {
+    key: string;
+    props: Record<string, unknown>;
+}
+interface EditModeProviderProps {
+    children: ReactNode;
+    /** Initial edit mode state */
+    initialEditing?: boolean;
+    /** Callback when changes are committed */
+    onCommit?: (changes: Array<ElementChange>) => void;
+}
+declare function EditModeProvider({ children, initialEditing, onCommit, }: EditModeProviderProps): react_jsx_runtime.JSX.Element;
+declare function useEditMode(): EditModeContextValue;
+/**
+ * Hook to check if a specific element is being edited
+ */
+declare function useIsElementEditing(elementKey: string): boolean;
+/**
+ * Hook for element-specific edit functionality
+ */
+declare function useElementEdit(elementKey: string): {
+    isEditing: boolean;
+    isFocused: boolean;
+    handleChange: (propName: string, newValue: unknown) => void;
+    handleFocus: () => void;
+    handleBlur: () => void;
+};
+
 /**
  * Renderer Types
  */
@@ -1695,6 +1838,21 @@ interface ComponentRenderProps<P = Record<string, unknown>> {
         inline?: boolean;
         className?: string;
         style?: CSSProperties;
+    }) => ReactNode;
+    /**
+     * Render editable text. When in edit mode, returns an editable span.
+     * When not in edit mode, returns the text as-is (or uses renderText if markdown).
+     * Use this for props that should be inline-editable.
+     *
+     * @param propName - The prop name (e.g., "title", "description")
+     * @param value - The text value
+     * @param options - Additional options (className, as tag, multiline)
+     */
+    renderEditableText?: (propName: string, value: string | null | undefined, options?: {
+        className?: string;
+        as?: "span" | "div" | "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
+        multiline?: boolean;
+        placeholder?: string;
     }) => ReactNode;
     /** Execute an action */
     onAction?: (action: Action) => void;
@@ -1860,7 +2018,7 @@ interface ElementRendererProps {
         height: number;
     }) => void;
 }
-declare const ElementRenderer: react__default.NamedExoticComponent<ElementRendererProps>;
+declare const ElementRenderer: React__default.NamedExoticComponent<ElementRendererProps>;
 
 /**
  * Information about user's native text selection
@@ -2190,6 +2348,24 @@ declare const useWorkspaceActions: () => {
     rejectPendingEdit: (editId: string) => void;
     clearPendingEdits: () => void;
 };
+declare const useCanvasInstances: () => CanvasInstance[];
+declare const useCanvasInstance: (canvasId: string) => CanvasInstance | undefined;
+declare const useCanvasContent: (canvasId: string) => CanvasEditorState | null;
+declare const useCanvasVersion: (canvasId: string) => number;
+declare const useCanvasIsStreaming: (canvasId: string) => boolean;
+declare const useCanvasActions: () => {
+    initCanvas: (canvasId: string, initialContent?: CanvasEditorState | null, options?: {
+        title?: string;
+        documentId?: string;
+    }) => CanvasInstance;
+    removeCanvas: (canvasId: string) => void;
+    updateCanvasContent: (canvasId: string, content: CanvasEditorState | null) => void;
+    setCanvasStreaming: (canvasId: string, isStreaming: boolean) => void;
+    setCanvasDirty: (canvasId: string, isDirty: boolean) => void;
+    queueCanvasUpdate: (canvasId: string, content: CanvasEditorState) => void;
+    flushCanvasUpdates: (canvasId: string) => void;
+    clearCanvasPendingUpdates: (canvasId: string) => void;
+};
 
 /**
  * Convert a flat element list to a UITree
@@ -2286,7 +2462,7 @@ interface MarkdownTheme {
     blockquoteBorder: string;
     hrColor: string;
 }
-declare const MarkdownText: react.NamedExoticComponent<MarkdownTextProps>;
+declare const MarkdownText: React$1.NamedExoticComponent<MarkdownTextProps>;
 
 interface TextSelectionBadgeProps {
     /** The preserved selection to display */
@@ -2326,7 +2502,7 @@ interface ResizableWrapperProps {
     /** The UI element being rendered */
     element: UIElement;
     /** Child content to render */
-    children: react__default.ReactNode;
+    children: React__default.ReactNode;
     /** Override layout config */
     layout?: ElementLayout;
     /** Callback when element is resized */
@@ -2368,19 +2544,19 @@ interface FreeGridCanvasProps {
     showGrid?: boolean;
     gridLineColor?: string;
     backgroundColor?: string;
-    children: react__default.ReactNode;
+    children: React__default.ReactNode;
     onLayoutChange?: (elementKey: string, layout: ElementLayout) => void;
     className?: string;
-    style?: react__default.CSSProperties;
+    style?: React__default.CSSProperties;
 }
 interface GridCellProps {
     column?: number;
     row?: number;
     columnSpan?: number;
     rowSpan?: number;
-    children: react__default.ReactNode;
+    children: React__default.ReactNode;
     className?: string;
-    style?: react__default.CSSProperties;
+    style?: React__default.CSSProperties;
 }
 
 /**
@@ -2396,7 +2572,7 @@ declare function GridCell({ column, row, columnSpan, rowSpan, children, classNam
 /**
  * Generate CSS styles from an element's layout configuration.
  */
-declare function getLayoutStyles(layout: ElementLayout | undefined): react__default.CSSProperties;
+declare function getLayoutStyles(layout: ElementLayout | undefined): React__default.CSSProperties;
 /**
  * Create a layout configuration from grid position and size.
  */
@@ -2420,7 +2596,7 @@ interface ToolProgressOverlayProps {
     /** Maximum number of items to show */
     maxItems?: number;
     /** Custom render function for each progress item */
-    renderItem?: (progress: ToolProgressEvent) => react__default.ReactNode;
+    renderItem?: (progress: ToolProgressEvent) => React__default.ReactNode;
 }
 /**
  * ToolProgressOverlay - Automatically shows tool execution progress
@@ -2437,7 +2613,7 @@ interface ToolProgressOverlayProps {
  * </ToolProgressProvider>
  * ```
  */
-declare const ToolProgressOverlay: react__default.NamedExoticComponent<ToolProgressOverlayProps>;
+declare const ToolProgressOverlay: React__default.NamedExoticComponent<ToolProgressOverlayProps>;
 
 interface CanvasBlockProps {
     /** Document unique identifier */
@@ -2487,7 +2663,7 @@ interface CanvasBlockComponentProps {
         className?: string;
     }>;
 }
-declare const CanvasBlock: react.NamedExoticComponent<CanvasBlockComponentProps>;
+declare const CanvasBlock: React$1.NamedExoticComponent<CanvasBlockComponentProps>;
 
 interface DocumentBlockProps {
     /** Document title */
@@ -2514,7 +2690,7 @@ interface DocumentBlockComponentProps {
     }) => React.ReactNode;
     loading?: boolean;
 }
-declare const DocumentBlock: react.NamedExoticComponent<DocumentBlockComponentProps>;
+declare const DocumentBlock: React$1.NamedExoticComponent<DocumentBlockComponentProps>;
 
 /**
  * Selection System Ports - Hexagonal Architecture
@@ -2824,4 +3000,4 @@ declare function isDeepSelectionSelected(selections: DeepSelectionData[], elemen
  */
 declare function groupDeepSelectionsByElement(selections: DeepSelectionData[]): Map<string, DeepSelectionData[]>;
 
-export { type AIAssistantSettings, AISettingsProvider, type ActionContextValue$1 as ActionContextValue, type ActionManagerPort, ActionProvider$1 as ActionProvider, type ActionProviderProps$1 as ActionProviderProps, type ActionTrackerOptions, type ActionTrackingCallback, ActionProvider as ActionTrackingProvider, type ActionType, type AddDeepSelectionInput, type Attachment, type AutoSaveContextValue, type AutoSavePayload, AutoSaveProvider, type AutoSaveResult, CanvasBlock, type CanvasBlockProps, type ChatMessage, ChildSkeleton, type Citation, CitationProvider, type ComponentRegistry, type ComponentRenderProps, type ComponentRenderer, ConfirmDialog, type ConfirmDialogProps, type ConversationMessage, type ConversationTurn, DEFAULT_AI_SETTINGS, DEFAULT_EXTENDED_SETTINGS, type DOMSelectorPort, type DataContextValue, type DataManagerPort, DataProvider, type DataProviderProps, type DeepResearchEffortLevel, type DeepSelectionData, type DeepSelectionInfo, type DeepSelectionInput, DocumentBlock, type DocumentBlockProps, type DocumentSettings, type DomainType, EditableNumber, type EditableProps, EditableProvider, EditableText, ElementRenderer, type ElementRendererProps$1 as ElementRendererProps, type ExtendedAISettings, type FieldValidationState, type FileAttachment, type FlatElement, type FormField, FreeGridCanvas, type FreeGridCanvasProps, GridCell, type GridCellProps, JSONUIProvider, type JSONUIProviderProps, type LibraryAttachment, type MarkdownContextValue, MarkdownProvider, type MarkdownProviderProps, MarkdownText, type MarkdownTextProps, type MarkdownTheme$1 as MarkdownTheme, type PendingAIEdit, type PendingConfirmation$1 as PendingConfirmation, type PersistedAttachment, PlaceholderSkeleton, type PlanExecutionState, type PlanStep, type PlanStepStatus, type PlanSubtask, type PreservedTextSelection, type ProactivityMode, type QuestionPayload, type RenderTextOptions, Renderer, type RendererProps, ResizableWrapper, type ResizableWrapperProps, type ResizeHandle, type ResizeState, SelectableItem, type SelectableItemProps, type SelectionContextValue, type SelectionEventPort, type SelectionExportPort, type SelectionManagerPort, type SelectionPort, SelectionProvider, type SelectionProviderProps, type SkeletonProps, type ExecutionPlan as StorePlanType, type SuggestionChip, TextSelectionBadge, type TextSelectionBadgeProps, type TextSelectionInfo, type ToolProgress, type ToolProgressContextValue, type ToolProgressManagerPort, ToolProgressOverlay, type ToolProgressOverlayProps, ToolProgressProvider, type ToolProgressProviderProps, type TrackedAction, type UnifiedProgressContextValue, type UnifiedProgressItem, type UnifiedProgressItemType, UnifiedProgressProvider, type UnifiedProgressProviderProps, type UnifiedProgressState, type UnifiedProgressStatus, type UseLayoutManagerOptions, type UseLayoutManagerReturn, type UsePreservedSelectionReturn, type UseResizableOptions, type UseResizableReturn, type UseUIStreamOptions, type UseUIStreamReturn, type ValidationContextValue, type ValidationManagerPort, ValidationProvider, type ValidationProviderProps, type VisibilityContextValue, VisibilityProvider, type VisibilityProviderProps, type WorkspaceDocument, type WorkspaceLayout, buildConversationMessages, computeAddSelection, computeRangeSelection, computeRemoveSelection, computeReplaceSelection, computeToggleSelection, createLayout, createRendererFromCatalog, elementRendererPropsAreEqual, exportDeepSelectionAsJSON, exportDeepSelectionAsText, exportDeepSelectionForAI, exportSelectionForAI, flatToTree, formatActionsForPrompt, generateDeepSelectionSummary, generateSelectionSummary, getLayoutStyles, getResizeCursor, getSelectionCountByElement, getSelectionForElement, groupDeepSelectionsByElement, isDeepSelectionSelected, isFileAttachment, isItemSelected, isLibraryAttachment, isPlaceholderElement, selectPlanExecution, selectableItemProps, useAISettings, useAISettingsOptional, useAction, useActionContext, useActionHistory, useActionSubscriber, useActions, useActiveDocument, useActiveDocumentId, useActiveResearch, useActiveStep, useActiveToolProgress$1 as useActiveToolProgress, useActiveToolProgress as useActiveToolProgressStore, useAreSuggestionsEnabled, useAuthenticatedSources, useAutoSave, useCitations, useData, useDataBinding, useDataValue, useDeepResearchEffortLevel, useDeepResearchEnabled, useDeepResearchSettings, useDeepSelectionActive, useDeepSelections, useDomainAutoSave, useEditable, useEditableContext, useElementActionTracker, useFieldStates, useFieldValidation, useFormState, useGeneratingGoal, useGranularSelection, useIsAnyToolRunning, useIsGenerating, useIsMobile, useIsPlanRunning, useIsProactivityEnabled, useIsResearchActive, useIsSmartParsingEnabled, useIsToolRunning, useIsValidating, useIsVisible, useIsWorkspaceOpen, useItemSelection, useLayoutManager, useLoadingActions, useMarkdown, usePendingAIEdits, usePendingConfirmations, usePlanExecution, usePlanProgress, usePreservedSelection, useProgressEvents, useRenderText, useResearchHistory, useResearchProgress, useResizable, useSelection, useStore, useTextSelection, useToolProgress, useToolProgressOptional, useUIStore, useUIStream, useUnifiedProgress, useUnifiedProgressOptional, useValidation, useVisibility, useWorkspaceActions, useWorkspaceDocuments, useWorkspaceLayout, useYoloMode };
+export { type AIAssistantSettings, AISettingsProvider, type ActionContextValue$1 as ActionContextValue, type ActionManagerPort, ActionProvider$1 as ActionProvider, type ActionProviderProps$1 as ActionProviderProps, type ActionTrackerOptions, type ActionTrackingCallback, ActionProvider as ActionTrackingProvider, type ActionType, type AddDeepSelectionInput, type Attachment, type AutoSaveContextValue, type AutoSavePayload, AutoSaveProvider, type AutoSaveResult, CanvasBlock, type CanvasBlockProps, type CanvasEditorState, type CanvasInstance, type CanvasPendingUpdate, type CanvasSlice, type ChatMessage, ChildSkeleton, type Citation, CitationProvider, type ComponentRegistry, type ComponentRenderProps, type ComponentRenderer, ConfirmDialog, type ConfirmDialogProps, type ConversationMessage, type ConversationTurn, DEFAULT_AI_SETTINGS, DEFAULT_EXTENDED_SETTINGS, type DOMSelectorPort, type DataContextValue, type DataManagerPort, DataProvider, type DataProviderProps, type DeepResearchEffortLevel, type DeepSelectionData, type DeepSelectionInfo, type DeepSelectionInput, DocumentBlock, type DocumentBlockProps, type DocumentSettings, type DomainType, type EditModeContextValue, EditModeProvider, type EditModeProviderProps, EditableNumber, type EditableProps, EditableProvider, EditableText, type ElementChange, ElementRenderer, type ElementRendererProps$1 as ElementRendererProps, type ExtendedAISettings, type FieldValidationState, type FileAttachment, type FlatElement, type FormField, FreeGridCanvas, type FreeGridCanvasProps, GridCell, type GridCellProps, JSONUIProvider, type JSONUIProviderProps, type LibraryAttachment, type MarkdownContextValue, MarkdownProvider, type MarkdownProviderProps, MarkdownText, type MarkdownTextProps, type MarkdownTheme$1 as MarkdownTheme, type PendingAIEdit, type PendingConfirmation$1 as PendingConfirmation, type PersistedAttachment, PlaceholderSkeleton, type PlanExecutionState, type PlanStep, type PlanStepStatus, type PlanSubtask, type PreservedTextSelection, type ProactivityMode, type QuestionPayload, type RenderTextOptions, Renderer, type RendererProps, ResizableWrapper, type ResizableWrapperProps, type ResizeHandle, type ResizeState, SelectableItem, type SelectableItemProps, type SelectionContextValue, type SelectionEventPort, type SelectionExportPort, type SelectionManagerPort, type SelectionPort, SelectionProvider, type SelectionProviderProps, type SkeletonProps, type ExecutionPlan as StorePlanType, type SuggestionChip, TextSelectionBadge, type TextSelectionBadgeProps, type TextSelectionInfo, type ToolProgress, type ToolProgressContextValue, type ToolProgressManagerPort, ToolProgressOverlay, type ToolProgressOverlayProps, ToolProgressProvider, type ToolProgressProviderProps, type TrackedAction, type UnifiedProgressContextValue, type UnifiedProgressItem, type UnifiedProgressItemType, UnifiedProgressProvider, type UnifiedProgressProviderProps, type UnifiedProgressState, type UnifiedProgressStatus, type UseLayoutManagerOptions, type UseLayoutManagerReturn, type UsePreservedSelectionReturn, type UseResizableOptions, type UseResizableReturn, type UseUIStreamOptions, type UseUIStreamReturn, type ValidationContextValue, type ValidationManagerPort, ValidationProvider, type ValidationProviderProps, type VisibilityContextValue, VisibilityProvider, type VisibilityProviderProps, type WorkspaceDocument, type WorkspaceLayout, buildConversationMessages, computeAddSelection, computeRangeSelection, computeRemoveSelection, computeReplaceSelection, computeToggleSelection, createLayout, createRendererFromCatalog, elementRendererPropsAreEqual, exportDeepSelectionAsJSON, exportDeepSelectionAsText, exportDeepSelectionForAI, exportSelectionForAI, flatToTree, formatActionsForPrompt, generateDeepSelectionSummary, generateSelectionSummary, getLayoutStyles, getResizeCursor, getSelectionCountByElement, getSelectionForElement, groupDeepSelectionsByElement, isDeepSelectionSelected, isFileAttachment, isItemSelected, isLibraryAttachment, isPlaceholderElement, selectPlanExecution, selectableItemProps, useAISettings, useAISettingsOptional, useAction, useActionContext, useActionHistory, useActionSubscriber, useActions, useActiveDocument, useActiveDocumentId, useActiveResearch, useActiveStep, useActiveToolProgress$1 as useActiveToolProgress, useActiveToolProgress as useActiveToolProgressStore, useAreSuggestionsEnabled, useAuthenticatedSources, useAutoSave, useCanvasActions, useCanvasContent, useCanvasInstance, useCanvasInstances, useCanvasIsStreaming, useCanvasVersion, useCitations, useData, useDataBinding, useDataValue, useDeepResearchEffortLevel, useDeepResearchEnabled, useDeepResearchSettings, useDeepSelectionActive, useDeepSelections, useDomainAutoSave, useEditMode, useEditable, useEditableContext, useElementActionTracker, useElementEdit, useFieldStates, useFieldValidation, useFormState, useGeneratingGoal, useGranularSelection, useIsAnyToolRunning, useIsElementEditing, useIsGenerating, useIsMobile, useIsPlanRunning, useIsProactivityEnabled, useIsResearchActive, useIsSmartParsingEnabled, useIsToolRunning, useIsValidating, useIsVisible, useIsWorkspaceOpen, useItemSelection, useLayoutManager, useLoadingActions, useMarkdown, usePendingAIEdits, usePendingConfirmations, usePlanExecution, usePlanProgress, usePreservedSelection, useProgressEvents, useRenderText, useResearchHistory, useResearchProgress, useResizable, useSelection, useStore, useTextSelection, useToolProgress, useToolProgressOptional, useUIStore, useUIStream, useUnifiedProgress, useUnifiedProgressOptional, useValidation, useVisibility, useWorkspaceActions, useWorkspaceDocuments, useWorkspaceLayout, useYoloMode };

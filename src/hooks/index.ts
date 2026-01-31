@@ -92,6 +92,14 @@ export { useHistory } from "./useHistory";
 // Deep Research hook
 export { useDeepResearch } from "./useDeepResearch";
 
+// Editable Text rendering hook
+export {
+  useRenderEditableText,
+  createRenderEditableText,
+  type RenderEditableTextFn,
+  type RenderEditableTextOptions,
+} from "./useRenderEditableText";
+
 // Utilities
 export { flatToTree } from "./flat-to-tree";
 export {

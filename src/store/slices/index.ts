@@ -73,3 +73,10 @@ export {
   type PendingAIEdit,
   type WorkspaceLayout,
 } from "./workspace";
+export {
+  createCanvasSlice,
+  type CanvasSlice,
+  type CanvasInstance,
+  type CanvasEditorState,
+  type CanvasPendingUpdate,
+} from "./canvas";

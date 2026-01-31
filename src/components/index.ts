@@ -34,6 +34,16 @@ export {
   type InteractionTrackingWrapperProps,
   type InteractionTrackingCallback,
 } from "./InteractionTrackingWrapper";
+export {
+  EditableText,
+  editableTextStyles,
+  type EditableTextProps,
+} from "./EditableText";
+export {
+  EditableWrapper,
+  editableWrapperStyles,
+  type EditableWrapperProps,
+} from "./EditableWrapper";
 
 // Canvas integration components
 export { CanvasBlock, type CanvasBlockProps } from "./Canvas";

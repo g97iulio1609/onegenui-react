@@ -129,6 +129,17 @@ export {
   type UnifiedProgressState,
 } from "./contexts/unified-progress";
 
+// Edit Mode Context (inline editing support)
+export {
+  EditModeProvider,
+  useEditMode,
+  useIsElementEditing,
+  useElementEdit,
+  type EditModeContextValue,
+  type EditModeProviderProps,
+  type ElementChange,
+} from "./contexts/edit-mode";
+
 // Renderer - Main UI rendering components
 export { Renderer, createRendererFromCatalog } from "./renderer.js";
 
@@ -287,6 +298,13 @@ export {
   useIsWorkspaceOpen,
   useActiveDocument,
   useWorkspaceActions,
+  // Canvas selectors
+  useCanvasInstances,
+  useCanvasInstance,
+  useCanvasContent,
+  useCanvasVersion,
+  useCanvasIsStreaming,
+  useCanvasActions,
   // Types
   type PlanExecutionState,
   type PlanStep,
@@ -297,6 +315,10 @@ export {
   type WorkspaceDocument,
   type WorkspaceLayout,
   type PendingAIEdit,
+  type CanvasSlice,
+  type CanvasInstance,
+  type CanvasEditorState,
+  type CanvasPendingUpdate,
   // Note: DeepSelectionInfo is exported from ./contexts/selection
 } from "./store";
 

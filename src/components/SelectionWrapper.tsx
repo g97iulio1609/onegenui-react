@@ -16,6 +16,7 @@ import {
   MOVE_TOLERANCE_PX,
 } from "../utils/selection";
 import { useSelection } from "../contexts/selection";
+import { useEditMode } from "../contexts/edit-mode";
 
 export interface SelectionWrapperProps {
   element: UIElement;
@@ -43,6 +44,9 @@ export function SelectionWrapper({
   const longPressCompletedRef = useRef(false);
   const onSelectableItemRef = useRef(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
+
+  // Get edit mode state
+  const { isEditing } = useEditMode();
 
   // Use context hook if available, with fallback for standalone usage
   let isDeepSelectionActive: () => boolean;
@@ -84,6 +88,19 @@ export function SelectionWrapper({
       if (!enabled || !onSelect) return;
       if (isIgnoredTarget(event.target)) return;
 
+      // In edit mode, check if the target is an editable text node
+      // If so, don't start selection - let the edit interaction handle it
+      if (isEditing) {
+        const target = event.target as HTMLElement;
+        const isEditableTarget =
+          target.closest(".editable-text-node") ||
+          target.closest("[data-editable='true']") ||
+          target.hasAttribute("contenteditable");
+        if (isEditableTarget) {
+          return; // Let EditableWrapper handle this interaction
+        }
+      }
+
       const wrapper = wrapperRef.current;
       if (!wrapper) return;
 
@@ -111,7 +128,7 @@ export function SelectionWrapper({
         document.body.classList.add("select-none");
       }
     },
-    [enabled, onSelect, isSelected],
+    [enabled, onSelect, isSelected, isEditing],
   );
 
   const handlePointerUp = useCallback(

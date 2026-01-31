@@ -32,6 +32,15 @@ export function isIgnoredTarget(target: EventTarget | null): boolean {
 
   if (target.closest("[data-jsonui-ignore-select]")) return true;
 
+  // Skip editable elements when in edit mode
+  if (
+    target.closest(".editable-text-node") ||
+    target.closest("[data-editable='true']") ||
+    target.closest("[contenteditable='true']")
+  ) {
+    return true;
+  }
+
   const tagName = target.tagName.toLowerCase();
   if (
     tagName === "input" ||

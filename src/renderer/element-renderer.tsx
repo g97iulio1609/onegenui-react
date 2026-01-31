@@ -1,12 +1,15 @@
 "use client";
 
-import React, { type ReactNode } from "react";
+import React, { type ReactNode, useMemo } from "react";
 import type { UIElement, UITree } from "@onegenui/core";
 import { useIsVisible } from "../contexts/visibility";
 import { useActions } from "../contexts/actions";
 import { useMarkdown } from "../contexts/markdown";
+import { useEditMode } from "../contexts/edit-mode";
 import { ResizableWrapper } from "../components/ResizableWrapper";
 import { SelectionWrapper } from "../components/SelectionWrapper";
+import { EditableWrapper } from "../components/EditableWrapper";
+import { createRenderEditableText } from "../hooks/useRenderEditableText";
 import type { ComponentRegistry, ComponentRenderer } from "./types";
 
 interface ElementRendererProps {
@@ -115,6 +118,13 @@ export const ElementRenderer = React.memo(function ElementRenderer({
   const isVisible = useIsVisible(element.visible);
   const { execute } = useActions();
   const { renderText } = useMarkdown();
+  const { isEditing } = useEditMode();
+
+  // Create renderEditableText function for this element (must be before conditionals)
+  const renderEditableText = useMemo(
+    () => createRenderEditableText(element, isEditing),
+    [element, isEditing],
+  );
 
   if (!isVisible) {
     return null;
@@ -171,6 +181,10 @@ export const ElementRenderer = React.memo(function ElementRenderer({
   });
 
   const isResizable = element.layout?.resizable !== false;
+  // All elements are editable by default when in edit mode
+  // unless explicitly disabled (editable: false) or locked
+  const isEditable =
+    isEditing && element.editable !== false && !element.locked;
 
   const content = (
     <Component
@@ -178,9 +192,17 @@ export const ElementRenderer = React.memo(function ElementRenderer({
       onAction={execute}
       loading={loading}
       renderText={renderText}
+      renderEditableText={renderEditableText}
     >
       {children}
     </Component>
+  );
+
+  // Wrap with EditableWrapper if editing is enabled (for automatic text detection)
+  const editableContent = isEditable ? (
+    <EditableWrapper element={element}>{content}</EditableWrapper>
+  ) : (
+    content
   );
 
   if (selectable && onElementSelect) {
@@ -192,7 +214,7 @@ export const ElementRenderer = React.memo(function ElementRenderer({
         delayMs={selectionDelayMs}
         isSelected={selectedKey === element.key}
       >
-        {content}
+        {editableContent}
       </SelectionWrapper>
     );
 
@@ -214,10 +236,10 @@ export const ElementRenderer = React.memo(function ElementRenderer({
   if (isResizable) {
     return (
       <ResizableWrapper element={element} onResize={onResize}>
-        {content}
+        {editableContent}
       </ResizableWrapper>
     );
   }
 
-  return content;
+  return editableContent;
 }, elementRendererPropsAreEqual);

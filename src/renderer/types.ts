@@ -23,6 +23,25 @@ export interface ComponentRenderProps<P = Record<string, unknown>> {
       style?: CSSProperties;
     },
   ) => ReactNode;
+  /**
+   * Render editable text. When in edit mode, returns an editable span.
+   * When not in edit mode, returns the text as-is (or uses renderText if markdown).
+   * Use this for props that should be inline-editable.
+   *
+   * @param propName - The prop name (e.g., "title", "description")
+   * @param value - The text value
+   * @param options - Additional options (className, as tag, multiline)
+   */
+  renderEditableText?: (
+    propName: string,
+    value: string | null | undefined,
+    options?: {
+      className?: string;
+      as?: "span" | "div" | "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
+      multiline?: boolean;
+      placeholder?: string;
+    },
+  ) => ReactNode;
   /** Execute an action */
   onAction?: (action: Action) => void;
   /** Whether the parent is loading */

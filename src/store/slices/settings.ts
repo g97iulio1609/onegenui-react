@@ -1,14 +1,22 @@
 /**
  * Settings Slice - AI settings, theme, preferences
+ * 
+ * NOTE: Model selection is now centralized server-side in `lib/services/model-config.ts`.
+ * The AIModel type here is kept for backward compatibility but new code should use
+ * the server-side `getModelForTask()` function.
  */
 import type { SliceCreator } from "../types";
 
 export type ThemeMode = "light" | "dark" | "system";
+
+/** @deprecated Use server-side model config from `lib/services/model-config.ts` */
 export type AIModel =
-  | "gemini-2.0-flash"
-  | "gemini-2.5-pro"
-  | "gpt-4o"
-  | "claude-3.5-sonnet";
+  | "gemini-3-flash-preview"
+  | "gemini-3-pro-preview"
+  | "gpt-5.2"
+  | "claude-haiku-4.5"
+  | "claude-sonnet-4.5"
+  | "claude-opus-4.5";
 
 export interface AISettings {
   model: AIModel;
@@ -36,7 +44,7 @@ export interface SettingsSlice {
 }
 
 const defaultAISettings: AISettings = {
-  model: "gemini-2.0-flash",
+  model: "gemini-3-flash-preview",
   temperature: 0.7,
   maxTokens: 8192,
   streamingEnabled: true,
