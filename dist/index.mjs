@@ -4349,49 +4349,168 @@ import {
   useContext as useContext13,
   useState as useState5,
   useCallback as useCallback17,
-  useMemo as useMemo14
+  useMemo as useMemo14,
+  useRef as useRef7,
+  useEffect as useEffect10
 } from "react";
 import { jsx as jsx15 } from "react/jsx-runtime";
 var EditModeContext = createContext13(null);
 function EditModeProvider({
   children,
   initialEditing = false,
-  onCommit
+  onCommit,
+  autoSaveDelay = 1500,
+  maxHistoryItems = 50
 }) {
   const [isEditing, setIsEditing] = useState5(initialEditing);
   const [focusedKey, setFocusedKey] = useState5(null);
   const [pendingChanges, setPendingChanges] = useState5(/* @__PURE__ */ new Map());
+  const [previousValues, setPreviousValues] = useState5(/* @__PURE__ */ new Map());
+  const [history, setHistory] = useState5([]);
+  const [historyIndex, setHistoryIndex] = useState5(-1);
+  const autoSaveTimerRef = useRef7(null);
+  useEffect10(() => {
+    return () => {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+      }
+    };
+  }, []);
   const enableEditing = useCallback17(() => setIsEditing(true), []);
   const disableEditing = useCallback17(() => {
     setIsEditing(false);
     setFocusedKey(null);
-  }, []);
+    if (pendingChanges.size > 0) {
+    }
+  }, [pendingChanges.size]);
   const toggleEditing = useCallback17(() => setIsEditing((prev) => !prev), []);
   const recordChange = useCallback17(
-    (elementKey, propName, newValue) => {
+    (elementKey, propName, newValue, previousValue) => {
       setPendingChanges((prev) => {
         const next = new Map(prev);
         const existing = next.get(elementKey) || {};
         next.set(elementKey, { ...existing, [propName]: newValue });
         return next;
       });
+      if (previousValue !== void 0) {
+        setPreviousValues((prev) => {
+          const next = new Map(prev);
+          const existing = next.get(elementKey) || {};
+          if (!(propName in existing)) {
+            next.set(elementKey, { ...existing, [propName]: previousValue });
+          }
+          return next;
+        });
+      }
+      if (autoSaveDelay > 0) {
+        if (autoSaveTimerRef.current) {
+          clearTimeout(autoSaveTimerRef.current);
+        }
+        autoSaveTimerRef.current = setTimeout(() => {
+          commitChangesRef.current?.();
+        }, autoSaveDelay);
+      }
     },
-    []
+    [autoSaveDelay]
   );
+  const commitChangesRef = useRef7(void 0);
   const commitChanges = useCallback17(() => {
     if (pendingChanges.size === 0) return;
-    const changes = [];
+    const propChanges = [];
+    const elementChanges = [];
+    const now = Date.now();
     pendingChanges.forEach((props, key) => {
-      changes.push({ key, props });
+      const prevProps = previousValues.get(key) || {};
+      for (const [propName, newValue] of Object.entries(props)) {
+        propChanges.push({
+          elementKey: key,
+          propName,
+          oldValue: prevProps[propName],
+          newValue
+        });
+      }
+      elementChanges.push({
+        key,
+        props,
+        previousProps: prevProps,
+        timestamp: now
+      });
     });
+    setHistory((prev) => {
+      const newHistory = prev.slice(0, historyIndex + 1);
+      newHistory.push({ changes: propChanges, timestamp: now });
+      if (newHistory.length > maxHistoryItems) {
+        return newHistory.slice(-maxHistoryItems);
+      }
+      return newHistory;
+    });
+    setHistoryIndex((prev) => prev + 1);
     if (onCommit) {
-      onCommit(changes);
+      onCommit(elementChanges);
     }
     setPendingChanges(/* @__PURE__ */ new Map());
-  }, [pendingChanges, onCommit]);
+    setPreviousValues(/* @__PURE__ */ new Map());
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+  }, [pendingChanges, previousValues, historyIndex, maxHistoryItems, onCommit]);
+  commitChangesRef.current = commitChanges;
   const discardChanges = useCallback17(() => {
     setPendingChanges(/* @__PURE__ */ new Map());
+    setPreviousValues(/* @__PURE__ */ new Map());
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
   }, []);
+  const undo = useCallback17(() => {
+    if (historyIndex < 0) return;
+    const item = history[historyIndex];
+    if (!item) return;
+    const elementMap = /* @__PURE__ */ new Map();
+    for (const change of item.changes) {
+      const existing = elementMap.get(change.elementKey) || { props: {}, previousProps: {} };
+      existing.props[change.propName] = change.oldValue;
+      existing.previousProps[change.propName] = change.newValue;
+      elementMap.set(change.elementKey, existing);
+    }
+    const undoChanges = Array.from(elementMap.entries()).map(([key, data]) => ({
+      key,
+      props: data.props,
+      previousProps: data.previousProps,
+      timestamp: Date.now()
+    }));
+    if (onCommit) {
+      onCommit(undoChanges);
+    }
+    setHistoryIndex((prev) => prev - 1);
+  }, [history, historyIndex, onCommit]);
+  const redo = useCallback17(() => {
+    if (historyIndex >= history.length - 1) return;
+    const item = history[historyIndex + 1];
+    if (!item) return;
+    const elementMap = /* @__PURE__ */ new Map();
+    for (const change of item.changes) {
+      const existing = elementMap.get(change.elementKey) || { props: {}, previousProps: {} };
+      existing.props[change.propName] = change.newValue;
+      existing.previousProps[change.propName] = change.oldValue;
+      elementMap.set(change.elementKey, existing);
+    }
+    const redoChanges = Array.from(elementMap.entries()).map(([key, data]) => ({
+      key,
+      props: data.props,
+      previousProps: data.previousProps,
+      timestamp: Date.now()
+    }));
+    if (onCommit) {
+      onCommit(redoChanges);
+    }
+    setHistoryIndex((prev) => prev + 1);
+  }, [history, historyIndex, onCommit]);
+  const canUndo = historyIndex >= 0;
+  const canRedo = historyIndex < history.length - 1;
+  const pendingCount = pendingChanges.size;
   const value = useMemo14(
     () => ({
       isEditing,
@@ -4404,6 +4523,12 @@ function EditModeProvider({
       recordChange,
       commitChanges,
       discardChanges,
+      undo,
+      redo,
+      canUndo,
+      canRedo,
+      history,
+      pendingCount,
       onCommit
     }),
     [
@@ -4417,6 +4542,12 @@ function EditModeProvider({
       recordChange,
       commitChanges,
       discardChanges,
+      undo,
+      redo,
+      canUndo,
+      canRedo,
+      history,
+      pendingCount,
       onCommit
     ]
   );
@@ -4442,7 +4573,15 @@ function useEditMode() {
       commitChanges: () => {
       },
       discardChanges: () => {
-      }
+      },
+      undo: () => {
+      },
+      redo: () => {
+      },
+      canUndo: false,
+      canRedo: false,
+      history: [],
+      pendingCount: 0
     };
   }
   return context;
@@ -4475,8 +4614,8 @@ function useElementEdit(elementKey) {
 
 // src/components/InteractionTrackingWrapper.tsx
 import {
-  useEffect as useEffect10,
-  useRef as useRef7,
+  useEffect as useEffect11,
+  useRef as useRef8,
   createContext as createContext14,
   useContext as useContext14
 } from "react";
@@ -4604,14 +4743,14 @@ function InteractionTrackingWrapper({
   tree,
   onInteraction
 }) {
-  const containerRef = useRef7(null);
+  const containerRef = useRef8(null);
   let isDeepSelectionActive;
   try {
     const selectionContext = useSelection();
     isDeepSelectionActive = selectionContext.isDeepSelectionActive;
   } catch {
   }
-  useEffect10(() => {
+  useEffect11(() => {
     const container = containerRef.current;
     if (!container) return;
     const handleInteraction = (event) => {
@@ -4647,7 +4786,7 @@ function InteractionTrackingWrapper({
 import React16, { useMemo as useMemo18 } from "react";
 
 // src/components/ResizableWrapper.tsx
-import React12, { useRef as useRef9, useCallback as useCallback19, useMemo as useMemo15 } from "react";
+import React12, { useRef as useRef10, useCallback as useCallback19, useMemo as useMemo15 } from "react";
 
 // src/hooks/resizable/types.ts
 var MOBILE_BREAKPOINT = 768;
@@ -4728,7 +4867,7 @@ function getResizeCursor(handle) {
 }
 
 // src/hooks/resizable/hook.ts
-import { useState as useState6, useCallback as useCallback18, useRef as useRef8, useEffect as useEffect11 } from "react";
+import { useState as useState6, useCallback as useCallback18, useRef as useRef9, useEffect as useEffect12 } from "react";
 function useResizable({
   initialSize,
   config,
@@ -4749,10 +4888,10 @@ function useResizable({
     activeHandle: null
   });
   const [hasResized, setHasResized] = useState6(hasExplicitSize);
-  const dragStart = useRef8({ x: 0, y: 0, width: 0, height: 0 });
-  const containerRef = useRef8(null);
-  const lastBreakpointRef = useRef8(null);
-  useEffect11(() => {
+  const dragStart = useRef9({ x: 0, y: 0, width: 0, height: 0 });
+  const containerRef = useRef9(null);
+  const lastBreakpointRef = useRef9(null);
+  useEffect12(() => {
     if (typeof window === "undefined") return;
     const checkBreakpoint = () => {
       const currentBreakpoint = window.innerWidth <= MOBILE_BREAKPOINT ? "mobile" : "desktop";
@@ -4840,7 +4979,7 @@ function useResizable({
     });
     setHasResized(hasExplicitSize);
   }, [initialWidth, initialHeight, hasExplicitSize]);
-  useEffect11(() => {
+  useEffect12(() => {
     if (!state.isResizing || !state.activeHandle) return;
     const handleMove = (e) => {
       const clientX = "touches" in e ? e.touches[0]?.clientX ?? 0 : e.clientX;
@@ -4999,7 +5138,7 @@ function ResizableWrapper({
   enabled: overrideEnabled,
   showHandles = false
 }) {
-  const wrapperRef = useRef9(null);
+  const wrapperRef = useRef10(null);
   const [isHovered, setIsHovered] = React12.useState(false);
   const layout = overrideLayout ?? element.layout;
   const resizableConfig = layout?.resizable;
@@ -5115,12 +5254,12 @@ function ResizableWrapper({
 import {
   useCallback as useCallback20,
   useState as useState8,
-  useRef as useRef11,
-  useEffect as useEffect13
+  useRef as useRef12,
+  useEffect as useEffect14
 } from "react";
 
 // src/components/LongPressIndicator.tsx
-import { useState as useState7, useRef as useRef10, useEffect as useEffect12 } from "react";
+import { useState as useState7, useRef as useRef11, useEffect as useEffect13 } from "react";
 import { createPortal } from "react-dom";
 import { jsx as jsx18, jsxs as jsxs4 } from "react/jsx-runtime";
 var RING_SIZE = 48;
@@ -5134,11 +5273,11 @@ function LongPressIndicator({
   onComplete
 }) {
   const [mounted, setMounted] = useState7(false);
-  const timerRef = useRef10(null);
-  const startTimeRef = useRef10(0);
-  const animationFrameRef = useRef10(null);
-  const circleRef = useRef10(null);
-  useEffect12(() => {
+  const timerRef = useRef11(null);
+  const startTimeRef = useRef11(0);
+  const animationFrameRef = useRef11(null);
+  const circleRef = useRef11(null);
+  useEffect13(() => {
     setMounted(true);
     startTimeRef.current = performance.now();
     const animate = () => {
@@ -5236,10 +5375,10 @@ function SelectionWrapper({
 }) {
   const [pressing, setPressing] = useState8(false);
   const [pressPosition, setPressPosition] = useState8(null);
-  const startPositionRef = useRef11(null);
-  const longPressCompletedRef = useRef11(false);
-  const onSelectableItemRef = useRef11(false);
-  const wrapperRef = useRef11(null);
+  const startPositionRef = useRef12(null);
+  const longPressCompletedRef = useRef12(false);
+  const onSelectableItemRef = useRef12(false);
+  const wrapperRef = useRef12(null);
   const { isEditing } = useEditMode();
   let isDeepSelectionActive;
   try {
@@ -5331,7 +5470,7 @@ function SelectionWrapper({
     },
     []
   );
-  useEffect13(() => {
+  useEffect14(() => {
     return () => {
       if (typeof document !== "undefined") {
         document.body.style.userSelect = "";
@@ -5374,13 +5513,13 @@ function SelectionWrapper({
 import React15, {
   memo as memo3,
   useCallback as useCallback30,
-  useRef as useRef18,
+  useRef as useRef19,
   useState as useState15,
-  useEffect as useEffect19
+  useEffect as useEffect20
 } from "react";
 
 // src/hooks/useUIStream.ts
-import { useState as useState10, useCallback as useCallback22, useRef as useRef14, useEffect as useEffect15, useMemo as useMemo16 } from "react";
+import { useState as useState10, useCallback as useCallback22, useRef as useRef15, useEffect as useEffect16, useMemo as useMemo16 } from "react";
 import { useShallow as useShallow4 } from "zustand/shallow";
 
 // src/hooks/patches/structural-sharing.ts
@@ -6123,7 +6262,7 @@ function processDocumentIndex(uiComponent, currentIndex) {
 }
 
 // src/hooks/ui-stream/use-store-refs.ts
-import { useRef as useRef13, useEffect as useEffect14 } from "react";
+import { useRef as useRef14, useEffect as useEffect15 } from "react";
 function useStoreRefs() {
   const storeSetUITree = useStore((s) => s.setUITree);
   const storeClearUITree = useStore((s) => s.clearUITree);
@@ -6138,17 +6277,17 @@ function useStoreRefs() {
   const setLevelStarted = useStore((s) => s.setLevelStarted);
   const setOrchestrationDone = useStore((s) => s.setOrchestrationDone);
   const resetPlanExecution = useStore((s) => s.resetPlanExecution);
-  const addProgressRef = useRef13(addProgressEvent);
-  useEffect14(() => {
+  const addProgressRef = useRef14(addProgressEvent);
+  useEffect15(() => {
     addProgressRef.current = addProgressEvent;
   }, [addProgressEvent]);
-  const storeRef = useRef13({
+  const storeRef = useRef14({
     setUITree: storeSetUITree,
     bumpTreeVersion: storeBumpTreeVersion,
     setTreeStreaming: storeSetTreeStreaming,
     clearUITree: storeClearUITree
   });
-  useEffect14(() => {
+  useEffect15(() => {
     storeRef.current = {
       setUITree: storeSetUITree,
       bumpTreeVersion: storeBumpTreeVersion,
@@ -6156,7 +6295,7 @@ function useStoreRefs() {
       clearUITree: storeClearUITree
     };
   }, [storeSetUITree, storeBumpTreeVersion, storeSetTreeStreaming, storeClearUITree]);
-  const planStoreRef = useRef13({
+  const planStoreRef = useRef14({
     setPlanCreated,
     setStepStarted,
     setStepDone,
@@ -6165,7 +6304,7 @@ function useStoreRefs() {
     setLevelStarted,
     setOrchestrationDone
   });
-  useEffect14(() => {
+  useEffect15(() => {
     planStoreRef.current = {
       setPlanCreated,
       setStepStarted,
@@ -6184,8 +6323,8 @@ function useStoreRefs() {
     setLevelStarted,
     setOrchestrationDone
   ]);
-  const storeSetUITreeRef = useRef13(storeSetUITree);
-  useEffect14(() => {
+  const storeSetUITreeRef = useRef14(storeSetUITree);
+  useEffect15(() => {
     storeSetUITreeRef.current = storeSetUITree;
   }, [storeSetUITree]);
   return {
@@ -6498,8 +6637,8 @@ function useUIStream({
     return { ...storeTree, elements: { ...storeTree.elements } };
   }, [storeTree, treeVersion]);
   const [conversation, setConversation] = useState10([]);
-  const treeRef = useRef14(null);
-  useEffect15(() => {
+  const treeRef = useRef15(null);
+  useEffect16(() => {
     treeRef.current = tree;
   }, [tree, treeVersion]);
   const setTree = useCallback22((newTree) => {
@@ -6521,13 +6660,13 @@ function useUIStream({
     setHistory,
     setHistoryIndex
   } = useHistory(tree, conversation, setTree, setConversation, treeRef);
-  useEffect15(() => {
+  useEffect16(() => {
     treeRef.current = tree;
   }, [tree]);
   const [isStreaming, setIsStreaming] = useState10(false);
   const [error, setError] = useState10(null);
-  const abortControllerRef = useRef14(null);
-  const sendingRef = useRef14(false);
+  const abortControllerRef = useRef15(null);
+  const sendingRef = useRef15(false);
   const clear = useCallback22(() => {
     setTree(null);
     setConversation([]);
@@ -6850,7 +6989,7 @@ function useUIStream({
     },
     [conversation, send]
   );
-  useEffect15(() => {
+  useEffect16(() => {
     return () => {
       abortControllerRef.current?.abort();
     };
@@ -6949,10 +7088,10 @@ function useTextSelection() {
 }
 
 // src/hooks/useIsMobile.ts
-import { useState as useState11, useEffect as useEffect16 } from "react";
+import { useState as useState11, useEffect as useEffect17 } from "react";
 function useIsMobile(breakpoint = 768) {
   const [isMobile, setIsMobile] = useState11(false);
-  useEffect16(() => {
+  useEffect17(() => {
     if (typeof window === "undefined") return;
     const media = window.matchMedia(`(max-width: ${breakpoint}px)`);
     const update = () => setIsMobile(media.matches);
@@ -6964,12 +7103,12 @@ function useIsMobile(breakpoint = 768) {
 }
 
 // src/hooks/usePreservedSelection.ts
-import { useState as useState12, useCallback as useCallback24, useRef as useRef15, useEffect as useEffect17 } from "react";
+import { useState as useState12, useCallback as useCallback24, useRef as useRef16, useEffect as useEffect18 } from "react";
 function usePreservedSelection() {
   const [preserved, setPreserved] = useState12(
     null
   );
-  const rangeRef = useRef15(null);
+  const rangeRef = useRef16(null);
   const preserve = useCallback24(async () => {
     if (typeof window === "undefined") return;
     const selection = window.getSelection();
@@ -7035,7 +7174,7 @@ function usePreservedSelection() {
       return false;
     }
   }, [preserved]);
-  useEffect17(() => {
+  useEffect18(() => {
     if (!preserved) return;
     const timeout = setTimeout(
       () => {
@@ -7144,16 +7283,16 @@ function useLayoutManager({
 import { useState as useState13, useCallback as useCallback26 } from "react";
 
 // src/hooks/useDeepResearch.ts
-import { useCallback as useCallback27, useRef as useRef16 } from "react";
+import { useCallback as useCallback27, useRef as useRef17 } from "react";
 
 // src/hooks/useRenderEditableText.tsx
 import React14, { useCallback as useCallback29 } from "react";
 
 // src/components/EditableText.tsx
 import {
-  useRef as useRef17,
+  useRef as useRef18,
   useCallback as useCallback28,
-  useEffect as useEffect18,
+  useEffect as useEffect19,
   useState as useState14,
   memo as memo2
 } from "react";
@@ -7170,10 +7309,10 @@ var EditableText = memo2(function EditableText2({
   style,
   onValueChange
 }) {
-  const ref = useRef17(null);
+  const ref = useRef18(null);
   const [localValue, setLocalValue] = useState14(value);
   const { isEditing, isFocused, handleChange, handleFocus } = useElementEdit(elementKey);
-  useEffect18(() => {
+  useEffect19(() => {
     setLocalValue(value);
     if (ref.current && !isFocused) {
       ref.current.textContent = value || "";
@@ -7327,12 +7466,12 @@ var EditableTextNode = memo3(function EditableTextNode2({
   isMobile,
   onTextChange
 }) {
-  const ref = useRef18(null);
+  const ref = useRef19(null);
   const { isEditing, recordChange, focusedKey, setFocusedKey } = useEditMode();
   const [localValue, setLocalValue] = useState15(value);
   const [isActive, setIsActive] = useState15(false);
   const canEdit = isEditing && (isMobile ? focusedKey === elementKey : true);
-  useEffect19(() => {
+  useEffect20(() => {
     setLocalValue(value);
   }, [value]);
   const handleClick = useCallback30(
@@ -7444,7 +7583,7 @@ var EditableWrapper = memo3(function EditableWrapper2({
 }) {
   const isMobile = useIsMobile();
   const { isEditing, focusedKey, setFocusedKey, recordChange } = useEditMode();
-  const containerRef = useRef18(null);
+  const containerRef = useRef19(null);
   const [isActiveEditing, setIsActiveEditing] = useState15(false);
   const isElementEditable = forceEditable !== void 0 ? forceEditable : element.editable !== false;
   if (!isEditing || !isElementEditable || element.locked) {
@@ -8413,7 +8552,7 @@ function createLayout(options = {}) {
 }
 
 // src/components/ToolProgressOverlay.tsx
-import { memo as memo6, useEffect as useEffect20, useState as useState17 } from "react";
+import { memo as memo6, useEffect as useEffect21, useState as useState17 } from "react";
 
 // src/components/tool-progress/icons.tsx
 import { jsx as jsx33, jsxs as jsxs11 } from "react/jsx-runtime";
@@ -8743,7 +8882,7 @@ var ToolProgressOverlay = memo6(function ToolProgressOverlay2({
   const activeProgress = useActiveToolProgress2();
   const isRunning = useIsToolRunning();
   const [mounted, setMounted] = useState17(false);
-  useEffect20(() => {
+  useEffect21(() => {
     setMounted(true);
   }, []);
   const shouldShow = show ?? isRunning;
@@ -8781,7 +8920,7 @@ var ToolProgressOverlay = memo6(function ToolProgressOverlay2({
 });
 
 // src/components/Canvas/CanvasBlock.tsx
-import { memo as memo7, useCallback as useCallback32, useState as useState18, useEffect as useEffect21, useMemo as useMemo21 } from "react";
+import { memo as memo7, useCallback as useCallback32, useState as useState18, useEffect as useEffect22, useMemo as useMemo21 } from "react";
 import { jsx as jsx36, jsxs as jsxs14 } from "react/jsx-runtime";
 function CanvasBlockSkeleton() {
   return /* @__PURE__ */ jsx36("div", { className: "w-full min-h-[200px] bg-zinc-900/50 rounded-xl border border-white/5 flex items-center justify-center", children: /* @__PURE__ */ jsx36("div", { className: "text-zinc-500 text-sm", children: "Loading editor..." }) });
@@ -8816,7 +8955,7 @@ var CanvasBlock = memo7(function CanvasBlock2({
     }
     return null;
   }, [initialContent, markdown, images]);
-  useEffect21(() => {
+  useEffect22(() => {
     if (processedContent !== void 0 && processedContent !== null) {
       setContent(processedContent);
       setEditorKey((k) => k + 1);

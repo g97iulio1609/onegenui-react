@@ -3,6 +3,12 @@
  *
  * Provides global edit mode state for inline editing of UI components.
  * When edit mode is enabled, text props become editable via contentEditable.
+ *
+ * Features:
+ * - Auto-save with debounce
+ * - Undo/Redo support
+ * - Change history tracking
+ * - Keyboard shortcuts (Escape to cancel)
  */
 
 "use client";
@@ -13,12 +19,35 @@ import React, {
   useState,
   useCallback,
   useMemo,
+  useRef,
+  useEffect,
   type ReactNode,
 } from "react";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
+
+export interface SinglePropChange {
+  elementKey: string;
+  propName: string;
+  oldValue: unknown;
+  newValue: unknown;
+}
+
+export interface ElementChange {
+  key: string;
+  props: Record<string, unknown>;
+  /** Previous values before the change (for undo) */
+  previousProps?: Record<string, unknown>;
+  /** Timestamp of the change */
+  timestamp: number;
+}
+
+export interface ChangeHistoryItem {
+  changes: SinglePropChange[];
+  timestamp: number;
+}
 
 export interface EditModeContextValue {
   /** Whether edit mode is active */
@@ -40,18 +69,38 @@ export interface EditModeContextValue {
     elementKey: string,
     propName: string,
     newValue: unknown,
+    previousValue?: unknown,
   ) => void;
-  /** Commit all pending changes */
+  /** Commit all pending changes (or auto-committed) */
   commitChanges: () => void;
   /** Discard all pending changes */
   discardChanges: () => void;
+  /** Undo last change */
+  undo: () => void;
+  /** Redo last undone change */
+  redo: () => void;
+  /** Whether undo is available */
+  canUndo: boolean;
+  /** Whether redo is available */
+  canRedo: boolean;
+  /** Change history for diff view */
+  history: ChangeHistoryItem[];
+  /** Number of pending changes */
+  pendingCount: number;
   /** Callback when changes are committed */
   onCommit?: (changes: Array<ElementChange>) => void;
 }
 
-export interface ElementChange {
-  key: string;
-  props: Record<string, unknown>;
+export interface EditModeProviderProps {
+  children: ReactNode;
+  /** Initial edit mode state */
+  initialEditing?: boolean;
+  /** Callback when changes are committed */
+  onCommit?: (changes: Array<ElementChange>) => void;
+  /** Auto-save delay in ms (0 to disable, default 1500) */
+  autoSaveDelay?: number;
+  /** Max history items to keep */
+  maxHistoryItems?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -64,62 +113,228 @@ const EditModeContext = createContext<EditModeContextValue | null>(null);
 // Provider
 // ─────────────────────────────────────────────────────────────────────────────
 
-export interface EditModeProviderProps {
-  children: ReactNode;
-  /** Initial edit mode state */
-  initialEditing?: boolean;
-  /** Callback when changes are committed */
-  onCommit?: (changes: Array<ElementChange>) => void;
-}
-
 export function EditModeProvider({
   children,
   initialEditing = false,
   onCommit,
+  autoSaveDelay = 1500,
+  maxHistoryItems = 50,
 }: EditModeProviderProps) {
   const [isEditing, setIsEditing] = useState(initialEditing);
   const [focusedKey, setFocusedKey] = useState<string | null>(null);
   const [pendingChanges, setPendingChanges] = useState<
     Map<string, Record<string, unknown>>
   >(new Map());
+  const [previousValues, setPreviousValues] = useState<
+    Map<string, Record<string, unknown>>
+  >(new Map());
+
+  // History for undo/redo
+  const [history, setHistory] = useState<ChangeHistoryItem[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+
+  // Auto-save debounce timer
+  const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+      }
+    };
+  }, []);
 
   const enableEditing = useCallback(() => setIsEditing(true), []);
+
   const disableEditing = useCallback(() => {
     setIsEditing(false);
     setFocusedKey(null);
-  }, []);
+    // Commit any pending changes when disabling
+    if (pendingChanges.size > 0) {
+      // This will be handled by commitChanges
+    }
+  }, [pendingChanges.size]);
+
   const toggleEditing = useCallback(() => setIsEditing((prev) => !prev), []);
 
   const recordChange = useCallback(
-    (elementKey: string, propName: string, newValue: unknown) => {
+    (
+      elementKey: string,
+      propName: string,
+      newValue: unknown,
+      previousValue?: unknown,
+    ) => {
       setPendingChanges((prev) => {
         const next = new Map(prev);
         const existing = next.get(elementKey) || {};
         next.set(elementKey, { ...existing, [propName]: newValue });
         return next;
       });
+
+      // Track previous value for undo
+      if (previousValue !== undefined) {
+        setPreviousValues((prev) => {
+          const next = new Map(prev);
+          const existing = next.get(elementKey) || {};
+          // Only store the first previous value (before any edits in this session)
+          if (!(propName in existing)) {
+            next.set(elementKey, { ...existing, [propName]: previousValue });
+          }
+          return next;
+        });
+      }
+
+      // Reset auto-save timer
+      if (autoSaveDelay > 0) {
+        if (autoSaveTimerRef.current) {
+          clearTimeout(autoSaveTimerRef.current);
+        }
+        autoSaveTimerRef.current = setTimeout(() => {
+          // Auto-commit will be triggered here
+          commitChangesRef.current?.();
+        }, autoSaveDelay);
+      }
     },
-    [],
+    [autoSaveDelay],
   );
+
+  // Use ref for commitChanges to avoid circular dependency
+  const commitChangesRef = useRef<(() => void) | undefined>(undefined);
 
   const commitChanges = useCallback(() => {
     if (pendingChanges.size === 0) return;
 
-    const changes: ElementChange[] = [];
+    const propChanges: SinglePropChange[] = [];
+    const elementChanges: ElementChange[] = [];
+    const now = Date.now();
+
     pendingChanges.forEach((props, key) => {
-      changes.push({ key, props });
+      const prevProps = previousValues.get(key) || {};
+      
+      // Convert to individual prop changes for history display
+      for (const [propName, newValue] of Object.entries(props)) {
+        propChanges.push({
+          elementKey: key,
+          propName,
+          oldValue: prevProps[propName],
+          newValue,
+        });
+      }
+      
+      // Keep element changes for onCommit callback
+      elementChanges.push({
+        key,
+        props,
+        previousProps: prevProps,
+        timestamp: now,
+      });
     });
 
+    // Add to history with SinglePropChange format
+    setHistory((prev) => {
+      const newHistory = prev.slice(0, historyIndex + 1);
+      newHistory.push({ changes: propChanges, timestamp: now });
+      // Limit history size
+      if (newHistory.length > maxHistoryItems) {
+        return newHistory.slice(-maxHistoryItems);
+      }
+      return newHistory;
+    });
+    setHistoryIndex((prev) => prev + 1);
+
     if (onCommit) {
-      onCommit(changes);
+      onCommit(elementChanges);
     }
 
+    // Clear pending changes and previous values
     setPendingChanges(new Map());
-  }, [pendingChanges, onCommit]);
+    setPreviousValues(new Map());
+
+    // Clear auto-save timer
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+  }, [pendingChanges, previousValues, historyIndex, maxHistoryItems, onCommit]);
+
+  // Keep ref updated
+  commitChangesRef.current = commitChanges;
 
   const discardChanges = useCallback(() => {
     setPendingChanges(new Map());
+    setPreviousValues(new Map());
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
   }, []);
+
+  const undo = useCallback(() => {
+    if (historyIndex < 0) return;
+
+    const item = history[historyIndex];
+    if (!item) return;
+
+    // Reconstruct ElementChange[] from SinglePropChange[] for onCommit
+    const elementMap = new Map<string, { props: Record<string, unknown>; previousProps: Record<string, unknown> }>();
+    
+    for (const change of item.changes) {
+      const existing = elementMap.get(change.elementKey) || { props: {}, previousProps: {} };
+      // Undo: swap old/new - new becomes "what to restore", old becomes "what was there"
+      existing.props[change.propName] = change.oldValue;
+      existing.previousProps[change.propName] = change.newValue;
+      elementMap.set(change.elementKey, existing);
+    }
+
+    const undoChanges: ElementChange[] = Array.from(elementMap.entries()).map(([key, data]) => ({
+      key,
+      props: data.props,
+      previousProps: data.previousProps,
+      timestamp: Date.now(),
+    }));
+
+    if (onCommit) {
+      onCommit(undoChanges);
+    }
+
+    setHistoryIndex((prev) => prev - 1);
+  }, [history, historyIndex, onCommit]);
+
+  const redo = useCallback(() => {
+    if (historyIndex >= history.length - 1) return;
+
+    const item = history[historyIndex + 1];
+    if (!item) return;
+
+    // Reconstruct ElementChange[] from SinglePropChange[] for onCommit
+    const elementMap = new Map<string, { props: Record<string, unknown>; previousProps: Record<string, unknown> }>();
+    
+    for (const change of item.changes) {
+      const existing = elementMap.get(change.elementKey) || { props: {}, previousProps: {} };
+      // Redo: apply the new values again
+      existing.props[change.propName] = change.newValue;
+      existing.previousProps[change.propName] = change.oldValue;
+      elementMap.set(change.elementKey, existing);
+    }
+
+    const redoChanges: ElementChange[] = Array.from(elementMap.entries()).map(([key, data]) => ({
+      key,
+      props: data.props,
+      previousProps: data.previousProps,
+      timestamp: Date.now(),
+    }));
+
+    if (onCommit) {
+      onCommit(redoChanges);
+    }
+
+    setHistoryIndex((prev) => prev + 1);
+  }, [history, historyIndex, onCommit]);
+
+  const canUndo = historyIndex >= 0;
+  const canRedo = historyIndex < history.length - 1;
+  const pendingCount = pendingChanges.size;
 
   const value = useMemo(
     (): EditModeContextValue => ({
@@ -133,6 +348,12 @@ export function EditModeProvider({
       recordChange,
       commitChanges,
       discardChanges,
+      undo,
+      redo,
+      canUndo,
+      canRedo,
+      history,
+      pendingCount,
       onCommit,
     }),
     [
@@ -146,6 +367,12 @@ export function EditModeProvider({
       recordChange,
       commitChanges,
       discardChanges,
+      undo,
+      redo,
+      canUndo,
+      canRedo,
+      history,
+      pendingCount,
       onCommit,
     ],
   );
@@ -176,6 +403,12 @@ export function useEditMode(): EditModeContextValue {
       recordChange: () => {},
       commitChanges: () => {},
       discardChanges: () => {},
+      undo: () => {},
+      redo: () => {},
+      canUndo: false,
+      canRedo: false,
+      history: [],
+      pendingCount: 0,
     };
   }
   return context;

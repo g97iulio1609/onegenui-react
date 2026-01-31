@@ -4462,42 +4462,159 @@ var EditModeContext = (0, import_react22.createContext)(null);
 function EditModeProvider({
   children,
   initialEditing = false,
-  onCommit
+  onCommit,
+  autoSaveDelay = 1500,
+  maxHistoryItems = 50
 }) {
   const [isEditing, setIsEditing] = (0, import_react22.useState)(initialEditing);
   const [focusedKey, setFocusedKey] = (0, import_react22.useState)(null);
   const [pendingChanges, setPendingChanges] = (0, import_react22.useState)(/* @__PURE__ */ new Map());
+  const [previousValues, setPreviousValues] = (0, import_react22.useState)(/* @__PURE__ */ new Map());
+  const [history, setHistory] = (0, import_react22.useState)([]);
+  const [historyIndex, setHistoryIndex] = (0, import_react22.useState)(-1);
+  const autoSaveTimerRef = (0, import_react22.useRef)(null);
+  (0, import_react22.useEffect)(() => {
+    return () => {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+      }
+    };
+  }, []);
   const enableEditing = (0, import_react22.useCallback)(() => setIsEditing(true), []);
   const disableEditing = (0, import_react22.useCallback)(() => {
     setIsEditing(false);
     setFocusedKey(null);
-  }, []);
+    if (pendingChanges.size > 0) {
+    }
+  }, [pendingChanges.size]);
   const toggleEditing = (0, import_react22.useCallback)(() => setIsEditing((prev) => !prev), []);
   const recordChange = (0, import_react22.useCallback)(
-    (elementKey, propName, newValue) => {
+    (elementKey, propName, newValue, previousValue) => {
       setPendingChanges((prev) => {
         const next = new Map(prev);
         const existing = next.get(elementKey) || {};
         next.set(elementKey, { ...existing, [propName]: newValue });
         return next;
       });
+      if (previousValue !== void 0) {
+        setPreviousValues((prev) => {
+          const next = new Map(prev);
+          const existing = next.get(elementKey) || {};
+          if (!(propName in existing)) {
+            next.set(elementKey, { ...existing, [propName]: previousValue });
+          }
+          return next;
+        });
+      }
+      if (autoSaveDelay > 0) {
+        if (autoSaveTimerRef.current) {
+          clearTimeout(autoSaveTimerRef.current);
+        }
+        autoSaveTimerRef.current = setTimeout(() => {
+          commitChangesRef.current?.();
+        }, autoSaveDelay);
+      }
     },
-    []
+    [autoSaveDelay]
   );
+  const commitChangesRef = (0, import_react22.useRef)(void 0);
   const commitChanges = (0, import_react22.useCallback)(() => {
     if (pendingChanges.size === 0) return;
-    const changes = [];
+    const propChanges = [];
+    const elementChanges = [];
+    const now = Date.now();
     pendingChanges.forEach((props, key) => {
-      changes.push({ key, props });
+      const prevProps = previousValues.get(key) || {};
+      for (const [propName, newValue] of Object.entries(props)) {
+        propChanges.push({
+          elementKey: key,
+          propName,
+          oldValue: prevProps[propName],
+          newValue
+        });
+      }
+      elementChanges.push({
+        key,
+        props,
+        previousProps: prevProps,
+        timestamp: now
+      });
     });
+    setHistory((prev) => {
+      const newHistory = prev.slice(0, historyIndex + 1);
+      newHistory.push({ changes: propChanges, timestamp: now });
+      if (newHistory.length > maxHistoryItems) {
+        return newHistory.slice(-maxHistoryItems);
+      }
+      return newHistory;
+    });
+    setHistoryIndex((prev) => prev + 1);
     if (onCommit) {
-      onCommit(changes);
+      onCommit(elementChanges);
     }
     setPendingChanges(/* @__PURE__ */ new Map());
-  }, [pendingChanges, onCommit]);
+    setPreviousValues(/* @__PURE__ */ new Map());
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+  }, [pendingChanges, previousValues, historyIndex, maxHistoryItems, onCommit]);
+  commitChangesRef.current = commitChanges;
   const discardChanges = (0, import_react22.useCallback)(() => {
     setPendingChanges(/* @__PURE__ */ new Map());
+    setPreviousValues(/* @__PURE__ */ new Map());
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
   }, []);
+  const undo = (0, import_react22.useCallback)(() => {
+    if (historyIndex < 0) return;
+    const item = history[historyIndex];
+    if (!item) return;
+    const elementMap = /* @__PURE__ */ new Map();
+    for (const change of item.changes) {
+      const existing = elementMap.get(change.elementKey) || { props: {}, previousProps: {} };
+      existing.props[change.propName] = change.oldValue;
+      existing.previousProps[change.propName] = change.newValue;
+      elementMap.set(change.elementKey, existing);
+    }
+    const undoChanges = Array.from(elementMap.entries()).map(([key, data]) => ({
+      key,
+      props: data.props,
+      previousProps: data.previousProps,
+      timestamp: Date.now()
+    }));
+    if (onCommit) {
+      onCommit(undoChanges);
+    }
+    setHistoryIndex((prev) => prev - 1);
+  }, [history, historyIndex, onCommit]);
+  const redo = (0, import_react22.useCallback)(() => {
+    if (historyIndex >= history.length - 1) return;
+    const item = history[historyIndex + 1];
+    if (!item) return;
+    const elementMap = /* @__PURE__ */ new Map();
+    for (const change of item.changes) {
+      const existing = elementMap.get(change.elementKey) || { props: {}, previousProps: {} };
+      existing.props[change.propName] = change.newValue;
+      existing.previousProps[change.propName] = change.oldValue;
+      elementMap.set(change.elementKey, existing);
+    }
+    const redoChanges = Array.from(elementMap.entries()).map(([key, data]) => ({
+      key,
+      props: data.props,
+      previousProps: data.previousProps,
+      timestamp: Date.now()
+    }));
+    if (onCommit) {
+      onCommit(redoChanges);
+    }
+    setHistoryIndex((prev) => prev + 1);
+  }, [history, historyIndex, onCommit]);
+  const canUndo = historyIndex >= 0;
+  const canRedo = historyIndex < history.length - 1;
+  const pendingCount = pendingChanges.size;
   const value = (0, import_react22.useMemo)(
     () => ({
       isEditing,
@@ -4510,6 +4627,12 @@ function EditModeProvider({
       recordChange,
       commitChanges,
       discardChanges,
+      undo,
+      redo,
+      canUndo,
+      canRedo,
+      history,
+      pendingCount,
       onCommit
     }),
     [
@@ -4523,6 +4646,12 @@ function EditModeProvider({
       recordChange,
       commitChanges,
       discardChanges,
+      undo,
+      redo,
+      canUndo,
+      canRedo,
+      history,
+      pendingCount,
       onCommit
     ]
   );
@@ -4548,7 +4677,15 @@ function useEditMode() {
       commitChanges: () => {
       },
       discardChanges: () => {
-      }
+      },
+      undo: () => {
+      },
+      redo: () => {
+      },
+      canUndo: false,
+      canRedo: false,
+      history: [],
+      pendingCount: 0
     };
   }
   return context;

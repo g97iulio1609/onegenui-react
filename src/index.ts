@@ -138,6 +138,8 @@ export {
   type EditModeContextValue,
   type EditModeProviderProps,
   type ElementChange,
+  type ChangeHistoryItem,
+  type SinglePropChange,
 } from "./contexts/edit-mode";
 
 // Renderer - Main UI rendering components

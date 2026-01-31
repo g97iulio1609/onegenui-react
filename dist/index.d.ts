@@ -1769,6 +1769,24 @@ declare function useIsGenerating(): boolean;
  */
 declare function useGeneratingGoal(): string | null;
 
+interface SinglePropChange {
+    elementKey: string;
+    propName: string;
+    oldValue: unknown;
+    newValue: unknown;
+}
+interface ElementChange {
+    key: string;
+    props: Record<string, unknown>;
+    /** Previous values before the change (for undo) */
+    previousProps?: Record<string, unknown>;
+    /** Timestamp of the change */
+    timestamp: number;
+}
+interface ChangeHistoryItem {
+    changes: SinglePropChange[];
+    timestamp: number;
+}
 interface EditModeContextValue {
     /** Whether edit mode is active */
     isEditing: boolean;
@@ -1785,17 +1803,25 @@ interface EditModeContextValue {
     /** Track pending changes before commit */
     pendingChanges: Map<string, Record<string, unknown>>;
     /** Record a pending change */
-    recordChange: (elementKey: string, propName: string, newValue: unknown) => void;
-    /** Commit all pending changes */
+    recordChange: (elementKey: string, propName: string, newValue: unknown, previousValue?: unknown) => void;
+    /** Commit all pending changes (or auto-committed) */
     commitChanges: () => void;
     /** Discard all pending changes */
     discardChanges: () => void;
+    /** Undo last change */
+    undo: () => void;
+    /** Redo last undone change */
+    redo: () => void;
+    /** Whether undo is available */
+    canUndo: boolean;
+    /** Whether redo is available */
+    canRedo: boolean;
+    /** Change history for diff view */
+    history: ChangeHistoryItem[];
+    /** Number of pending changes */
+    pendingCount: number;
     /** Callback when changes are committed */
     onCommit?: (changes: Array<ElementChange>) => void;
-}
-interface ElementChange {
-    key: string;
-    props: Record<string, unknown>;
 }
 interface EditModeProviderProps {
     children: ReactNode;
@@ -1803,8 +1829,12 @@ interface EditModeProviderProps {
     initialEditing?: boolean;
     /** Callback when changes are committed */
     onCommit?: (changes: Array<ElementChange>) => void;
+    /** Auto-save delay in ms (0 to disable, default 1500) */
+    autoSaveDelay?: number;
+    /** Max history items to keep */
+    maxHistoryItems?: number;
 }
-declare function EditModeProvider({ children, initialEditing, onCommit, }: EditModeProviderProps): react_jsx_runtime.JSX.Element;
+declare function EditModeProvider({ children, initialEditing, onCommit, autoSaveDelay, maxHistoryItems, }: EditModeProviderProps): react_jsx_runtime.JSX.Element;
 declare function useEditMode(): EditModeContextValue;
 /**
  * Hook to check if a specific element is being edited
@@ -3000,4 +3030,4 @@ declare function isDeepSelectionSelected(selections: DeepSelectionData[], elemen
  */
 declare function groupDeepSelectionsByElement(selections: DeepSelectionData[]): Map<string, DeepSelectionData[]>;
 
-export { type AIAssistantSettings, AISettingsProvider, type ActionContextValue$1 as ActionContextValue, type ActionManagerPort, ActionProvider$1 as ActionProvider, type ActionProviderProps$1 as ActionProviderProps, type ActionTrackerOptions, type ActionTrackingCallback, ActionProvider as ActionTrackingProvider, type ActionType, type AddDeepSelectionInput, type Attachment, type AutoSaveContextValue, type AutoSavePayload, AutoSaveProvider, type AutoSaveResult, CanvasBlock, type CanvasBlockProps, type CanvasEditorState, type CanvasInstance, type CanvasPendingUpdate, type CanvasSlice, type ChatMessage, ChildSkeleton, type Citation, CitationProvider, type ComponentRegistry, type ComponentRenderProps, type ComponentRenderer, ConfirmDialog, type ConfirmDialogProps, type ConversationMessage, type ConversationTurn, DEFAULT_AI_SETTINGS, DEFAULT_EXTENDED_SETTINGS, type DOMSelectorPort, type DataContextValue, type DataManagerPort, DataProvider, type DataProviderProps, type DeepResearchEffortLevel, type DeepSelectionData, type DeepSelectionInfo, type DeepSelectionInput, DocumentBlock, type DocumentBlockProps, type DocumentSettings, type DomainType, type EditModeContextValue, EditModeProvider, type EditModeProviderProps, EditableNumber, type EditableProps, EditableProvider, EditableText, type ElementChange, ElementRenderer, type ElementRendererProps$1 as ElementRendererProps, type ExtendedAISettings, type FieldValidationState, type FileAttachment, type FlatElement, type FormField, FreeGridCanvas, type FreeGridCanvasProps, GridCell, type GridCellProps, JSONUIProvider, type JSONUIProviderProps, type LibraryAttachment, type MarkdownContextValue, MarkdownProvider, type MarkdownProviderProps, MarkdownText, type MarkdownTextProps, type MarkdownTheme$1 as MarkdownTheme, type PendingAIEdit, type PendingConfirmation$1 as PendingConfirmation, type PersistedAttachment, PlaceholderSkeleton, type PlanExecutionState, type PlanStep, type PlanStepStatus, type PlanSubtask, type PreservedTextSelection, type ProactivityMode, type QuestionPayload, type RenderTextOptions, Renderer, type RendererProps, ResizableWrapper, type ResizableWrapperProps, type ResizeHandle, type ResizeState, SelectableItem, type SelectableItemProps, type SelectionContextValue, type SelectionEventPort, type SelectionExportPort, type SelectionManagerPort, type SelectionPort, SelectionProvider, type SelectionProviderProps, type SkeletonProps, type ExecutionPlan as StorePlanType, type SuggestionChip, TextSelectionBadge, type TextSelectionBadgeProps, type TextSelectionInfo, type ToolProgress, type ToolProgressContextValue, type ToolProgressManagerPort, ToolProgressOverlay, type ToolProgressOverlayProps, ToolProgressProvider, type ToolProgressProviderProps, type TrackedAction, type UnifiedProgressContextValue, type UnifiedProgressItem, type UnifiedProgressItemType, UnifiedProgressProvider, type UnifiedProgressProviderProps, type UnifiedProgressState, type UnifiedProgressStatus, type UseLayoutManagerOptions, type UseLayoutManagerReturn, type UsePreservedSelectionReturn, type UseResizableOptions, type UseResizableReturn, type UseUIStreamOptions, type UseUIStreamReturn, type ValidationContextValue, type ValidationManagerPort, ValidationProvider, type ValidationProviderProps, type VisibilityContextValue, VisibilityProvider, type VisibilityProviderProps, type WorkspaceDocument, type WorkspaceLayout, buildConversationMessages, computeAddSelection, computeRangeSelection, computeRemoveSelection, computeReplaceSelection, computeToggleSelection, createLayout, createRendererFromCatalog, elementRendererPropsAreEqual, exportDeepSelectionAsJSON, exportDeepSelectionAsText, exportDeepSelectionForAI, exportSelectionForAI, flatToTree, formatActionsForPrompt, generateDeepSelectionSummary, generateSelectionSummary, getLayoutStyles, getResizeCursor, getSelectionCountByElement, getSelectionForElement, groupDeepSelectionsByElement, isDeepSelectionSelected, isFileAttachment, isItemSelected, isLibraryAttachment, isPlaceholderElement, selectPlanExecution, selectableItemProps, useAISettings, useAISettingsOptional, useAction, useActionContext, useActionHistory, useActionSubscriber, useActions, useActiveDocument, useActiveDocumentId, useActiveResearch, useActiveStep, useActiveToolProgress$1 as useActiveToolProgress, useActiveToolProgress as useActiveToolProgressStore, useAreSuggestionsEnabled, useAuthenticatedSources, useAutoSave, useCanvasActions, useCanvasContent, useCanvasInstance, useCanvasInstances, useCanvasIsStreaming, useCanvasVersion, useCitations, useData, useDataBinding, useDataValue, useDeepResearchEffortLevel, useDeepResearchEnabled, useDeepResearchSettings, useDeepSelectionActive, useDeepSelections, useDomainAutoSave, useEditMode, useEditable, useEditableContext, useElementActionTracker, useElementEdit, useFieldStates, useFieldValidation, useFormState, useGeneratingGoal, useGranularSelection, useIsAnyToolRunning, useIsElementEditing, useIsGenerating, useIsMobile, useIsPlanRunning, useIsProactivityEnabled, useIsResearchActive, useIsSmartParsingEnabled, useIsToolRunning, useIsValidating, useIsVisible, useIsWorkspaceOpen, useItemSelection, useLayoutManager, useLoadingActions, useMarkdown, usePendingAIEdits, usePendingConfirmations, usePlanExecution, usePlanProgress, usePreservedSelection, useProgressEvents, useRenderText, useResearchHistory, useResearchProgress, useResizable, useSelection, useStore, useTextSelection, useToolProgress, useToolProgressOptional, useUIStore, useUIStream, useUnifiedProgress, useUnifiedProgressOptional, useValidation, useVisibility, useWorkspaceActions, useWorkspaceDocuments, useWorkspaceLayout, useYoloMode };
+export { type AIAssistantSettings, AISettingsProvider, type ActionContextValue$1 as ActionContextValue, type ActionManagerPort, ActionProvider$1 as ActionProvider, type ActionProviderProps$1 as ActionProviderProps, type ActionTrackerOptions, type ActionTrackingCallback, ActionProvider as ActionTrackingProvider, type ActionType, type AddDeepSelectionInput, type Attachment, type AutoSaveContextValue, type AutoSavePayload, AutoSaveProvider, type AutoSaveResult, CanvasBlock, type CanvasBlockProps, type CanvasEditorState, type CanvasInstance, type CanvasPendingUpdate, type CanvasSlice, type ChangeHistoryItem, type ChatMessage, ChildSkeleton, type Citation, CitationProvider, type ComponentRegistry, type ComponentRenderProps, type ComponentRenderer, ConfirmDialog, type ConfirmDialogProps, type ConversationMessage, type ConversationTurn, DEFAULT_AI_SETTINGS, DEFAULT_EXTENDED_SETTINGS, type DOMSelectorPort, type DataContextValue, type DataManagerPort, DataProvider, type DataProviderProps, type DeepResearchEffortLevel, type DeepSelectionData, type DeepSelectionInfo, type DeepSelectionInput, DocumentBlock, type DocumentBlockProps, type DocumentSettings, type DomainType, type EditModeContextValue, EditModeProvider, type EditModeProviderProps, EditableNumber, type EditableProps, EditableProvider, EditableText, type ElementChange, ElementRenderer, type ElementRendererProps$1 as ElementRendererProps, type ExtendedAISettings, type FieldValidationState, type FileAttachment, type FlatElement, type FormField, FreeGridCanvas, type FreeGridCanvasProps, GridCell, type GridCellProps, JSONUIProvider, type JSONUIProviderProps, type LibraryAttachment, type MarkdownContextValue, MarkdownProvider, type MarkdownProviderProps, MarkdownText, type MarkdownTextProps, type MarkdownTheme$1 as MarkdownTheme, type PendingAIEdit, type PendingConfirmation$1 as PendingConfirmation, type PersistedAttachment, PlaceholderSkeleton, type PlanExecutionState, type PlanStep, type PlanStepStatus, type PlanSubtask, type PreservedTextSelection, type ProactivityMode, type QuestionPayload, type RenderTextOptions, Renderer, type RendererProps, ResizableWrapper, type ResizableWrapperProps, type ResizeHandle, type ResizeState, SelectableItem, type SelectableItemProps, type SelectionContextValue, type SelectionEventPort, type SelectionExportPort, type SelectionManagerPort, type SelectionPort, SelectionProvider, type SelectionProviderProps, type SinglePropChange, type SkeletonProps, type ExecutionPlan as StorePlanType, type SuggestionChip, TextSelectionBadge, type TextSelectionBadgeProps, type TextSelectionInfo, type ToolProgress, type ToolProgressContextValue, type ToolProgressManagerPort, ToolProgressOverlay, type ToolProgressOverlayProps, ToolProgressProvider, type ToolProgressProviderProps, type TrackedAction, type UnifiedProgressContextValue, type UnifiedProgressItem, type UnifiedProgressItemType, UnifiedProgressProvider, type UnifiedProgressProviderProps, type UnifiedProgressState, type UnifiedProgressStatus, type UseLayoutManagerOptions, type UseLayoutManagerReturn, type UsePreservedSelectionReturn, type UseResizableOptions, type UseResizableReturn, type UseUIStreamOptions, type UseUIStreamReturn, type ValidationContextValue, type ValidationManagerPort, ValidationProvider, type ValidationProviderProps, type VisibilityContextValue, VisibilityProvider, type VisibilityProviderProps, type WorkspaceDocument, type WorkspaceLayout, buildConversationMessages, computeAddSelection, computeRangeSelection, computeRemoveSelection, computeReplaceSelection, computeToggleSelection, createLayout, createRendererFromCatalog, elementRendererPropsAreEqual, exportDeepSelectionAsJSON, exportDeepSelectionAsText, exportDeepSelectionForAI, exportSelectionForAI, flatToTree, formatActionsForPrompt, generateDeepSelectionSummary, generateSelectionSummary, getLayoutStyles, getResizeCursor, getSelectionCountByElement, getSelectionForElement, groupDeepSelectionsByElement, isDeepSelectionSelected, isFileAttachment, isItemSelected, isLibraryAttachment, isPlaceholderElement, selectPlanExecution, selectableItemProps, useAISettings, useAISettingsOptional, useAction, useActionContext, useActionHistory, useActionSubscriber, useActions, useActiveDocument, useActiveDocumentId, useActiveResearch, useActiveStep, useActiveToolProgress$1 as useActiveToolProgress, useActiveToolProgress as useActiveToolProgressStore, useAreSuggestionsEnabled, useAuthenticatedSources, useAutoSave, useCanvasActions, useCanvasContent, useCanvasInstance, useCanvasInstances, useCanvasIsStreaming, useCanvasVersion, useCitations, useData, useDataBinding, useDataValue, useDeepResearchEffortLevel, useDeepResearchEnabled, useDeepResearchSettings, useDeepSelectionActive, useDeepSelections, useDomainAutoSave, useEditMode, useEditable, useEditableContext, useElementActionTracker, useElementEdit, useFieldStates, useFieldValidation, useFormState, useGeneratingGoal, useGranularSelection, useIsAnyToolRunning, useIsElementEditing, useIsGenerating, useIsMobile, useIsPlanRunning, useIsProactivityEnabled, useIsResearchActive, useIsSmartParsingEnabled, useIsToolRunning, useIsValidating, useIsVisible, useIsWorkspaceOpen, useItemSelection, useLayoutManager, useLoadingActions, useMarkdown, usePendingAIEdits, usePendingConfirmations, usePlanExecution, usePlanProgress, usePreservedSelection, useProgressEvents, useRenderText, useResearchHistory, useResearchProgress, useResizable, useSelection, useStore, useTextSelection, useToolProgress, useToolProgressOptional, useUIStore, useUIStream, useUnifiedProgress, useUnifiedProgressOptional, useValidation, useVisibility, useWorkspaceActions, useWorkspaceDocuments, useWorkspaceLayout, useYoloMode };
