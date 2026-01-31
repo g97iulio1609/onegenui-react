@@ -6,6 +6,7 @@ import { SELECTION_STYLE_ID, SELECTION_CSS } from "./styles";
 import { getUniqueCSSPath } from "./utils";
 import { useSelectionState } from "./use-selection-state";
 import { useLongPress } from "./use-long-press";
+import { useEditMode } from "../edit-mode";
 import type { SelectionContextValue, SelectionProviderProps } from "./types";
 
 /**
@@ -42,6 +43,9 @@ export function SelectionProvider({ children }: SelectionProviderProps) {
     setDeepSelectionActive,
   } = selectionState;
 
+  // Get edit mode state - disable item selection when editing
+  const { isEditing } = useEditMode();
+
   // Function to check if deep selection is active
   const isDeepSelectionActive = useCallback(
     () => deepSelectionActiveRef.current,
@@ -75,6 +79,11 @@ export function SelectionProvider({ children }: SelectionProviderProps) {
     target: HTMLElement,
     componentWrapper: HTMLElement,
   ) => {
+    // In edit mode, don't start long-press selection
+    if (isEditing) {
+      return;
+    }
+
     const elementKey = componentWrapper.getAttribute("data-jsonui-element-key");
     if (!elementKey) return;
 
@@ -121,6 +130,12 @@ export function SelectionProvider({ children }: SelectionProviderProps) {
 
   // Handle click selection
   const handleClick = (target: HTMLElement, _event: MouseEvent) => {
+    // In edit mode, don't intercept clicks on selectable items
+    // This allows normal interaction (editing tables, clicking links, etc.)
+    if (isEditing) {
+      return;
+    }
+
     // Check for selectable-item click
     const selectableItem = target.closest(
       "[data-selectable-item]",
