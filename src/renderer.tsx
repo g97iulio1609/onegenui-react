@@ -1,8 +1,9 @@
 "use client";
 
-import type { ComponentType } from "react";
+import type { ComponentType, ReactNode } from "react";
 import type { Catalog, ComponentDefinition } from "@onegenui/core";
 import { InteractionTrackingWrapper } from "./components/InteractionTrackingWrapper";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { DEFAULT_SELECTION_DELAY } from "./utils/selection";
 import type {
   ComponentRenderProps,
@@ -25,7 +26,28 @@ export type {
 export { JSONUIProvider };
 
 /**
- * Main renderer component
+ * Default renderer error fallback
+ */
+function RendererErrorFallback(error: Error, reset: () => void): ReactNode {
+  return (
+    <div
+      role="alert"
+      className="p-4 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive"
+    >
+      <h3 className="font-semibold mb-2">Render Error</h3>
+      <p className="text-sm text-muted-foreground mb-3">{error.message}</p>
+      <button
+        onClick={reset}
+        className="px-3 py-1.5 text-sm rounded bg-destructive/20 hover:bg-destructive/30 transition-colors"
+      >
+        Retry
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Main renderer component with error boundary
  */
 export function Renderer({
   tree,
@@ -40,25 +62,32 @@ export function Renderer({
   onInteraction,
   onResize,
   autoGrid = true,
-}: RendererProps) {
+  onError,
+}: RendererProps & { onError?: (error: Error) => void }) {
   if (!tree || !tree.root) return null;
 
   const rootElement = tree.elements[tree.root];
   if (!rootElement) return null;
 
   const content = (
-    <ElementRenderer
-      element={rootElement}
-      tree={tree}
-      registry={registry}
-      loading={loading}
-      fallback={fallback}
-      selectable={selectable}
-      onElementSelect={onElementSelect}
-      selectionDelayMs={selectionDelayMs}
-      selectedKey={selectedKey}
-      onResize={onResize}
-    />
+    <ErrorBoundary
+      name="ElementRenderer"
+      fallback={RendererErrorFallback}
+      onError={(error) => onError?.(error)}
+    >
+      <ElementRenderer
+        element={rootElement}
+        tree={tree}
+        registry={registry}
+        loading={loading}
+        fallback={fallback}
+        selectable={selectable}
+        onElementSelect={onElementSelect}
+        selectionDelayMs={selectionDelayMs}
+        selectedKey={selectedKey}
+        onResize={onResize}
+      />
+    </ErrorBoundary>
   );
 
   const gridContent = autoGrid ? (

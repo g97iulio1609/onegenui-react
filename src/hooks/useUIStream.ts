@@ -123,6 +123,7 @@ export function useUIStream({
   const [error, setError] = useState<Error | null>(null);
   const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
   const sendingRef = useRef(false);
+  const patchFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clear = useCallback(() => {
     setTree(null);
@@ -254,7 +255,12 @@ export function useUIStream({
 
       // Batch processing variables
       let patchBuffer: JsonPatch[] = [];
-      let patchFlushTimer: ReturnType<typeof setTimeout> | null = null;
+      
+      // Clear any existing timer
+      if (patchFlushTimerRef.current) {
+        clearTimeout(patchFlushTimerRef.current);
+        patchFlushTimerRef.current = null;
+      }
 
       try {
         // Build request body and headers
@@ -378,9 +384,9 @@ export function useUIStream({
               patchBuffer.push(event.patch);
 
               // Schedule batch application with short delay
-              if (!patchFlushTimer) {
-                patchFlushTimer = setTimeout(() => {
-                  patchFlushTimer = null;
+              if (!patchFlushTimerRef.current) {
+                patchFlushTimerRef.current = setTimeout(() => {
+                  patchFlushTimerRef.current = null;
                   if (patchBuffer.length > 0) {
                     streamLog.debug("Flushing patches", { count: patchBuffer.length });
                     
@@ -467,9 +473,9 @@ export function useUIStream({
         });
 
         // Clear flush timer if pending
-        if (patchFlushTimer) {
-          clearTimeout(patchFlushTimer);
-          patchFlushTimer = null;
+        if (patchFlushTimerRef.current) {
+          clearTimeout(patchFlushTimerRef.current);
+          patchFlushTimerRef.current = null;
         }
 
         // Flush any remaining patches before finalization
@@ -519,9 +525,9 @@ export function useUIStream({
         onComplete?.(currentTree);
       } catch (err) {
         // Clear buffer and timer on any error
-        if (patchFlushTimer) {
-          clearTimeout(patchFlushTimer);
-          patchFlushTimer = null;
+        if (patchFlushTimerRef.current) {
+          clearTimeout(patchFlushTimerRef.current);
+          patchFlushTimerRef.current = null;
         }
         patchBuffer = [];
 
@@ -573,9 +579,15 @@ export function useUIStream({
     [conversation, send],
   );
 
-  // Cleanup on unmount - abort all active streams
+  // Cleanup on unmount - abort all active streams and clear timers
   useEffect(() => {
     return () => {
+      // Clear any pending patch flush timer
+      if (patchFlushTimerRef.current) {
+        clearTimeout(patchFlushTimerRef.current);
+        patchFlushTimerRef.current = null;
+      }
+      // Abort all active streams
       for (const controller of abortControllersRef.current.values()) {
         controller.abort();
       }

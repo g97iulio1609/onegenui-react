@@ -1,3 +1,10 @@
+export {
+  ErrorBoundary,
+  ErrorFallback,
+  withErrorBoundary,
+  type ErrorBoundaryProps,
+  type ErrorFallbackProps,
+} from "./ErrorBoundary";
 export { MarkdownText, type MarkdownTextProps } from "./MarkdownText";
 export {
   TextSelectionBadge,

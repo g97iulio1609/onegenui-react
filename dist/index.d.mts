@@ -1981,9 +1981,11 @@ interface JSONUIProviderProps {
 declare function JSONUIProvider({ registry, initialData, authState, actionHandlers, navigate, validationFunctions, onDataChange, children, }: JSONUIProviderProps): react_jsx_runtime.JSX.Element;
 
 /**
- * Main renderer component
+ * Main renderer component with error boundary
  */
-declare function Renderer({ tree, registry, loading, fallback, selectable, onElementSelect, selectionDelayMs, selectedKey, trackInteractions, onInteraction, onResize, autoGrid, }: RendererProps): react_jsx_runtime.JSX.Element | null;
+declare function Renderer({ tree, registry, loading, fallback, selectable, onElementSelect, selectionDelayMs, selectedKey, trackInteractions, onInteraction, onResize, autoGrid, onError, }: RendererProps & {
+    onError?: (error: Error) => void;
+}): react_jsx_runtime.JSX.Element | null;
 /**
  * Helper to create a renderer component from a catalog
  */
