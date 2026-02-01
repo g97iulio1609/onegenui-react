@@ -11,7 +11,7 @@
 
 import { parseSSELine, type StreamEvent } from "./stream-parser";
 
-const IDLE_TIMEOUT_MS = 90000; // 90 seconds
+const IDLE_TIMEOUT_MS = 300000; // 5 minutes - deep research can take longer
 
 /**
  * Read SSE stream with idle timeout protection

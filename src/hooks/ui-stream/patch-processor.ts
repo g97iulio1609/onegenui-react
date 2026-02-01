@@ -7,11 +7,89 @@
  * - Patch buffering and batch scheduling
  * - Tree updates with protection for specific types
  * - Zustand store synchronization
+ * - Selection preservation during updates
  */
 
 import type { UITree, JsonPatch } from "@onegenui/core";
 import { applyPatchesBatch } from "../patch-utils";
 import { streamLog } from "./logger";
+
+/** Flush interval in ms - higher = less jarring, lower = more responsive */
+const PATCH_FLUSH_INTERVAL_MS = 100;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Selection Preservation Utilities
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface SavedSelection {
+  anchorNodePath: number[];
+  anchorOffset: number;
+  focusNodePath: number[];
+  focusOffset: number;
+}
+
+/** Get path from root to node as array of child indices */
+function getNodePath(node: Node | null): number[] {
+  const path: number[] = [];
+  let current = node;
+  while (current?.parentNode) {
+    const parent = current.parentNode;
+    const index = Array.from(parent.childNodes).indexOf(current as ChildNode);
+    path.unshift(index);
+    current = parent;
+  }
+  return path;
+}
+
+/** Resolve a node path back to a DOM node */
+function resolveNodePath(path: number[], root: Document): Node | null {
+  let node: Node = root.body;
+  for (const index of path) {
+    if (!node.childNodes[index]) return null;
+    node = node.childNodes[index];
+  }
+  return node;
+}
+
+/** Save current browser selection state */
+export function saveSelection(): SavedSelection | null {
+  if (typeof window === "undefined") return null;
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
+  
+  return {
+    anchorNodePath: getNodePath(sel.anchorNode),
+    anchorOffset: sel.anchorOffset,
+    focusNodePath: getNodePath(sel.focusNode),
+    focusOffset: sel.focusOffset,
+  };
+}
+
+/** Restore browser selection from saved state */
+export function restoreSelection(saved: SavedSelection | null): void {
+  if (!saved || typeof window === "undefined") return;
+  
+  try {
+    const anchorNode = resolveNodePath(saved.anchorNodePath, document);
+    const focusNode = resolveNodePath(saved.focusNodePath, document);
+    
+    if (!anchorNode || !focusNode) return;
+    
+    const sel = window.getSelection();
+    if (!sel) return;
+    
+    const range = document.createRange();
+    range.setStart(anchorNode, Math.min(saved.anchorOffset, anchorNode.textContent?.length ?? 0));
+    range.setEnd(focusNode, Math.min(saved.focusOffset, focusNode.textContent?.length ?? 0));
+    
+    sel.removeAllRanges();
+    sel.addRange(range);
+  } catch {
+    // Selection restoration failed - likely DOM structure changed significantly
+  }
+}
+
+export { PATCH_FLUSH_INTERVAL_MS };
 
 export interface TreeStoreActions {
   setUITree: (tree: { root: string; elements: UITree["elements"] }) => void;
@@ -56,6 +134,9 @@ export function schedulePatchFlush(
     if (patchBuffer.length > 0) {
       streamLog.debug("Flushing patches", { count: patchBuffer.length });
       
+      // Save selection before DOM changes
+      const savedSel = saveSelection();
+      
       // Use treeRef.current as base for latest state
       const baseTree = treeRef.current ?? state.currentTree;
       
@@ -81,11 +162,16 @@ export function schedulePatchFlush(
       });
       store.bumpTreeVersion();
       
+      // Restore selection after DOM update (deferred for React reconciliation)
+      if (savedSel) {
+        requestAnimationFrame(() => restoreSelection(savedSel));
+      }
+      
       streamLog.debug("Tree updated", {
         elementCount: Object.keys(updatedTree.elements).length,
       });
     }
-  }, 50); // Flush every 50ms for responsive UI
+  }, PATCH_FLUSH_INTERVAL_MS);
 
   return {
     patchBuffer: newBuffer,

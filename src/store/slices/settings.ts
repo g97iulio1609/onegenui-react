@@ -1,15 +1,14 @@
 /**
  * Settings Slice - AI settings, theme, preferences
  * 
- * NOTE: Model selection is now centralized server-side in `lib/services/model-config.ts`.
- * The AIModel type here is kept for backward compatibility but new code should use
- * the server-side `getModelForTask()` function.
+ * NOTE: Model selection is centralized in @onegenui/providers.
+ * Use `createModelForTask()` or `getModelConfig()` from the providers package.
  */
 import type { SliceCreator } from "../types";
 
 export type ThemeMode = "light" | "dark" | "system";
 
-/** @deprecated Use server-side model config from `lib/services/model-config.ts` */
+/** @deprecated Use @onegenui/providers for model management */
 export type AIModel =
   | "gemini-3-flash-preview"
   | "gemini-3-pro-preview"
@@ -45,8 +44,8 @@ export interface SettingsSlice {
 
 const defaultAISettings: AISettings = {
   model: "gemini-3-flash-preview",
-  temperature: 0.7,
-  maxTokens: 8192,
+  temperature: 1,
+  maxTokens: 65000,
   streamingEnabled: true,
   autoSuggestions: true,
 };

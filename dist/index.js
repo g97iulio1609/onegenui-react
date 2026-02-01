@@ -364,8 +364,8 @@ var createSelectionSlice = (set, get) => ({
 // src/store/slices/settings.ts
 var defaultAISettings = {
   model: "gemini-3-flash-preview",
-  temperature: 0.7,
-  maxTokens: 8192,
+  temperature: 1,
+  maxTokens: 65e3,
   streamingEnabled: true,
   autoSuggestions: true
 };
@@ -673,14 +673,27 @@ var createToolProgressSlice = (set, get) => {
     const existingIndex = state.progressEvents.findIndex(
       (p) => p.toolCallId === event.toolCallId
     );
-    const storedEvent = {
-      type: "tool-progress",
-      ...event,
-      timestamp
-    };
     if (existingIndex >= 0) {
+      const existing = state.progressEvents[existingIndex];
+      const messageHistory = existing?.messageHistory ?? [];
+      if (event.message && !messageHistory.some((h) => h.message === event.message)) {
+        messageHistory.push({ message: event.message, timestamp });
+      }
+      const storedEvent = {
+        type: "tool-progress",
+        ...event,
+        timestamp,
+        messageHistory
+      };
       state.progressEvents[existingIndex] = storedEvent;
     } else {
+      const messageHistory = event.message ? [{ message: event.message, timestamp }] : [];
+      const storedEvent = {
+        type: "tool-progress",
+        ...event,
+        timestamp,
+        messageHistory
+      };
       state.progressEvents.push(storedEvent);
       if (state.progressEvents.length > state.maxEvents) {
         state.progressEvents = state.progressEvents.slice(-state.maxEvents);
@@ -1171,7 +1184,7 @@ var createWorkspaceSlice = (set, get) => ({
       savedAt: null,
       modifiedAt: Date.now(),
       isDirty: false,
-      format: "lexical"
+      format: "tiptap"
     };
     set((state) => ({
       documents: [...state.documents, doc],
@@ -2067,7 +2080,7 @@ var import_react5 = require("react");
 var SelectionContext = (0, import_react5.createContext)(void 0);
 
 // src/contexts/selection/provider.tsx
-var import_react8 = require("react");
+var import_react9 = require("react");
 
 // src/contexts/selection/styles.ts
 var SELECTION_STYLE_ID = "jsonui-selection-styles";
@@ -2741,8 +2754,269 @@ function useLongPress(callbacks, config = {}) {
   };
 }
 
-// src/contexts/selection/provider.tsx
+// src/contexts/edit-mode.tsx
+var import_react8 = require("react");
 var import_jsx_runtime5 = require("react/jsx-runtime");
+var EditModeContext = (0, import_react8.createContext)(null);
+function EditModeProvider({
+  children,
+  initialEditing = false,
+  onCommit,
+  autoSaveDelay = 1500,
+  maxHistoryItems = 50
+}) {
+  const [isEditing, setIsEditing] = (0, import_react8.useState)(initialEditing);
+  const [focusedKey, setFocusedKey] = (0, import_react8.useState)(null);
+  const [pendingChanges, setPendingChanges] = (0, import_react8.useState)(/* @__PURE__ */ new Map());
+  const [previousValues, setPreviousValues] = (0, import_react8.useState)(/* @__PURE__ */ new Map());
+  const [history, setHistory] = (0, import_react8.useState)([]);
+  const [historyIndex, setHistoryIndex] = (0, import_react8.useState)(-1);
+  const autoSaveTimerRef = (0, import_react8.useRef)(null);
+  (0, import_react8.useEffect)(() => {
+    return () => {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+      }
+    };
+  }, []);
+  const enableEditing = (0, import_react8.useCallback)(() => setIsEditing(true), []);
+  const disableEditing = (0, import_react8.useCallback)(() => {
+    setIsEditing(false);
+    setFocusedKey(null);
+    if (pendingChanges.size > 0) {
+    }
+  }, [pendingChanges.size]);
+  const toggleEditing = (0, import_react8.useCallback)(() => setIsEditing((prev) => !prev), []);
+  const recordChange = (0, import_react8.useCallback)(
+    (elementKey, propName, newValue, previousValue) => {
+      setPendingChanges((prev) => {
+        const next = new Map(prev);
+        const existing = next.get(elementKey) || {};
+        next.set(elementKey, { ...existing, [propName]: newValue });
+        return next;
+      });
+      if (previousValue !== void 0) {
+        setPreviousValues((prev) => {
+          const next = new Map(prev);
+          const existing = next.get(elementKey) || {};
+          if (!(propName in existing)) {
+            next.set(elementKey, { ...existing, [propName]: previousValue });
+          }
+          return next;
+        });
+      }
+      if (autoSaveDelay > 0) {
+        if (autoSaveTimerRef.current) {
+          clearTimeout(autoSaveTimerRef.current);
+        }
+        autoSaveTimerRef.current = setTimeout(() => {
+          commitChangesRef.current?.();
+        }, autoSaveDelay);
+      }
+    },
+    [autoSaveDelay]
+  );
+  const commitChangesRef = (0, import_react8.useRef)(void 0);
+  const commitChanges = (0, import_react8.useCallback)(() => {
+    if (pendingChanges.size === 0) return;
+    const propChanges = [];
+    const elementChanges = [];
+    const now = Date.now();
+    pendingChanges.forEach((props, key) => {
+      const prevProps = previousValues.get(key) || {};
+      for (const [propName, newValue] of Object.entries(props)) {
+        propChanges.push({
+          elementKey: key,
+          propName,
+          oldValue: prevProps[propName],
+          newValue
+        });
+      }
+      elementChanges.push({
+        key,
+        props,
+        previousProps: prevProps,
+        timestamp: now
+      });
+    });
+    setHistory((prev) => {
+      const newHistory = prev.slice(0, historyIndex + 1);
+      newHistory.push({ changes: propChanges, timestamp: now });
+      if (newHistory.length > maxHistoryItems) {
+        return newHistory.slice(-maxHistoryItems);
+      }
+      return newHistory;
+    });
+    setHistoryIndex((prev) => prev + 1);
+    if (onCommit) {
+      onCommit(elementChanges);
+    }
+    setPendingChanges(/* @__PURE__ */ new Map());
+    setPreviousValues(/* @__PURE__ */ new Map());
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+  }, [pendingChanges, previousValues, historyIndex, maxHistoryItems, onCommit]);
+  commitChangesRef.current = commitChanges;
+  const discardChanges = (0, import_react8.useCallback)(() => {
+    setPendingChanges(/* @__PURE__ */ new Map());
+    setPreviousValues(/* @__PURE__ */ new Map());
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+  }, []);
+  const undo = (0, import_react8.useCallback)(() => {
+    if (historyIndex < 0) return;
+    const item = history[historyIndex];
+    if (!item) return;
+    const elementMap = /* @__PURE__ */ new Map();
+    for (const change of item.changes) {
+      const existing = elementMap.get(change.elementKey) || { props: {}, previousProps: {} };
+      existing.props[change.propName] = change.oldValue;
+      existing.previousProps[change.propName] = change.newValue;
+      elementMap.set(change.elementKey, existing);
+    }
+    const undoChanges = Array.from(elementMap.entries()).map(([key, data]) => ({
+      key,
+      props: data.props,
+      previousProps: data.previousProps,
+      timestamp: Date.now()
+    }));
+    if (onCommit) {
+      onCommit(undoChanges);
+    }
+    setHistoryIndex((prev) => prev - 1);
+  }, [history, historyIndex, onCommit]);
+  const redo = (0, import_react8.useCallback)(() => {
+    if (historyIndex >= history.length - 1) return;
+    const item = history[historyIndex + 1];
+    if (!item) return;
+    const elementMap = /* @__PURE__ */ new Map();
+    for (const change of item.changes) {
+      const existing = elementMap.get(change.elementKey) || { props: {}, previousProps: {} };
+      existing.props[change.propName] = change.newValue;
+      existing.previousProps[change.propName] = change.oldValue;
+      elementMap.set(change.elementKey, existing);
+    }
+    const redoChanges = Array.from(elementMap.entries()).map(([key, data]) => ({
+      key,
+      props: data.props,
+      previousProps: data.previousProps,
+      timestamp: Date.now()
+    }));
+    if (onCommit) {
+      onCommit(redoChanges);
+    }
+    setHistoryIndex((prev) => prev + 1);
+  }, [history, historyIndex, onCommit]);
+  const canUndo = historyIndex >= 0;
+  const canRedo = historyIndex < history.length - 1;
+  const pendingCount = pendingChanges.size;
+  const value = (0, import_react8.useMemo)(
+    () => ({
+      isEditing,
+      enableEditing,
+      disableEditing,
+      toggleEditing,
+      focusedKey,
+      setFocusedKey,
+      pendingChanges,
+      recordChange,
+      commitChanges,
+      discardChanges,
+      undo,
+      redo,
+      canUndo,
+      canRedo,
+      history,
+      pendingCount,
+      onCommit
+    }),
+    [
+      isEditing,
+      enableEditing,
+      disableEditing,
+      toggleEditing,
+      focusedKey,
+      setFocusedKey,
+      pendingChanges,
+      recordChange,
+      commitChanges,
+      discardChanges,
+      undo,
+      redo,
+      canUndo,
+      canRedo,
+      history,
+      pendingCount,
+      onCommit
+    ]
+  );
+  return /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(EditModeContext.Provider, { value, children });
+}
+function useEditMode() {
+  const context = (0, import_react8.useContext)(EditModeContext);
+  if (!context) {
+    return {
+      isEditing: false,
+      enableEditing: () => {
+      },
+      disableEditing: () => {
+      },
+      toggleEditing: () => {
+      },
+      focusedKey: null,
+      setFocusedKey: () => {
+      },
+      pendingChanges: /* @__PURE__ */ new Map(),
+      recordChange: () => {
+      },
+      commitChanges: () => {
+      },
+      discardChanges: () => {
+      },
+      undo: () => {
+      },
+      redo: () => {
+      },
+      canUndo: false,
+      canRedo: false,
+      history: [],
+      pendingCount: 0
+    };
+  }
+  return context;
+}
+function useIsElementEditing(elementKey) {
+  const { isEditing, focusedKey } = useEditMode();
+  return isEditing && focusedKey === elementKey;
+}
+function useElementEdit(elementKey) {
+  const { isEditing, recordChange, focusedKey, setFocusedKey } = useEditMode();
+  const handleChange = (0, import_react8.useCallback)(
+    (propName, newValue) => {
+      recordChange(elementKey, propName, newValue);
+    },
+    [elementKey, recordChange]
+  );
+  const handleFocus = (0, import_react8.useCallback)(() => {
+    setFocusedKey(elementKey);
+  }, [elementKey, setFocusedKey]);
+  const handleBlur = (0, import_react8.useCallback)(() => {
+  }, []);
+  return {
+    isEditing,
+    isFocused: focusedKey === elementKey,
+    handleChange,
+    handleFocus,
+    handleBlur
+  };
+}
+
+// src/contexts/selection/provider.tsx
+var import_jsx_runtime6 = require("react/jsx-runtime");
 function SelectionProvider({ children }) {
   const selectionState = useSelectionState();
   const {
@@ -2758,7 +3032,8 @@ function SelectionProvider({ children }) {
     deepSelectionActiveRef,
     setDeepSelectionActive
   } = selectionState;
-  const isDeepSelectionActive = (0, import_react8.useCallback)(
+  const { isEditing } = useEditMode();
+  const isDeepSelectionActive = (0, import_react9.useCallback)(
     () => deepSelectionActiveRef.current,
     [deepSelectionActiveRef]
   );
@@ -2777,6 +3052,9 @@ function SelectionProvider({ children }) {
     clearSelection();
   };
   const handleLongPress = (target, componentWrapper) => {
+    if (isEditing) {
+      return;
+    }
     const elementKey = componentWrapper.getAttribute("data-jsonui-element-key");
     if (!elementKey) return;
     if (selectedElementsRef.current.has(target)) {
@@ -2808,6 +3086,9 @@ function SelectionProvider({ children }) {
     });
   };
   const handleClick = (target, _event) => {
+    if (isEditing) {
+      return;
+    }
     const selectableItem = target.closest(
       "[data-selectable-item]"
     );
@@ -2861,7 +3142,7 @@ function SelectionProvider({ children }) {
     },
     { debug: false }
   );
-  (0, import_react8.useEffect)(() => {
+  (0, import_react9.useEffect)(() => {
     if (typeof document === "undefined") return;
     const handleKeyDown = (e) => {
       if (e.key === "Escape" && deepSelections.length > 0) {
@@ -2878,7 +3159,7 @@ function SelectionProvider({ children }) {
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [deepSelections, clearDeepSelection]);
-  (0, import_react8.useEffect)(() => {
+  (0, import_react9.useEffect)(() => {
     return () => {
       selectedElementsRef.current.forEach((el) => {
         el.classList.remove("jsonui-deep-selected");
@@ -2886,7 +3167,7 @@ function SelectionProvider({ children }) {
       });
     };
   }, [selectedElementsRef]);
-  (0, import_react8.useEffect)(() => {
+  (0, import_react9.useEffect)(() => {
     if (typeof document === "undefined") return;
     if (document.getElementById(SELECTION_STYLE_ID)) return;
     const style = document.createElement("style");
@@ -2898,7 +3179,7 @@ function SelectionProvider({ children }) {
       if (el) el.remove();
     };
   }, []);
-  const value = (0, import_react8.useMemo)(
+  const value = (0, import_react9.useMemo)(
     () => ({
       granularSelection,
       toggleSelection,
@@ -2919,13 +3200,13 @@ function SelectionProvider({ children }) {
       isDeepSelectionActive
     ]
   );
-  return /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(SelectionContext.Provider, { value, children });
+  return /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(SelectionContext.Provider, { value, children });
 }
 
 // src/contexts/selection/hooks.ts
-var import_react9 = require("react");
+var import_react10 = require("react");
 function useSelection() {
-  const context = (0, import_react9.useContext)(SelectionContext);
+  const context = (0, import_react10.useContext)(SelectionContext);
   if (context === void 0) {
     throw new Error("useSelection must be used within a SelectionProvider");
   }
@@ -2933,15 +3214,15 @@ function useSelection() {
 }
 function useItemSelection(elementKey) {
   const { isSelected, getSelectedItems, granularSelection } = useSelection();
-  const isItemSelected2 = (0, import_react9.useCallback)(
+  const isItemSelected2 = (0, import_react10.useCallback)(
     (itemId) => isSelected(elementKey, itemId),
     [elementKey, isSelected]
   );
-  const selectedItems = (0, import_react9.useMemo)(
+  const selectedItems = (0, import_react10.useMemo)(
     () => getSelectedItems(elementKey),
     [elementKey, getSelectedItems]
   );
-  const hasSelection = (0, import_react9.useMemo)(
+  const hasSelection = (0, import_react10.useMemo)(
     () => (granularSelection[elementKey]?.size ?? 0) > 0,
     [elementKey, granularSelection]
   );
@@ -2953,10 +3234,10 @@ function useItemSelection(elementKey) {
 }
 
 // src/contexts/selection/use-dom-tracking.ts
-var import_react10 = require("react");
+var import_react11 = require("react");
 
 // src/contexts/selection/SelectableItem.tsx
-var import_jsx_runtime6 = require("react/jsx-runtime");
+var import_jsx_runtime7 = require("react/jsx-runtime");
 function SelectableItem({
   elementKey,
   itemId,
@@ -2974,7 +3255,7 @@ function SelectableItem({
     as: _as,
     ...domProps
   } = rest;
-  return /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
     Component,
     {
       "data-selectable-item": "true",
@@ -3053,32 +3334,32 @@ var createStyles = (theme) => ({
 });
 
 // src/contexts/markdown/internal-markdown.tsx
-var import_react14 = __toESM(require("react"));
+var import_react15 = __toESM(require("react"));
 var import_react_markdown = __toESM(require("react-markdown"));
 
 // src/contexts/citation/index.ts
-var import_react11 = require("react");
 var import_react12 = require("react");
-var CitationContext = (0, import_react11.createContext)(null);
+var import_react13 = require("react");
+var CitationContext = (0, import_react12.createContext)(null);
 function CitationProvider({ children }) {
-  const [citations, setCitationsState] = (0, import_react11.useState)([]);
-  const setCitations = (0, import_react11.useCallback)((newCitations) => {
+  const [citations, setCitationsState] = (0, import_react12.useState)([]);
+  const setCitations = (0, import_react12.useCallback)((newCitations) => {
     setCitationsState(newCitations);
   }, []);
-  const addCitation = (0, import_react11.useCallback)((citation) => {
+  const addCitation = (0, import_react12.useCallback)((citation) => {
     setCitationsState((prev) => {
       if (prev.some((c) => c.id === citation.id)) return prev;
       return [...prev, citation];
     });
   }, []);
-  const clearCitations = (0, import_react11.useCallback)(() => {
+  const clearCitations = (0, import_react12.useCallback)(() => {
     setCitationsState([]);
   }, []);
-  const getCitation = (0, import_react11.useCallback)(
+  const getCitation = (0, import_react12.useCallback)(
     (id) => citations.find((c) => c.id === id),
     [citations]
   );
-  (0, import_react11.useEffect)(() => {
+  (0, import_react12.useEffect)(() => {
     if (typeof window === "undefined") return;
     const handleCitations = (event) => {
       const newCitations = event.detail?.citations;
@@ -3097,7 +3378,7 @@ function CitationProvider({ children }) {
       );
     };
   }, []);
-  const value = (0, import_react11.useMemo)(
+  const value = (0, import_react12.useMemo)(
     () => ({
       citations,
       setCitations,
@@ -3107,10 +3388,10 @@ function CitationProvider({ children }) {
     }),
     [citations, setCitations, addCitation, clearCitations, getCitation]
   );
-  return (0, import_react12.createElement)(CitationContext.Provider, { value }, children);
+  return (0, import_react13.createElement)(CitationContext.Provider, { value }, children);
 }
 function useCitations() {
-  const context = (0, import_react11.useContext)(CitationContext);
+  const context = (0, import_react12.useContext)(CitationContext);
   if (!context) {
     return {
       citations: [],
@@ -3127,25 +3408,25 @@ function useCitations() {
 }
 
 // src/contexts/citation/inline-citation.tsx
-var import_react13 = require("react");
-var import_jsx_runtime7 = require("react/jsx-runtime");
-var InlineCitation = (0, import_react13.memo)(function InlineCitation2({
+var import_react14 = require("react");
+var import_jsx_runtime8 = require("react/jsx-runtime");
+var InlineCitation = (0, import_react14.memo)(function InlineCitation2({
   id,
   citation
 }) {
-  const [showPopover, setShowPopover] = (0, import_react13.useState)(false);
-  const [popoverPosition, setPopoverPosition] = (0, import_react13.useState)(
+  const [showPopover, setShowPopover] = (0, import_react14.useState)(false);
+  const [popoverPosition, setPopoverPosition] = (0, import_react14.useState)(
     "bottom"
   );
-  const buttonRef = (0, import_react13.useRef)(null);
-  const popoverRef = (0, import_react13.useRef)(null);
-  const updatePosition = (0, import_react13.useCallback)(() => {
+  const buttonRef = (0, import_react14.useRef)(null);
+  const popoverRef = (0, import_react14.useRef)(null);
+  const updatePosition = (0, import_react14.useCallback)(() => {
     if (!buttonRef.current) return;
     const rect = buttonRef.current.getBoundingClientRect();
     const spaceBelow = window.innerHeight - rect.bottom;
     setPopoverPosition(spaceBelow < 200 ? "top" : "bottom");
   }, []);
-  (0, import_react13.useEffect)(() => {
+  (0, import_react14.useEffect)(() => {
     if (!showPopover) return;
     const handleClick2 = (e) => {
       if (popoverRef.current && !popoverRef.current.contains(e.target) && buttonRef.current && !buttonRef.current.contains(e.target)) {
@@ -3156,7 +3437,7 @@ var InlineCitation = (0, import_react13.memo)(function InlineCitation2({
     return () => document.removeEventListener("click", handleClick2);
   }, [showPopover]);
   if (!citation) {
-    return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
       "span",
       {
         style: {
@@ -3189,8 +3470,8 @@ var InlineCitation = (0, import_react13.memo)(function InlineCitation2({
       setShowPopover(!showPopover);
     }
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("span", { style: { position: "relative", display: "inline-block" }, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)("span", { style: { position: "relative", display: "inline-block" }, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
       "button",
       {
         ref: buttonRef,
@@ -3222,7 +3503,7 @@ var InlineCitation = (0, import_react13.memo)(function InlineCitation2({
         children: id
       }
     ),
-    showPopover && hasExcerpt && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+    showPopover && hasExcerpt && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(
       "div",
       {
         ref: popoverRef,
@@ -3242,7 +3523,7 @@ var InlineCitation = (0, import_react13.memo)(function InlineCitation2({
           transform: "translateX(-50%)"
         },
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+          /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(
             "div",
             {
               style: {
@@ -3254,7 +3535,7 @@ var InlineCitation = (0, import_react13.memo)(function InlineCitation2({
                 borderBottom: "1px solid rgba(255, 255, 255, 0.05)"
               },
               children: [
-                citation.pageNumber && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+                citation.pageNumber && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(
                   "span",
                   {
                     style: {
@@ -3271,7 +3552,7 @@ var InlineCitation = (0, import_react13.memo)(function InlineCitation2({
                     ]
                   }
                 ),
-                /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+                /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
                   "span",
                   {
                     style: {
@@ -3288,7 +3569,7 @@ var InlineCitation = (0, import_react13.memo)(function InlineCitation2({
               ]
             }
           ),
-          /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+          /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(
             "p",
             {
               style: {
@@ -3305,7 +3586,7 @@ var InlineCitation = (0, import_react13.memo)(function InlineCitation2({
               ]
             }
           ),
-          isWebSource && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
+          isWebSource && /* @__PURE__ */ (0, import_jsx_runtime8.jsxs)(
             "a",
             {
               href: citation.url,
@@ -3335,7 +3616,7 @@ var InlineCitation = (0, import_react13.memo)(function InlineCitation2({
 });
 
 // src/contexts/markdown/internal-markdown.tsx
-var import_jsx_runtime8 = require("react/jsx-runtime");
+var import_jsx_runtime9 = require("react/jsx-runtime");
 function parseCitationMarkers(text2, getCitation) {
   const parts = text2.split(/(\[\d+\])/g);
   return parts.map((part, idx) => {
@@ -3343,7 +3624,7 @@ function parseCitationMarkers(text2, getCitation) {
     if (match) {
       const id = match[1];
       const citation = getCitation(id);
-      return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(InlineCitation, { id, citation }, `cite-${idx}`);
+      return /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(InlineCitation, { id, citation }, `cite-${idx}`);
     }
     return part;
   });
@@ -3355,13 +3636,13 @@ function InternalMarkdown({
   className,
   style
 }) {
-  const styles = (0, import_react14.useMemo)(() => createStyles(theme), [theme]);
+  const styles = (0, import_react15.useMemo)(() => createStyles(theme), [theme]);
   const { getCitation, citations } = useCitations();
   const hasCitations = citations.length > 0;
-  const components = (0, import_react14.useMemo)(
+  const components = (0, import_react15.useMemo)(
     () => ({
       // Images - responsive with high quality
-      img: (props) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+      img: (props) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
         "img",
         {
           ...props,
@@ -3378,7 +3659,7 @@ function InternalMarkdown({
         }
       ),
       // Videos - native player with controls
-      video: (props) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+      video: (props) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
         "video",
         {
           ...props,
@@ -3395,19 +3676,19 @@ function InternalMarkdown({
         }
       ),
       // Code blocks
-      pre: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("pre", { style: styles.codeBlock, children }),
+      pre: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("pre", { style: styles.codeBlock, children }),
       code: ({
         children,
         className: codeClassName
       }) => {
         const isInline = !codeClassName;
         if (isInline) {
-          return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("code", { style: styles.inlineCode, children });
+          return /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("code", { style: styles.inlineCode, children });
         }
-        return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("code", { children });
+        return /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("code", { children });
       },
       // Links
-      a: ({ href, children }) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+      a: ({ href, children }) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
         "a",
         {
           href,
@@ -3418,8 +3699,8 @@ function InternalMarkdown({
         }
       ),
       // Lists
-      ul: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("ul", { style: styles.list, children }),
-      ol: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(
+      ul: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("ul", { style: styles.list, children }),
+      ol: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
         "ol",
         {
           style: {
@@ -3430,78 +3711,78 @@ function InternalMarkdown({
           children
         }
       ),
-      li: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("li", { style: styles.listItem, children }),
+      li: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("li", { style: styles.listItem, children }),
       // Headings
-      h1: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h1", { style: { ...styles.headingBase, fontSize: 18 }, children }),
-      h2: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h2", { style: { ...styles.headingBase, fontSize: 16 }, children }),
-      h3: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h3", { style: { ...styles.headingBase, fontSize: 15 }, children }),
-      h4: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h4", { style: { ...styles.headingBase, fontSize: 14 }, children }),
-      h5: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h5", { style: { ...styles.headingBase, fontSize: 13 }, children }),
-      h6: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("h6", { style: { ...styles.headingBase, fontSize: 12 }, children }),
+      h1: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h1", { style: { ...styles.headingBase, fontSize: 18 }, children }),
+      h2: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h2", { style: { ...styles.headingBase, fontSize: 16 }, children }),
+      h3: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h3", { style: { ...styles.headingBase, fontSize: 15 }, children }),
+      h4: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h4", { style: { ...styles.headingBase, fontSize: 14 }, children }),
+      h5: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h5", { style: { ...styles.headingBase, fontSize: 13 }, children }),
+      h6: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("h6", { style: { ...styles.headingBase, fontSize: 12 }, children }),
       // Paragraphs - with citation parsing
       p: ({ children }) => {
-        const processedChildren = hasCitations ? import_react14.default.Children.map(children, (child) => {
+        const processedChildren = hasCitations ? import_react15.default.Children.map(children, (child) => {
           if (typeof child === "string") {
             return parseCitationMarkers(child, getCitation);
           }
           return child;
         }) : children;
-        return inline ? /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("span", { children: processedChildren }) : /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("p", { style: styles.paragraph, children: processedChildren });
+        return inline ? /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { children: processedChildren }) : /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("p", { style: styles.paragraph, children: processedChildren });
       },
       // Blockquotes
-      blockquote: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("blockquote", { style: styles.blockquote, children }),
+      blockquote: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("blockquote", { style: styles.blockquote, children }),
       // Horizontal rules
-      hr: () => /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("hr", { style: styles.hr }),
+      hr: () => /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("hr", { style: styles.hr }),
       // Strong/Bold - with citation parsing
       strong: ({ children }) => {
-        const processedChildren = hasCitations ? import_react14.default.Children.map(children, (child) => {
+        const processedChildren = hasCitations ? import_react15.default.Children.map(children, (child) => {
           if (typeof child === "string") {
             return parseCitationMarkers(child, getCitation);
           }
           return child;
         }) : children;
-        return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("strong", { style: { fontWeight: 600 }, children: processedChildren });
+        return /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("strong", { style: { fontWeight: 600 }, children: processedChildren });
       },
       // Emphasis/Italic - with citation parsing
       em: ({ children }) => {
-        const processedChildren = hasCitations ? import_react14.default.Children.map(children, (child) => {
+        const processedChildren = hasCitations ? import_react15.default.Children.map(children, (child) => {
           if (typeof child === "string") {
             return parseCitationMarkers(child, getCitation);
           }
           return child;
         }) : children;
-        return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)("em", { style: { fontStyle: "italic" }, children: processedChildren });
+        return /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("em", { style: { fontStyle: "italic" }, children: processedChildren });
       }
     }),
     [styles, inline, hasCitations, getCitation]
   );
   const Wrapper = inline ? "span" : "div";
-  return /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(Wrapper, { className, style, children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(import_react_markdown.default, { components, children: content }) });
+  return /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(Wrapper, { className, style, children: /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(import_react_markdown.default, { components, children: content }) });
 }
 
 // src/contexts/markdown/provider.tsx
-var import_react15 = require("react");
-var import_jsx_runtime9 = require("react/jsx-runtime");
-var MarkdownContext = (0, import_react15.createContext)(null);
+var import_react16 = require("react");
+var import_jsx_runtime10 = require("react/jsx-runtime");
+var MarkdownContext = (0, import_react16.createContext)(null);
 function MarkdownProvider({
   children,
   enabled = true,
   theme: themeOverrides
 }) {
-  const theme = (0, import_react15.useMemo)(
+  const theme = (0, import_react16.useMemo)(
     () => ({ ...defaultTheme, ...themeOverrides }),
     [themeOverrides]
   );
-  const renderText = (0, import_react15.useMemo)(() => {
+  const renderText = (0, import_react16.useMemo)(() => {
     return (content, options = {}) => {
       if (!content) return null;
       if (!enabled) {
         if (options.inline) {
-          return /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: options.className, style: options.style, children: content });
+          return /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: options.className, style: options.style, children: content });
         }
-        return /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: options.className, style: options.style, children: content });
+        return /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("div", { className: options.className, style: options.style, children: content });
       }
-      return /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(
+      return /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(
         InternalMarkdown,
         {
           content,
@@ -3513,7 +3794,7 @@ function MarkdownProvider({
       );
     };
   }, [enabled, theme]);
-  const value = (0, import_react15.useMemo)(
+  const value = (0, import_react16.useMemo)(
     () => ({
       enabled,
       theme,
@@ -3521,14 +3802,14 @@ function MarkdownProvider({
     }),
     [enabled, theme, renderText]
   );
-  return /* @__PURE__ */ (0, import_jsx_runtime9.jsx)(MarkdownContext.Provider, { value, children });
+  return /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(MarkdownContext.Provider, { value, children });
 }
 var fallbackRenderText = (content, options = {}) => {
   if (!content) return null;
   if (options.inline) {
-    return /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("span", { className: options.className, style: options.style, children: content });
+    return /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("span", { className: options.className, style: options.style, children: content });
   }
-  return /* @__PURE__ */ (0, import_jsx_runtime9.jsx)("div", { className: options.className, style: options.style, children: content });
+  return /* @__PURE__ */ (0, import_jsx_runtime10.jsx)("div", { className: options.className, style: options.style, children: content });
 };
 var fallbackContextValue = {
   enabled: false,
@@ -3536,7 +3817,7 @@ var fallbackContextValue = {
   renderText: fallbackRenderText
 };
 function useMarkdown() {
-  const context = (0, import_react15.useContext)(MarkdownContext);
+  const context = (0, import_react16.useContext)(MarkdownContext);
   return context ?? fallbackContextValue;
 }
 function useRenderText() {
@@ -3545,7 +3826,7 @@ function useRenderText() {
 }
 
 // src/contexts/ai-settings.tsx
-var import_react16 = require("react");
+var import_react17 = require("react");
 
 // src/hooks/types.ts
 function isLibraryAttachment(a) {
@@ -3671,13 +3952,13 @@ async function saveSettingsToAPI(settings) {
 }
 
 // src/contexts/ai-settings.tsx
-var import_jsx_runtime10 = require("react/jsx-runtime");
-var AISettingsContext = (0, import_react16.createContext)(null);
+var import_jsx_runtime11 = require("react/jsx-runtime");
+var AISettingsContext = (0, import_react17.createContext)(null);
 function AISettingsProvider({
   children,
   initialSettings
 }) {
-  const [settings, setSettings] = (0, import_react16.useState)(() => {
+  const [settings, setSettings] = (0, import_react17.useState)(() => {
     const loaded = loadSettings();
     if (initialSettings) {
       return {
@@ -3693,10 +3974,10 @@ function AISettingsProvider({
     }
     return loaded;
   });
-  const [isLoading, setIsLoading] = (0, import_react16.useState)(true);
-  const [isSyncing, setIsSyncing] = (0, import_react16.useState)(false);
-  const syncTimeoutRef = (0, import_react16.useRef)(null);
-  (0, import_react16.useEffect)(() => {
+  const [isLoading, setIsLoading] = (0, import_react17.useState)(true);
+  const [isSyncing, setIsSyncing] = (0, import_react17.useState)(false);
+  const syncTimeoutRef = (0, import_react17.useRef)(null);
+  (0, import_react17.useEffect)(() => {
     fetchSettingsFromAPI().then((apiSettings) => {
       if (apiSettings) {
         setSettings(apiSettings);
@@ -3705,7 +3986,7 @@ function AISettingsProvider({
       setIsLoading(false);
     });
   }, []);
-  const syncToAPI = (0, import_react16.useCallback)((newSettings) => {
+  const syncToAPI = (0, import_react17.useCallback)((newSettings) => {
     if (syncTimeoutRef.current) {
       clearTimeout(syncTimeoutRef.current);
     }
@@ -3715,7 +3996,7 @@ function AISettingsProvider({
       setIsSyncing(false);
     }, 500);
   }, []);
-  const updateAndSync = (0, import_react16.useCallback)(
+  const updateAndSync = (0, import_react17.useCallback)(
     (newSettings, changedPart) => {
       setSettings(newSettings);
       saveSettings(newSettings);
@@ -3723,7 +4004,7 @@ function AISettingsProvider({
     },
     [syncToAPI]
   );
-  const updateSettings = (0, import_react16.useCallback)(
+  const updateSettings = (0, import_react17.useCallback)(
     (partial) => {
       setSettings((prev) => {
         const next = {
@@ -3740,7 +4021,7 @@ function AISettingsProvider({
     },
     [syncToAPI]
   );
-  const setProactivityMode = (0, import_react16.useCallback)(
+  const setProactivityMode = (0, import_react17.useCallback)(
     (mode) => {
       const change = {
         proactivity: {
@@ -3759,7 +4040,7 @@ function AISettingsProvider({
     },
     [settings, updateAndSync]
   );
-  const setProactivityEnabled = (0, import_react16.useCallback)(
+  const setProactivityEnabled = (0, import_react17.useCallback)(
     (enabled) => {
       const change = {
         proactivity: {
@@ -3778,14 +4059,14 @@ function AISettingsProvider({
     },
     [settings, updateAndSync]
   );
-  const setSuggestionsEnabled = (0, import_react16.useCallback)(
+  const setSuggestionsEnabled = (0, import_react17.useCallback)(
     (enabled) => {
       const change = { suggestions: { ...settings.suggestions, enabled } };
       updateAndSync({ ...settings, ...change }, change);
     },
     [settings, updateAndSync]
   );
-  const setDataCollectionPreferForm = (0, import_react16.useCallback)(
+  const setDataCollectionPreferForm = (0, import_react17.useCallback)(
     (preferForm) => {
       const change = {
         dataCollection: { ...settings.dataCollection, preferForm }
@@ -3794,19 +4075,19 @@ function AISettingsProvider({
     },
     [settings, updateAndSync]
   );
-  const setSmartParsingEnabled = (0, import_react16.useCallback)(
+  const setSmartParsingEnabled = (0, import_react17.useCallback)(
     (enabled) => {
       const change = { documents: { smartParsingEnabled: enabled } };
       updateAndSync({ ...settings, ...change }, change);
     },
     [settings, updateAndSync]
   );
-  const resetSettings = (0, import_react16.useCallback)(() => {
+  const resetSettings = (0, import_react17.useCallback)(() => {
     setSettings(DEFAULT_EXTENDED_SETTINGS);
     saveSettings(DEFAULT_EXTENDED_SETTINGS);
     syncToAPI(DEFAULT_EXTENDED_SETTINGS);
   }, [syncToAPI]);
-  const completeOnboarding = (0, import_react16.useCallback)(() => {
+  const completeOnboarding = (0, import_react17.useCallback)(() => {
     const change = { onboarding: { ...settings.onboarding, completed: true } };
     updateAndSync({ ...settings, ...change }, change);
   }, [settings, updateAndSync]);
@@ -3823,36 +4104,36 @@ function AISettingsProvider({
     isLoading,
     isSyncing
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime10.jsx)(AISettingsContext.Provider, { value, children });
+  return /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(AISettingsContext.Provider, { value, children });
 }
 function useAISettings() {
-  const context = (0, import_react16.useContext)(AISettingsContext);
+  const context = (0, import_react17.useContext)(AISettingsContext);
   if (!context) {
     throw new Error("useAISettings must be used within AISettingsProvider");
   }
   return context;
 }
 function useAISettingsOptional() {
-  return (0, import_react16.useContext)(AISettingsContext);
+  return (0, import_react17.useContext)(AISettingsContext);
 }
 function useIsProactivityEnabled() {
-  const context = (0, import_react16.useContext)(AISettingsContext);
+  const context = (0, import_react17.useContext)(AISettingsContext);
   if (!context) return true;
   return context.settings.proactivity.enabled && context.settings.proactivity.mode !== "disabled";
 }
 function useAreSuggestionsEnabled() {
-  const context = (0, import_react16.useContext)(AISettingsContext);
+  const context = (0, import_react17.useContext)(AISettingsContext);
   if (!context) return true;
   return context.settings.suggestions.enabled;
 }
 function useIsSmartParsingEnabled() {
-  const context = (0, import_react16.useContext)(AISettingsContext);
+  const context = (0, import_react17.useContext)(AISettingsContext);
   if (!context) return false;
   return context.settings.documents.smartParsingEnabled;
 }
 
 // src/contexts/action-tracking/provider.tsx
-var import_react17 = require("react");
+var import_react18 = require("react");
 
 // src/contexts/action-tracking/types.ts
 var DEFAULT_OPTIONS = {
@@ -3893,24 +4174,24 @@ Based on these actions, you may proactively offer relevant assistance.
 }
 
 // src/contexts/action-tracking/provider.tsx
-var import_jsx_runtime11 = require("react/jsx-runtime");
-var ActionContext2 = (0, import_react17.createContext)(null);
+var import_jsx_runtime12 = require("react/jsx-runtime");
+var ActionContext2 = (0, import_react18.createContext)(null);
 function ActionProvider2({
   children,
   initialOptions
 }) {
-  const [options, setOptionsState] = (0, import_react17.useState)(() => ({
+  const [options, setOptionsState] = (0, import_react18.useState)(() => ({
     ...DEFAULT_OPTIONS,
     ...initialOptions
   }));
-  const [actions, setActions] = (0, import_react17.useState)([]);
-  const [lastAction, setLastAction] = (0, import_react17.useState)(null);
-  const subscribersRef = (0, import_react17.useRef)(
+  const [actions, setActions] = (0, import_react18.useState)([]);
+  const [lastAction, setLastAction] = (0, import_react18.useState)(null);
+  const subscribersRef = (0, import_react18.useRef)(
     /* @__PURE__ */ new Set()
   );
-  const pendingActionsRef = (0, import_react17.useRef)([]);
-  const timerRef = (0, import_react17.useRef)(null);
-  const notifySubscribers = (0, import_react17.useCallback)((batch) => {
+  const pendingActionsRef = (0, import_react18.useRef)([]);
+  const timerRef = (0, import_react18.useRef)(null);
+  const notifySubscribers = (0, import_react18.useCallback)((batch) => {
     subscribersRef.current.forEach((cb) => {
       try {
         cb(batch);
@@ -3919,7 +4200,7 @@ function ActionProvider2({
       }
     });
   }, []);
-  const tryFlush = (0, import_react17.useCallback)(() => {
+  const tryFlush = (0, import_react18.useCallback)(() => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
@@ -3933,7 +4214,7 @@ function ActionProvider2({
     pendingActionsRef.current = [];
     notifySubscribers(batch);
   }, [notifySubscribers]);
-  const scheduleFlush2 = (0, import_react17.useCallback)(
+  const scheduleFlush2 = (0, import_react18.useCallback)(
     (delayMs) => {
       if (timerRef.current) {
         clearTimeout(timerRef.current);
@@ -3942,7 +4223,7 @@ function ActionProvider2({
     },
     [tryFlush]
   );
-  const trackAction = (0, import_react17.useCallback)(
+  const trackAction = (0, import_react18.useCallback)(
     (actionData) => {
       if (!options.enabled) return;
       const action = {
@@ -3965,7 +4246,7 @@ function ActionProvider2({
       scheduleFlush2
     ]
   );
-  const clearActions = (0, import_react17.useCallback)(() => {
+  const clearActions = (0, import_react18.useCallback)(() => {
     setActions([]);
     setLastAction(null);
     pendingActionsRef.current = [];
@@ -3974,28 +4255,28 @@ function ActionProvider2({
       timerRef.current = null;
     }
   }, []);
-  const getActionsForContext = (0, import_react17.useCallback)(() => {
+  const getActionsForContext = (0, import_react18.useCallback)(() => {
     return actions.slice(-(options.maxActionsInContext ?? 5));
   }, [actions, options.maxActionsInContext]);
-  const onAction = (0, import_react17.useCallback)(
+  const onAction = (0, import_react18.useCallback)(
     (callback) => {
       subscribersRef.current.add(callback);
       return () => subscribersRef.current.delete(callback);
     },
     []
   );
-  const setOptions = (0, import_react17.useCallback)(
+  const setOptions = (0, import_react18.useCallback)(
     (newOptions) => {
       setOptionsState((prev) => ({ ...prev, ...newOptions }));
     },
     []
   );
-  (0, import_react17.useEffect)(() => {
+  (0, import_react18.useEffect)(() => {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, []);
-  (0, import_react17.useEffect)(() => {
+  (0, import_react18.useEffect)(() => {
     if (typeof document === "undefined") return;
     let focusOutTimeout = null;
     const handleFocusOut = (e) => {
@@ -4025,13 +4306,13 @@ function ActionProvider2({
     options,
     setOptions
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(ActionContext2.Provider, { value, children });
+  return /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(ActionContext2.Provider, { value, children });
 }
 
 // src/contexts/action-tracking/hooks.ts
-var import_react18 = require("react");
+var import_react19 = require("react");
 function useActionContext() {
-  const context = (0, import_react18.useContext)(ActionContext2);
+  const context = (0, import_react19.useContext)(ActionContext2);
   if (!context) {
     throw new Error("useActionContext must be used within ActionProvider");
   }
@@ -4039,7 +4320,7 @@ function useActionContext() {
 }
 function useElementActionTracker(elementKey, elementType) {
   const { trackAction, options } = useActionContext();
-  const track = (0, import_react18.useCallback)(
+  const track = (0, import_react19.useCallback)(
     (type, context, payload) => {
       if (!options.enabled) return;
       trackAction({ type, elementKey, elementType, context, payload });
@@ -4050,15 +4331,15 @@ function useElementActionTracker(elementKey, elementType) {
 }
 function useActionSubscriber(callback, deps = []) {
   const { onAction } = useActionContext();
-  (0, import_react18.useEffect)(() => {
+  (0, import_react19.useEffect)(() => {
     return onAction(callback);
   }, [onAction, ...deps]);
 }
 
 // src/contexts/autosave.tsx
-var import_react19 = __toESM(require("react"));
-var import_jsx_runtime12 = require("react/jsx-runtime");
-var AutoSaveContext = (0, import_react19.createContext)(null);
+var import_react20 = __toESM(require("react"));
+var import_jsx_runtime13 = require("react/jsx-runtime");
+var AutoSaveContext = (0, import_react20.createContext)(null);
 var DEFAULT_DEBOUNCE_MS = 1500;
 function AutoSaveProvider({
   children,
@@ -4068,9 +4349,9 @@ function AutoSaveProvider({
   onSaveComplete,
   onSaveError
 }) {
-  const debounceTimersRef = (0, import_react19.useRef)(/* @__PURE__ */ new Map());
-  const pendingRef = (0, import_react19.useRef)(/* @__PURE__ */ new Map());
-  const autoSave = (0, import_react19.useCallback)(
+  const debounceTimersRef = (0, import_react20.useRef)(/* @__PURE__ */ new Map());
+  const pendingRef = (0, import_react20.useRef)(/* @__PURE__ */ new Map());
+  const autoSave = (0, import_react20.useCallback)(
     async (payload) => {
       if (!chatId || !enabled) {
         return {
@@ -4105,7 +4386,7 @@ function AutoSaveProvider({
     },
     [chatId, enabled, saveEndpoint, onSaveComplete, onSaveError]
   );
-  const debouncedAutoSave = (0, import_react19.useCallback)(
+  const debouncedAutoSave = (0, import_react20.useCallback)(
     (payload, delayMs = DEFAULT_DEBOUNCE_MS) => {
       if (!chatId || !enabled) return;
       const key = `${payload.type}:${payload.elementKey}`;
@@ -4126,7 +4407,7 @@ function AutoSaveProvider({
     },
     [chatId, enabled, autoSave]
   );
-  const value = (0, import_react19.useMemo)(
+  const value = (0, import_react20.useMemo)(
     () => ({
       chatId,
       autoSave,
@@ -4135,10 +4416,10 @@ function AutoSaveProvider({
     }),
     [chatId, autoSave, debouncedAutoSave, enabled]
   );
-  return /* @__PURE__ */ (0, import_jsx_runtime12.jsx)(AutoSaveContext.Provider, { value, children });
+  return /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(AutoSaveContext.Provider, { value, children });
 }
 function useAutoSave() {
-  const context = (0, import_react19.useContext)(AutoSaveContext);
+  const context = (0, import_react20.useContext)(AutoSaveContext);
   if (!context) {
     return {
       chatId: null,
@@ -4152,9 +4433,9 @@ function useAutoSave() {
 }
 function useDomainAutoSave(type, elementKey, data, options) {
   const { debouncedAutoSave, isEnabled } = useAutoSave();
-  const mountedRef = (0, import_react19.useRef)(false);
-  const lastDataRef = (0, import_react19.useRef)(null);
-  import_react19.default.useEffect(() => {
+  const mountedRef = (0, import_react20.useRef)(false);
+  const lastDataRef = (0, import_react20.useRef)(null);
+  import_react20.default.useEffect(() => {
     if (!isEnabled || !data || !elementKey) return;
     if (!mountedRef.current) {
       mountedRef.current = true;
@@ -4176,10 +4457,10 @@ function useDomainAutoSave(type, elementKey, data, options) {
 }
 
 // src/contexts/tool-progress.tsx
-var import_react20 = require("react");
+var import_react21 = require("react");
 var import_shallow2 = require("zustand/react/shallow");
-var import_jsx_runtime13 = require("react/jsx-runtime");
-var ToolProgressContext = (0, import_react20.createContext)(
+var import_jsx_runtime14 = require("react/jsx-runtime");
+var ToolProgressContext = (0, import_react21.createContext)(
   null
 );
 function ToolProgressProvider({
@@ -4196,7 +4477,7 @@ function ToolProgressProvider({
   );
   const getActiveProgress = useStore((s) => s.getActiveProgress);
   const isToolRunning = useStore((s) => s.isToolRunning);
-  const addProgress = (0, import_react20.useCallback)(
+  const addProgress = (0, import_react21.useCallback)(
     (event) => {
       addProgressEvent({
         toolCallId: event.toolCallId,
@@ -4209,22 +4490,22 @@ function ToolProgressProvider({
     },
     [addProgressEvent]
   );
-  const updateProgress = (0, import_react20.useCallback)(
+  const updateProgress = (0, import_react21.useCallback)(
     (toolCallId, updates) => {
       updateProgressEvent(toolCallId, updates);
     },
     [updateProgressEvent]
   );
-  const clearProgress = (0, import_react20.useCallback)(() => {
+  const clearProgress = (0, import_react21.useCallback)(() => {
     clearProgressEvents();
   }, [clearProgressEvents]);
-  const clearCompletedOlderThan = (0, import_react20.useCallback)(
+  const clearCompletedOlderThan = (0, import_react21.useCallback)(
     (ms) => {
       clearCompletedProgressOlderThan(ms);
     },
     [clearCompletedProgressOlderThan]
   );
-  (0, import_react20.useEffect)(() => {
+  (0, import_react21.useEffect)(() => {
     if (autoClearCompleteMs <= 0) return;
     const interval = setInterval(() => {
       clearCompletedOlderThan(autoClearCompleteMs);
@@ -4233,7 +4514,7 @@ function ToolProgressProvider({
   }, [autoClearCompleteMs, clearCompletedOlderThan]);
   const activeProgress = getActiveProgress();
   const toolRunning = isToolRunning();
-  const value = (0, import_react20.useMemo)(
+  const value = (0, import_react21.useMemo)(
     () => ({
       activeProgress,
       allProgress: progressEvents,
@@ -4253,10 +4534,10 @@ function ToolProgressProvider({
       clearCompletedOlderThan
     ]
   );
-  return /* @__PURE__ */ (0, import_jsx_runtime13.jsx)(ToolProgressContext.Provider, { value, children });
+  return /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(ToolProgressContext.Provider, { value, children });
 }
 function useToolProgress() {
-  const context = (0, import_react20.useContext)(ToolProgressContext);
+  const context = (0, import_react21.useContext)(ToolProgressContext);
   if (!context) {
     throw new Error(
       "useToolProgress must be used within a ToolProgressProvider"
@@ -4265,7 +4546,7 @@ function useToolProgress() {
   return context;
 }
 function useToolProgressOptional() {
-  return (0, import_react20.useContext)(ToolProgressContext);
+  return (0, import_react21.useContext)(ToolProgressContext);
 }
 function useIsToolRunning() {
   return useStore(
@@ -4285,10 +4566,10 @@ function useActiveToolProgress2() {
 }
 
 // src/contexts/unified-progress.tsx
-var import_react21 = require("react");
+var import_react22 = require("react");
 var import_shallow3 = require("zustand/react/shallow");
-var import_jsx_runtime14 = require("react/jsx-runtime");
-var UnifiedProgressContext = (0, import_react21.createContext)(null);
+var import_jsx_runtime15 = require("react/jsx-runtime");
+var UnifiedProgressContext = (0, import_react22.createContext)(null);
 function mapPlanStepStatus(status) {
   switch (status) {
     case "running":
@@ -4353,7 +4634,7 @@ function UnifiedProgressProvider({
 }) {
   const planExecution = useStore((s) => s.planExecution);
   const progressEvents = useStore((0, import_shallow3.useShallow)((s) => s.progressEvents));
-  const items = (0, import_react21.useMemo)(() => {
+  const items = (0, import_react22.useMemo)(() => {
     const result = [];
     if (planExecution.plan) {
       for (const step of planExecution.plan.steps) {
@@ -4367,18 +4648,18 @@ function UnifiedProgressProvider({
     }
     return result;
   }, [planExecution.plan, planExecution.isOrchestrating, progressEvents]);
-  const activeItems = (0, import_react21.useMemo)(
+  const activeItems = (0, import_react22.useMemo)(
     () => items.filter((item) => item.status === "running"),
     [items]
   );
-  const isGenerating = (0, import_react21.useMemo)(() => {
+  const isGenerating = (0, import_react22.useMemo)(() => {
     if (planExecution.isOrchestrating) return true;
     return progressEvents.some(
       (p) => p.status === "starting" || p.status === "progress"
     );
   }, [planExecution.isOrchestrating, progressEvents]);
   const goal = planExecution.plan?.goal ?? null;
-  const overallProgress = (0, import_react21.useMemo)(() => {
+  const overallProgress = (0, import_react22.useMemo)(() => {
     if (!planExecution.plan) {
       const activeTools = progressEvents.filter(
         (p) => p.status === "starting" || p.status === "progress"
@@ -4391,23 +4672,23 @@ function UnifiedProgressProvider({
     const completed = steps.filter((s) => s.status === "complete").length;
     return steps.length > 0 ? Math.round(completed / steps.length * 100) : 0;
   }, [planExecution.plan, progressEvents]);
-  const elapsedTime = (0, import_react21.useMemo)(() => {
+  const elapsedTime = (0, import_react22.useMemo)(() => {
     if (!planExecution.orchestrationStartTime) return null;
     if (!planExecution.isOrchestrating) return null;
     return Date.now() - planExecution.orchestrationStartTime;
   }, [planExecution.orchestrationStartTime, planExecution.isOrchestrating]);
-  const getItem = (0, import_react21.useCallback)(
+  const getItem = (0, import_react22.useCallback)(
     (id) => items.find((item) => item.id === id),
     [items]
   );
-  const isItemRunning = (0, import_react21.useCallback)(
+  const isItemRunning = (0, import_react22.useCallback)(
     (id) => {
       const item = items.find((i) => i.id === id);
       return item?.status === "running";
     },
     [items]
   );
-  const value = (0, import_react21.useMemo)(
+  const value = (0, import_react22.useMemo)(
     () => ({
       isGenerating,
       goal,
@@ -4429,10 +4710,10 @@ function UnifiedProgressProvider({
       isItemRunning
     ]
   );
-  return /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(UnifiedProgressContext.Provider, { value, children });
+  return /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(UnifiedProgressContext.Provider, { value, children });
 }
 function useUnifiedProgress() {
-  const context = (0, import_react21.useContext)(UnifiedProgressContext);
+  const context = (0, import_react22.useContext)(UnifiedProgressContext);
   if (!context) {
     throw new Error(
       "useUnifiedProgress must be used within a UnifiedProgressProvider"
@@ -4441,7 +4722,7 @@ function useUnifiedProgress() {
   return context;
 }
 function useUnifiedProgressOptional() {
-  return (0, import_react21.useContext)(UnifiedProgressContext);
+  return (0, import_react22.useContext)(UnifiedProgressContext);
 }
 function useIsGenerating() {
   return useStore((s) => {
@@ -4453,267 +4734,6 @@ function useIsGenerating() {
 }
 function useGeneratingGoal() {
   return useStore((s) => s.planExecution.plan?.goal ?? null);
-}
-
-// src/contexts/edit-mode.tsx
-var import_react22 = require("react");
-var import_jsx_runtime15 = require("react/jsx-runtime");
-var EditModeContext = (0, import_react22.createContext)(null);
-function EditModeProvider({
-  children,
-  initialEditing = false,
-  onCommit,
-  autoSaveDelay = 1500,
-  maxHistoryItems = 50
-}) {
-  const [isEditing, setIsEditing] = (0, import_react22.useState)(initialEditing);
-  const [focusedKey, setFocusedKey] = (0, import_react22.useState)(null);
-  const [pendingChanges, setPendingChanges] = (0, import_react22.useState)(/* @__PURE__ */ new Map());
-  const [previousValues, setPreviousValues] = (0, import_react22.useState)(/* @__PURE__ */ new Map());
-  const [history, setHistory] = (0, import_react22.useState)([]);
-  const [historyIndex, setHistoryIndex] = (0, import_react22.useState)(-1);
-  const autoSaveTimerRef = (0, import_react22.useRef)(null);
-  (0, import_react22.useEffect)(() => {
-    return () => {
-      if (autoSaveTimerRef.current) {
-        clearTimeout(autoSaveTimerRef.current);
-      }
-    };
-  }, []);
-  const enableEditing = (0, import_react22.useCallback)(() => setIsEditing(true), []);
-  const disableEditing = (0, import_react22.useCallback)(() => {
-    setIsEditing(false);
-    setFocusedKey(null);
-    if (pendingChanges.size > 0) {
-    }
-  }, [pendingChanges.size]);
-  const toggleEditing = (0, import_react22.useCallback)(() => setIsEditing((prev) => !prev), []);
-  const recordChange = (0, import_react22.useCallback)(
-    (elementKey, propName, newValue, previousValue) => {
-      setPendingChanges((prev) => {
-        const next = new Map(prev);
-        const existing = next.get(elementKey) || {};
-        next.set(elementKey, { ...existing, [propName]: newValue });
-        return next;
-      });
-      if (previousValue !== void 0) {
-        setPreviousValues((prev) => {
-          const next = new Map(prev);
-          const existing = next.get(elementKey) || {};
-          if (!(propName in existing)) {
-            next.set(elementKey, { ...existing, [propName]: previousValue });
-          }
-          return next;
-        });
-      }
-      if (autoSaveDelay > 0) {
-        if (autoSaveTimerRef.current) {
-          clearTimeout(autoSaveTimerRef.current);
-        }
-        autoSaveTimerRef.current = setTimeout(() => {
-          commitChangesRef.current?.();
-        }, autoSaveDelay);
-      }
-    },
-    [autoSaveDelay]
-  );
-  const commitChangesRef = (0, import_react22.useRef)(void 0);
-  const commitChanges = (0, import_react22.useCallback)(() => {
-    if (pendingChanges.size === 0) return;
-    const propChanges = [];
-    const elementChanges = [];
-    const now = Date.now();
-    pendingChanges.forEach((props, key) => {
-      const prevProps = previousValues.get(key) || {};
-      for (const [propName, newValue] of Object.entries(props)) {
-        propChanges.push({
-          elementKey: key,
-          propName,
-          oldValue: prevProps[propName],
-          newValue
-        });
-      }
-      elementChanges.push({
-        key,
-        props,
-        previousProps: prevProps,
-        timestamp: now
-      });
-    });
-    setHistory((prev) => {
-      const newHistory = prev.slice(0, historyIndex + 1);
-      newHistory.push({ changes: propChanges, timestamp: now });
-      if (newHistory.length > maxHistoryItems) {
-        return newHistory.slice(-maxHistoryItems);
-      }
-      return newHistory;
-    });
-    setHistoryIndex((prev) => prev + 1);
-    if (onCommit) {
-      onCommit(elementChanges);
-    }
-    setPendingChanges(/* @__PURE__ */ new Map());
-    setPreviousValues(/* @__PURE__ */ new Map());
-    if (autoSaveTimerRef.current) {
-      clearTimeout(autoSaveTimerRef.current);
-      autoSaveTimerRef.current = null;
-    }
-  }, [pendingChanges, previousValues, historyIndex, maxHistoryItems, onCommit]);
-  commitChangesRef.current = commitChanges;
-  const discardChanges = (0, import_react22.useCallback)(() => {
-    setPendingChanges(/* @__PURE__ */ new Map());
-    setPreviousValues(/* @__PURE__ */ new Map());
-    if (autoSaveTimerRef.current) {
-      clearTimeout(autoSaveTimerRef.current);
-      autoSaveTimerRef.current = null;
-    }
-  }, []);
-  const undo = (0, import_react22.useCallback)(() => {
-    if (historyIndex < 0) return;
-    const item = history[historyIndex];
-    if (!item) return;
-    const elementMap = /* @__PURE__ */ new Map();
-    for (const change of item.changes) {
-      const existing = elementMap.get(change.elementKey) || { props: {}, previousProps: {} };
-      existing.props[change.propName] = change.oldValue;
-      existing.previousProps[change.propName] = change.newValue;
-      elementMap.set(change.elementKey, existing);
-    }
-    const undoChanges = Array.from(elementMap.entries()).map(([key, data]) => ({
-      key,
-      props: data.props,
-      previousProps: data.previousProps,
-      timestamp: Date.now()
-    }));
-    if (onCommit) {
-      onCommit(undoChanges);
-    }
-    setHistoryIndex((prev) => prev - 1);
-  }, [history, historyIndex, onCommit]);
-  const redo = (0, import_react22.useCallback)(() => {
-    if (historyIndex >= history.length - 1) return;
-    const item = history[historyIndex + 1];
-    if (!item) return;
-    const elementMap = /* @__PURE__ */ new Map();
-    for (const change of item.changes) {
-      const existing = elementMap.get(change.elementKey) || { props: {}, previousProps: {} };
-      existing.props[change.propName] = change.newValue;
-      existing.previousProps[change.propName] = change.oldValue;
-      elementMap.set(change.elementKey, existing);
-    }
-    const redoChanges = Array.from(elementMap.entries()).map(([key, data]) => ({
-      key,
-      props: data.props,
-      previousProps: data.previousProps,
-      timestamp: Date.now()
-    }));
-    if (onCommit) {
-      onCommit(redoChanges);
-    }
-    setHistoryIndex((prev) => prev + 1);
-  }, [history, historyIndex, onCommit]);
-  const canUndo = historyIndex >= 0;
-  const canRedo = historyIndex < history.length - 1;
-  const pendingCount = pendingChanges.size;
-  const value = (0, import_react22.useMemo)(
-    () => ({
-      isEditing,
-      enableEditing,
-      disableEditing,
-      toggleEditing,
-      focusedKey,
-      setFocusedKey,
-      pendingChanges,
-      recordChange,
-      commitChanges,
-      discardChanges,
-      undo,
-      redo,
-      canUndo,
-      canRedo,
-      history,
-      pendingCount,
-      onCommit
-    }),
-    [
-      isEditing,
-      enableEditing,
-      disableEditing,
-      toggleEditing,
-      focusedKey,
-      setFocusedKey,
-      pendingChanges,
-      recordChange,
-      commitChanges,
-      discardChanges,
-      undo,
-      redo,
-      canUndo,
-      canRedo,
-      history,
-      pendingCount,
-      onCommit
-    ]
-  );
-  return /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(EditModeContext.Provider, { value, children });
-}
-function useEditMode() {
-  const context = (0, import_react22.useContext)(EditModeContext);
-  if (!context) {
-    return {
-      isEditing: false,
-      enableEditing: () => {
-      },
-      disableEditing: () => {
-      },
-      toggleEditing: () => {
-      },
-      focusedKey: null,
-      setFocusedKey: () => {
-      },
-      pendingChanges: /* @__PURE__ */ new Map(),
-      recordChange: () => {
-      },
-      commitChanges: () => {
-      },
-      discardChanges: () => {
-      },
-      undo: () => {
-      },
-      redo: () => {
-      },
-      canUndo: false,
-      canRedo: false,
-      history: [],
-      pendingCount: 0
-    };
-  }
-  return context;
-}
-function useIsElementEditing(elementKey) {
-  const { isEditing, focusedKey } = useEditMode();
-  return isEditing && focusedKey === elementKey;
-}
-function useElementEdit(elementKey) {
-  const { isEditing, recordChange, focusedKey, setFocusedKey } = useEditMode();
-  const handleChange = (0, import_react22.useCallback)(
-    (propName, newValue) => {
-      recordChange(elementKey, propName, newValue);
-    },
-    [elementKey, recordChange]
-  );
-  const handleFocus = (0, import_react22.useCallback)(() => {
-    setFocusedKey(elementKey);
-  }, [elementKey, setFocusedKey]);
-  const handleBlur = (0, import_react22.useCallback)(() => {
-  }, []);
-  return {
-    isEditing,
-    isFocused: focusedKey === elementKey,
-    handleChange,
-    handleFocus,
-    handleBlur
-  };
 }
 
 // src/components/InteractionTrackingWrapper.tsx
@@ -6116,6 +6136,7 @@ function useHistory(tree, conversation, setTree, setConversation, treeRef) {
 }
 
 // src/hooks/ui-stream/logger.ts
+var DEBUG = typeof window !== "undefined" && process.env.NODE_ENV === "development" && process.env.NEXT_PUBLIC_DEBUG === "true";
 var LOG_ENDPOINT = "/api/debug-log";
 var LOG_BUFFER = [];
 var flushTimer = null;
@@ -6126,7 +6147,7 @@ function formatLog(level, message, data) {
   return `[${timestamp}] [${level}] [useUIStream] ${message}${dataStr}`;
 }
 function flushLogs() {
-  if (LOG_BUFFER.length === 0) return;
+  if (!DEBUG || LOG_BUFFER.length === 0) return;
   const logs = LOG_BUFFER.splice(0, LOG_BUFFER.length);
   if (typeof window !== "undefined") {
     fetch(LOG_ENDPOINT, {
@@ -6146,21 +6167,22 @@ function scheduleFlush() {
 }
 var streamLog = {
   debug: (msg, data) => {
-    console.log(`[useUIStream] ${msg}`, data ?? "");
+    if (!DEBUG) return;
     LOG_BUFFER.push(formatLog("DEBUG", msg, data));
     scheduleFlush();
   },
   info: (msg, data) => {
-    console.log(`[useUIStream] ${msg}`, data ?? "");
+    if (!DEBUG) return;
     LOG_BUFFER.push(formatLog("INFO", msg, data));
     scheduleFlush();
   },
   warn: (msg, data) => {
-    console.warn(`[useUIStream] ${msg}`, data ?? "");
+    if (!DEBUG) return;
     LOG_BUFFER.push(formatLog("WARN", msg, data));
     scheduleFlush();
   },
   error: (msg, data) => {
+    if (!DEBUG) return;
     console.error(`[useUIStream] ${msg}`, data ?? "");
     LOG_BUFFER.push(formatLog("ERROR", msg, data));
     scheduleFlush();
@@ -6561,6 +6583,9 @@ function parseSSELine(line) {
 }
 function parsePayload(payload) {
   if (!payload) return null;
+  if (payload.type === "streaming-started") {
+    return { type: "streaming-started", timestamp: payload.timestamp };
+  }
   if (payload.type === "text-delta") {
     return { type: "text-delta" };
   }
@@ -6671,7 +6696,7 @@ function parsePayload(payload) {
 }
 
 // src/hooks/ui-stream/stream-reader.ts
-var IDLE_TIMEOUT_MS = 9e4;
+var IDLE_TIMEOUT_MS = 3e5;
 async function* readStreamWithTimeout(reader) {
   const decoder = new TextDecoder();
   let buffer = "";
@@ -6706,12 +6731,63 @@ async function* readStreamWithTimeout(reader) {
   }
 }
 
+// src/hooks/ui-stream/patch-processor.ts
+var PATCH_FLUSH_INTERVAL_MS = 100;
+function getNodePath(node) {
+  const path = [];
+  let current = node;
+  while (current?.parentNode) {
+    const parent = current.parentNode;
+    const index = Array.from(parent.childNodes).indexOf(current);
+    path.unshift(index);
+    current = parent;
+  }
+  return path;
+}
+function resolveNodePath(path, root) {
+  let node = root.body;
+  for (const index of path) {
+    if (!node.childNodes[index]) return null;
+    node = node.childNodes[index];
+  }
+  return node;
+}
+function saveSelection() {
+  if (typeof window === "undefined") return null;
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
+  return {
+    anchorNodePath: getNodePath(sel.anchorNode),
+    anchorOffset: sel.anchorOffset,
+    focusNodePath: getNodePath(sel.focusNode),
+    focusOffset: sel.focusOffset
+  };
+}
+function restoreSelection(saved) {
+  if (!saved || typeof window === "undefined") return;
+  try {
+    const anchorNode = resolveNodePath(saved.anchorNodePath, document);
+    const focusNode = resolveNodePath(saved.focusNodePath, document);
+    if (!anchorNode || !focusNode) return;
+    const sel = window.getSelection();
+    if (!sel) return;
+    const range = document.createRange();
+    range.setStart(anchorNode, Math.min(saved.anchorOffset, anchorNode.textContent?.length ?? 0));
+    range.setEnd(focusNode, Math.min(saved.focusOffset, focusNode.textContent?.length ?? 0));
+    sel.removeAllRanges();
+    sel.addRange(range);
+  } catch {
+  }
+}
+
 // src/hooks/useUIStream.ts
 function useUIStream({
   api,
   onComplete,
   onError,
-  getHeaders
+  getHeaders,
+  getChatId,
+  onBackgroundComplete
 }) {
   const { storeTree, treeVersion } = useStore(
     (0, import_shallow4.useShallow)((s) => ({
@@ -6753,7 +6829,7 @@ function useUIStream({
   }, [tree]);
   const [isStreaming, setIsStreaming] = (0, import_react30.useState)(false);
   const [error, setError] = (0, import_react30.useState)(null);
-  const abortControllerRef = (0, import_react30.useRef)(null);
+  const abortControllersRef = (0, import_react30.useRef)(/* @__PURE__ */ new Map());
   const sendingRef = (0, import_react30.useRef)(false);
   const clear = (0, import_react30.useCallback)(() => {
     setTree(null);
@@ -6809,19 +6885,28 @@ function useUIStream({
   );
   const send = (0, import_react30.useCallback)(
     async (prompt, context, attachments) => {
+      const chatId = context?.chatId ?? getChatId?.();
       if (sendingRef.current) {
-        streamLog.warn("Ignoring concurrent send request", { prompt: prompt.slice(0, 100) });
+        streamLog.warn("Ignoring concurrent send", {
+          prompt: prompt.slice(0, 100)
+        });
         return;
       }
       sendingRef.current = true;
       streamLog.info("Starting send", {
         promptLength: prompt.length,
         hasContext: !!context,
-        attachmentCount: attachments?.length ?? 0
+        attachmentCount: attachments?.length ?? 0,
+        chatId
       });
-      abortControllerRef.current?.abort();
-      abortControllerRef.current = new AbortController();
-      const signal = abortControllerRef.current.signal;
+      if (abortControllersRef.current.size > 0) {
+        abortControllersRef.current.forEach((controller) => controller.abort());
+        abortControllersRef.current.clear();
+      }
+      const abortController = new AbortController();
+      const abortKey = chatId ?? "default";
+      abortControllersRef.current.set(abortKey, abortController);
+      const signal = abortController.signal;
       setIsStreaming(true);
       setError(null);
       let currentTree = treeRef.current ? JSON.parse(JSON.stringify(treeRef.current)) : { root: "", elements: {} };
@@ -6833,8 +6918,17 @@ function useUIStream({
       const isProactive = context?.hideUserMessage === true;
       const pendingTurn = createPendingTurn(prompt, { isProactive, attachments });
       const turnId = pendingTurn.id;
-      streamLog.debug("Creating turn", { turnId, isProactive });
-      setConversation((prev) => [...prev, pendingTurn]);
+      streamLog.debug("Creating turn", { turnId, isProactive, userMessage: prompt.slice(0, 50) });
+      setConversation((prev) => {
+        const updated = [...prev, pendingTurn];
+        streamLog.debug("Conversation updated", {
+          prevLength: prev.length,
+          newLength: updated.length,
+          pendingTurnId: pendingTurn.id,
+          userMessage: pendingTurn.userMessage?.slice(0, 50)
+        });
+        return updated;
+      });
       let patchBuffer = [];
       let patchFlushTimer = null;
       try {
@@ -6865,7 +6959,7 @@ function useUIStream({
           method: "POST",
           headers,
           body,
-          signal: abortControllerRef.current.signal
+          signal
         });
         streamLog.debug("Response received", { status: response.status, ok: response.ok });
         if (!response.ok) {
@@ -6948,17 +7042,21 @@ function useUIStream({
                     patchBuffer = [];
                     treeRef.current = updatedTree;
                     currentTree = updatedTree;
+                    const savedSel = saveSelection();
                     const store = storeRef.current;
                     store.setUITree({
                       root: updatedTree.root,
                       elements: { ...updatedTree.elements }
                     });
                     store.bumpTreeVersion();
+                    if (savedSel) {
+                      requestAnimationFrame(() => restoreSelection(savedSel));
+                    }
                     streamLog.debug("Tree updated", {
                       elementCount: Object.keys(updatedTree.elements).length
                     });
                   }
-                }, 16);
+                }, PATCH_FLUSH_INTERVAL_MS);
               }
             } else if (event.type === "plan-created" || event.type === "step-started" || event.type === "step-done" || event.type === "subtask-started" || event.type === "subtask-done" || event.type === "level-started" || event.type === "level-completed" || event.type === "orchestration-done") {
               processPlanEvent(event, planStoreRef.current);
@@ -7052,11 +7150,12 @@ function useUIStream({
         setConversation((prev) => markTurnFailed(prev, turnId, error2.message));
       } finally {
         sendingRef.current = false;
+        abortControllersRef.current.clear();
         setIsStreaming(false);
-        streamLog.debug("Send completed, isStreaming=false");
+        streamLog.debug("Send completed");
       }
     },
-    [api, onComplete, onError, setTree]
+    [api, onComplete, onError, setTree, getChatId]
   );
   const answerQuestion = (0, import_react30.useCallback)(
     (turnId, questionId, answers) => {
@@ -7079,7 +7178,10 @@ function useUIStream({
   );
   (0, import_react30.useEffect)(() => {
     return () => {
-      abortControllerRef.current?.abort();
+      for (const controller of abortControllersRef.current.values()) {
+        controller.abort();
+      }
+      abortControllersRef.current.clear();
     };
   }, []);
   const deleteTurn = (0, import_react30.useCallback)(
@@ -7106,6 +7208,12 @@ function useUIStream({
     },
     [conversation, send, pushHistory, setTree]
   );
+  const abort = (0, import_react30.useCallback)(() => {
+    abortControllersRef.current.forEach((controller) => controller.abort());
+    abortControllersRef.current.clear();
+    sendingRef.current = false;
+    setIsStreaming(false);
+  }, []);
   return {
     tree,
     conversation,
@@ -7124,7 +7232,8 @@ function useUIStream({
     redo,
     canUndo,
     canRedo,
-    answerQuestion
+    answerQuestion,
+    abort
   };
 }
 

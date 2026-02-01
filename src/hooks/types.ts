@@ -241,6 +241,10 @@ export interface UseUIStreamOptions {
   onError?: (error: Error) => void;
   /** Function to get dynamic headers (e.g. for auth) */
   getHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
+  /** Function to get current chat ID - used to bind streams to their originating chat */
+  getChatId?: () => string | undefined;
+  /** Callback when stream completes for a different chat (background completion) */
+  onBackgroundComplete?: (chatId: string, tree: UITree, conversation: ConversationTurn[]) => void;
 }
 
 /**
@@ -308,6 +312,8 @@ export interface UseUIStreamReturn {
     questionId: string,
     answers: Record<string, unknown>,
   ) => void;
+  /** Abort the current streaming request */
+  abort: () => void;
   // Note: Plan state now in Zustand store - use usePlanExecution() hook
 }
 

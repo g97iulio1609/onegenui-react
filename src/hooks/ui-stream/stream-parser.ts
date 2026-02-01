@@ -27,6 +27,7 @@ import { streamLog } from "./logger";
 export type StreamEvent =
   | { type: "text-delta" }
   | { type: "done" }
+  | { type: "streaming-started"; timestamp: number }
   | { type: "message"; message: ChatMessage }
   | { type: "question"; question: QuestionPayload }
   | { type: "suggestion"; suggestions: SuggestionChip[] }
@@ -85,6 +86,10 @@ function parsePayload(payload: Record<string, unknown> | null): StreamEvent | nu
   if (!payload) return null;
 
   // Type-based events
+  if (payload.type === "streaming-started") {
+    return { type: "streaming-started", timestamp: payload.timestamp as number };
+  }
+
   if (payload.type === "text-delta") {
     return { type: "text-delta" };
   }

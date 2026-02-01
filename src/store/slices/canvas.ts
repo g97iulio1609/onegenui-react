@@ -7,7 +7,7 @@
  * Key features:
  * - Per-canvas state management by canvasId (usually element.key)
  * - Streaming-safe updates without forcing re-mount
- * - Lexical editor state synchronization
+ * - Tiptap editor state synchronization
  * - Pending AI edits queue
  */
 
@@ -17,23 +17,17 @@ import type { SliceCreator } from "../types";
 // Types
 // =============================================================================
 
-/** Serialized Lexical editor state */
+/** Tiptap document format */
 export type CanvasEditorState = {
-  root: {
-    children: unknown[];
-    direction: string | null;
-    format: string;
-    indent: number;
-    type: string;
-    version: number;
-  };
+  type: "doc";
+  content: unknown[];
 };
 
 /** Canvas instance state */
 export interface CanvasInstance {
   /** Unique canvas ID (usually element.key from GenUI tree) */
   id: string;
-  /** Current editor content */
+  /** Current editor content (Tiptap format) */
   content: CanvasEditorState | null;
   /** Is content being streamed from AI */
   isStreaming: boolean;

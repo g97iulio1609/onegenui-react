@@ -276,13 +276,12 @@ interface UISlice {
 /**
  * Settings Slice - AI settings, theme, preferences
  *
- * NOTE: Model selection is now centralized server-side in `lib/services/model-config.ts`.
- * The AIModel type here is kept for backward compatibility but new code should use
- * the server-side `getModelForTask()` function.
+ * NOTE: Model selection is centralized in @onegenui/providers.
+ * Use `createModelForTask()` or `getModelConfig()` from the providers package.
  */
 
 type ThemeMode = "light" | "dark" | "system";
-/** @deprecated Use server-side model config from `lib/services/model-config.ts` */
+/** @deprecated Use @onegenui/providers for model management */
 type AIModel = "gemini-3-flash-preview" | "gemini-3-pro-preview" | "gpt-5.2" | "claude-haiku-4.5" | "claude-sonnet-4.5" | "claude-opus-4.5";
 interface AISettings {
     model: AIModel;
@@ -461,10 +460,15 @@ interface ValidationSlice {
  */
 
 /**
- * Slice-specific progress event (with required timestamp)
+ * Slice-specific progress event (with required timestamp and message history)
  */
 interface StoredProgressEvent extends ToolProgressEvent {
     timestamp: number;
+    /** History of unique messages for this tool execution */
+    messageHistory?: Array<{
+        message: string;
+        timestamp: number;
+    }>;
 }
 interface ToolProgressSlice {
     progressEvents: StoredProgressEvent[];
@@ -680,25 +684,21 @@ interface UITreeSlice {
  * - AI edit approvals
  */
 
-/** Serialized Lexical editor state (simplified type to avoid hard dependency) */
-type SerializedEditorState = {
-    root: {
-        children: unknown[];
-        direction: string | null;
-        format: string;
-        indent: number;
-        type: string;
-        version: number;
-    };
-};
+/**
+ * Editor content type - supports both Lexical and Tiptap formats
+ *
+ * Lexical format has a root node with children
+ * Tiptap format has a type and content array
+ */
+type EditorContent = Record<string, unknown>;
 /** Document in workspace */
 interface WorkspaceDocument {
     /** Unique document ID */
     id: string;
     /** Document title */
     title: string;
-    /** Serialized Lexical content */
-    content: SerializedEditorState | null;
+    /** Editor content (Lexical or Tiptap format) */
+    content: EditorContent | null;
     /** Last saved timestamp */
     savedAt: number | null;
     /** Last modified timestamp */
@@ -706,7 +706,7 @@ interface WorkspaceDocument {
     /** Has unsaved changes */
     isDirty: boolean;
     /** Document format */
-    format: "lexical" | "markdown" | "html";
+    format: "tiptap" | "lexical" | "markdown" | "html";
 }
 /** Pending AI edit requiring approval */
 interface PendingAIEdit {
@@ -722,7 +722,7 @@ interface PendingAIEdit {
         after: string;
     };
     /** New content if approved */
-    newContent: SerializedEditorState;
+    newContent: EditorContent;
     /** Created timestamp */
     createdAt: number;
 }
@@ -750,7 +750,7 @@ interface WorkspaceSlice {
     /** Set active document */
     setActiveDocument: (id: string) => void;
     /** Update document content */
-    updateDocumentContent: (id: string, content: SerializedEditorState | null) => void;
+    updateDocumentContent: (id: string, content: EditorContent | null) => void;
     /** Rename document */
     renameDocument: (id: string, title: string) => void;
     /** Mark document as saved */
@@ -784,26 +784,20 @@ interface WorkspaceSlice {
  * Key features:
  * - Per-canvas state management by canvasId (usually element.key)
  * - Streaming-safe updates without forcing re-mount
- * - Lexical editor state synchronization
+ * - Tiptap editor state synchronization
  * - Pending AI edits queue
  */
 
-/** Serialized Lexical editor state */
+/** Tiptap document format */
 type CanvasEditorState = {
-    root: {
-        children: unknown[];
-        direction: string | null;
-        format: string;
-        indent: number;
-        type: string;
-        version: number;
-    };
+    type: "doc";
+    content: unknown[];
 };
 /** Canvas instance state */
 interface CanvasInstance {
     /** Unique canvas ID (usually element.key from GenUI tree) */
     id: string;
-    /** Current editor content */
+    /** Current editor content (Tiptap format) */
     content: CanvasEditorState | null;
     /** Is content being streamed from AI */
     isStreaming: boolean;
@@ -1397,6 +1391,10 @@ interface UseUIStreamOptions {
     onError?: (error: Error) => void;
     /** Function to get dynamic headers (e.g. for auth) */
     getHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
+    /** Function to get current chat ID - used to bind streams to their originating chat */
+    getChatId?: () => string | undefined;
+    /** Callback when stream completes for a different chat (background completion) */
+    onBackgroundComplete?: (chatId: string, tree: UITree, conversation: ConversationTurn[]) => void;
 }
 /**
  * Return type for useUIStream
@@ -1449,6 +1447,8 @@ interface UseUIStreamReturn {
     }) => void;
     /** Answer a question from AI */
     answerQuestion: (turnId: string, questionId: string, answers: Record<string, unknown>) => void;
+    /** Abort the current streaming request */
+    abort: () => void;
 }
 type FlatElement = UIElement & {
     parentKey?: string | null;
@@ -2290,7 +2290,7 @@ declare function useLayoutManager({ tree, onTreeUpdate, onLayoutChange, }: UseLa
 /**
  * Hook for streaming UI generation
  */
-declare function useUIStream({ api, onComplete, onError, getHeaders, }: UseUIStreamOptions): UseUIStreamReturn;
+declare function useUIStream({ api, onComplete, onError, getHeaders, getChatId, onBackgroundComplete, }: UseUIStreamOptions): UseUIStreamReturn;
 
 /**
  * Hook to detect mobile viewport
@@ -2367,7 +2367,7 @@ declare const useWorkspaceActions: () => {
     openDocument: (doc: WorkspaceDocument) => void;
     closeDocument: (id: string) => void;
     setActiveDocument: (id: string) => void;
-    updateDocumentContent: (id: string, content: SerializedEditorState | null) => void;
+    updateDocumentContent: (id: string, content: EditorContent | null) => void;
     renameDocument: (id: string, title: string) => void;
     markDocumentSaved: (id: string) => void;
     setWorkspaceLayout: (layout: WorkspaceLayout) => void;

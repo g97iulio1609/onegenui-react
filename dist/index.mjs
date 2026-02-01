@@ -190,8 +190,8 @@ var createSelectionSlice = (set, get) => ({
 // src/store/slices/settings.ts
 var defaultAISettings = {
   model: "gemini-3-flash-preview",
-  temperature: 0.7,
-  maxTokens: 8192,
+  temperature: 1,
+  maxTokens: 65e3,
   streamingEnabled: true,
   autoSuggestions: true
 };
@@ -499,14 +499,27 @@ var createToolProgressSlice = (set, get) => {
     const existingIndex = state.progressEvents.findIndex(
       (p) => p.toolCallId === event.toolCallId
     );
-    const storedEvent = {
-      type: "tool-progress",
-      ...event,
-      timestamp
-    };
     if (existingIndex >= 0) {
+      const existing = state.progressEvents[existingIndex];
+      const messageHistory = existing?.messageHistory ?? [];
+      if (event.message && !messageHistory.some((h) => h.message === event.message)) {
+        messageHistory.push({ message: event.message, timestamp });
+      }
+      const storedEvent = {
+        type: "tool-progress",
+        ...event,
+        timestamp,
+        messageHistory
+      };
       state.progressEvents[existingIndex] = storedEvent;
     } else {
+      const messageHistory = event.message ? [{ message: event.message, timestamp }] : [];
+      const storedEvent = {
+        type: "tool-progress",
+        ...event,
+        timestamp,
+        messageHistory
+      };
       state.progressEvents.push(storedEvent);
       if (state.progressEvents.length > state.maxEvents) {
         state.progressEvents = state.progressEvents.slice(-state.maxEvents);
@@ -997,7 +1010,7 @@ var createWorkspaceSlice = (set, get) => ({
       savedAt: null,
       modifiedAt: Date.now(),
       isDirty: false,
-      format: "lexical"
+      format: "tiptap"
     };
     set((state) => ({
       documents: [...state.documents, doc],
@@ -1914,7 +1927,7 @@ import { createContext as createContext5 } from "react";
 var SelectionContext = createContext5(void 0);
 
 // src/contexts/selection/provider.tsx
-import { useMemo as useMemo6, useEffect as useEffect3, useCallback as useCallback6 } from "react";
+import { useMemo as useMemo7, useEffect as useEffect4, useCallback as useCallback7 } from "react";
 
 // src/contexts/selection/styles.ts
 var SELECTION_STYLE_ID = "jsonui-selection-styles";
@@ -2588,8 +2601,277 @@ function useLongPress(callbacks, config = {}) {
   };
 }
 
-// src/contexts/selection/provider.tsx
+// src/contexts/edit-mode.tsx
+import {
+  createContext as createContext6,
+  useContext as useContext5,
+  useState,
+  useCallback as useCallback6,
+  useMemo as useMemo6,
+  useRef as useRef3,
+  useEffect as useEffect3
+} from "react";
 import { jsx as jsx5 } from "react/jsx-runtime";
+var EditModeContext = createContext6(null);
+function EditModeProvider({
+  children,
+  initialEditing = false,
+  onCommit,
+  autoSaveDelay = 1500,
+  maxHistoryItems = 50
+}) {
+  const [isEditing, setIsEditing] = useState(initialEditing);
+  const [focusedKey, setFocusedKey] = useState(null);
+  const [pendingChanges, setPendingChanges] = useState(/* @__PURE__ */ new Map());
+  const [previousValues, setPreviousValues] = useState(/* @__PURE__ */ new Map());
+  const [history, setHistory] = useState([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const autoSaveTimerRef = useRef3(null);
+  useEffect3(() => {
+    return () => {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+      }
+    };
+  }, []);
+  const enableEditing = useCallback6(() => setIsEditing(true), []);
+  const disableEditing = useCallback6(() => {
+    setIsEditing(false);
+    setFocusedKey(null);
+    if (pendingChanges.size > 0) {
+    }
+  }, [pendingChanges.size]);
+  const toggleEditing = useCallback6(() => setIsEditing((prev) => !prev), []);
+  const recordChange = useCallback6(
+    (elementKey, propName, newValue, previousValue) => {
+      setPendingChanges((prev) => {
+        const next = new Map(prev);
+        const existing = next.get(elementKey) || {};
+        next.set(elementKey, { ...existing, [propName]: newValue });
+        return next;
+      });
+      if (previousValue !== void 0) {
+        setPreviousValues((prev) => {
+          const next = new Map(prev);
+          const existing = next.get(elementKey) || {};
+          if (!(propName in existing)) {
+            next.set(elementKey, { ...existing, [propName]: previousValue });
+          }
+          return next;
+        });
+      }
+      if (autoSaveDelay > 0) {
+        if (autoSaveTimerRef.current) {
+          clearTimeout(autoSaveTimerRef.current);
+        }
+        autoSaveTimerRef.current = setTimeout(() => {
+          commitChangesRef.current?.();
+        }, autoSaveDelay);
+      }
+    },
+    [autoSaveDelay]
+  );
+  const commitChangesRef = useRef3(void 0);
+  const commitChanges = useCallback6(() => {
+    if (pendingChanges.size === 0) return;
+    const propChanges = [];
+    const elementChanges = [];
+    const now = Date.now();
+    pendingChanges.forEach((props, key) => {
+      const prevProps = previousValues.get(key) || {};
+      for (const [propName, newValue] of Object.entries(props)) {
+        propChanges.push({
+          elementKey: key,
+          propName,
+          oldValue: prevProps[propName],
+          newValue
+        });
+      }
+      elementChanges.push({
+        key,
+        props,
+        previousProps: prevProps,
+        timestamp: now
+      });
+    });
+    setHistory((prev) => {
+      const newHistory = prev.slice(0, historyIndex + 1);
+      newHistory.push({ changes: propChanges, timestamp: now });
+      if (newHistory.length > maxHistoryItems) {
+        return newHistory.slice(-maxHistoryItems);
+      }
+      return newHistory;
+    });
+    setHistoryIndex((prev) => prev + 1);
+    if (onCommit) {
+      onCommit(elementChanges);
+    }
+    setPendingChanges(/* @__PURE__ */ new Map());
+    setPreviousValues(/* @__PURE__ */ new Map());
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+  }, [pendingChanges, previousValues, historyIndex, maxHistoryItems, onCommit]);
+  commitChangesRef.current = commitChanges;
+  const discardChanges = useCallback6(() => {
+    setPendingChanges(/* @__PURE__ */ new Map());
+    setPreviousValues(/* @__PURE__ */ new Map());
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+  }, []);
+  const undo = useCallback6(() => {
+    if (historyIndex < 0) return;
+    const item = history[historyIndex];
+    if (!item) return;
+    const elementMap = /* @__PURE__ */ new Map();
+    for (const change of item.changes) {
+      const existing = elementMap.get(change.elementKey) || { props: {}, previousProps: {} };
+      existing.props[change.propName] = change.oldValue;
+      existing.previousProps[change.propName] = change.newValue;
+      elementMap.set(change.elementKey, existing);
+    }
+    const undoChanges = Array.from(elementMap.entries()).map(([key, data]) => ({
+      key,
+      props: data.props,
+      previousProps: data.previousProps,
+      timestamp: Date.now()
+    }));
+    if (onCommit) {
+      onCommit(undoChanges);
+    }
+    setHistoryIndex((prev) => prev - 1);
+  }, [history, historyIndex, onCommit]);
+  const redo = useCallback6(() => {
+    if (historyIndex >= history.length - 1) return;
+    const item = history[historyIndex + 1];
+    if (!item) return;
+    const elementMap = /* @__PURE__ */ new Map();
+    for (const change of item.changes) {
+      const existing = elementMap.get(change.elementKey) || { props: {}, previousProps: {} };
+      existing.props[change.propName] = change.newValue;
+      existing.previousProps[change.propName] = change.oldValue;
+      elementMap.set(change.elementKey, existing);
+    }
+    const redoChanges = Array.from(elementMap.entries()).map(([key, data]) => ({
+      key,
+      props: data.props,
+      previousProps: data.previousProps,
+      timestamp: Date.now()
+    }));
+    if (onCommit) {
+      onCommit(redoChanges);
+    }
+    setHistoryIndex((prev) => prev + 1);
+  }, [history, historyIndex, onCommit]);
+  const canUndo = historyIndex >= 0;
+  const canRedo = historyIndex < history.length - 1;
+  const pendingCount = pendingChanges.size;
+  const value = useMemo6(
+    () => ({
+      isEditing,
+      enableEditing,
+      disableEditing,
+      toggleEditing,
+      focusedKey,
+      setFocusedKey,
+      pendingChanges,
+      recordChange,
+      commitChanges,
+      discardChanges,
+      undo,
+      redo,
+      canUndo,
+      canRedo,
+      history,
+      pendingCount,
+      onCommit
+    }),
+    [
+      isEditing,
+      enableEditing,
+      disableEditing,
+      toggleEditing,
+      focusedKey,
+      setFocusedKey,
+      pendingChanges,
+      recordChange,
+      commitChanges,
+      discardChanges,
+      undo,
+      redo,
+      canUndo,
+      canRedo,
+      history,
+      pendingCount,
+      onCommit
+    ]
+  );
+  return /* @__PURE__ */ jsx5(EditModeContext.Provider, { value, children });
+}
+function useEditMode() {
+  const context = useContext5(EditModeContext);
+  if (!context) {
+    return {
+      isEditing: false,
+      enableEditing: () => {
+      },
+      disableEditing: () => {
+      },
+      toggleEditing: () => {
+      },
+      focusedKey: null,
+      setFocusedKey: () => {
+      },
+      pendingChanges: /* @__PURE__ */ new Map(),
+      recordChange: () => {
+      },
+      commitChanges: () => {
+      },
+      discardChanges: () => {
+      },
+      undo: () => {
+      },
+      redo: () => {
+      },
+      canUndo: false,
+      canRedo: false,
+      history: [],
+      pendingCount: 0
+    };
+  }
+  return context;
+}
+function useIsElementEditing(elementKey) {
+  const { isEditing, focusedKey } = useEditMode();
+  return isEditing && focusedKey === elementKey;
+}
+function useElementEdit(elementKey) {
+  const { isEditing, recordChange, focusedKey, setFocusedKey } = useEditMode();
+  const handleChange = useCallback6(
+    (propName, newValue) => {
+      recordChange(elementKey, propName, newValue);
+    },
+    [elementKey, recordChange]
+  );
+  const handleFocus = useCallback6(() => {
+    setFocusedKey(elementKey);
+  }, [elementKey, setFocusedKey]);
+  const handleBlur = useCallback6(() => {
+  }, []);
+  return {
+    isEditing,
+    isFocused: focusedKey === elementKey,
+    handleChange,
+    handleFocus,
+    handleBlur
+  };
+}
+
+// src/contexts/selection/provider.tsx
+import { jsx as jsx6 } from "react/jsx-runtime";
 function SelectionProvider({ children }) {
   const selectionState = useSelectionState();
   const {
@@ -2605,7 +2887,8 @@ function SelectionProvider({ children }) {
     deepSelectionActiveRef,
     setDeepSelectionActive
   } = selectionState;
-  const isDeepSelectionActive = useCallback6(
+  const { isEditing } = useEditMode();
+  const isDeepSelectionActive = useCallback7(
     () => deepSelectionActiveRef.current,
     [deepSelectionActiveRef]
   );
@@ -2624,6 +2907,9 @@ function SelectionProvider({ children }) {
     clearSelection();
   };
   const handleLongPress = (target, componentWrapper) => {
+    if (isEditing) {
+      return;
+    }
     const elementKey = componentWrapper.getAttribute("data-jsonui-element-key");
     if (!elementKey) return;
     if (selectedElementsRef.current.has(target)) {
@@ -2655,6 +2941,9 @@ function SelectionProvider({ children }) {
     });
   };
   const handleClick = (target, _event) => {
+    if (isEditing) {
+      return;
+    }
     const selectableItem = target.closest(
       "[data-selectable-item]"
     );
@@ -2708,7 +2997,7 @@ function SelectionProvider({ children }) {
     },
     { debug: false }
   );
-  useEffect3(() => {
+  useEffect4(() => {
     if (typeof document === "undefined") return;
     const handleKeyDown = (e) => {
       if (e.key === "Escape" && deepSelections.length > 0) {
@@ -2725,7 +3014,7 @@ function SelectionProvider({ children }) {
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [deepSelections, clearDeepSelection]);
-  useEffect3(() => {
+  useEffect4(() => {
     return () => {
       selectedElementsRef.current.forEach((el) => {
         el.classList.remove("jsonui-deep-selected");
@@ -2733,7 +3022,7 @@ function SelectionProvider({ children }) {
       });
     };
   }, [selectedElementsRef]);
-  useEffect3(() => {
+  useEffect4(() => {
     if (typeof document === "undefined") return;
     if (document.getElementById(SELECTION_STYLE_ID)) return;
     const style = document.createElement("style");
@@ -2745,7 +3034,7 @@ function SelectionProvider({ children }) {
       if (el) el.remove();
     };
   }, []);
-  const value = useMemo6(
+  const value = useMemo7(
     () => ({
       granularSelection,
       toggleSelection,
@@ -2766,13 +3055,13 @@ function SelectionProvider({ children }) {
       isDeepSelectionActive
     ]
   );
-  return /* @__PURE__ */ jsx5(SelectionContext.Provider, { value, children });
+  return /* @__PURE__ */ jsx6(SelectionContext.Provider, { value, children });
 }
 
 // src/contexts/selection/hooks.ts
-import { useContext as useContext5, useCallback as useCallback7, useMemo as useMemo7 } from "react";
+import { useContext as useContext6, useCallback as useCallback8, useMemo as useMemo8 } from "react";
 function useSelection() {
-  const context = useContext5(SelectionContext);
+  const context = useContext6(SelectionContext);
   if (context === void 0) {
     throw new Error("useSelection must be used within a SelectionProvider");
   }
@@ -2780,15 +3069,15 @@ function useSelection() {
 }
 function useItemSelection(elementKey) {
   const { isSelected, getSelectedItems, granularSelection } = useSelection();
-  const isItemSelected2 = useCallback7(
+  const isItemSelected2 = useCallback8(
     (itemId) => isSelected(elementKey, itemId),
     [elementKey, isSelected]
   );
-  const selectedItems = useMemo7(
+  const selectedItems = useMemo8(
     () => getSelectedItems(elementKey),
     [elementKey, getSelectedItems]
   );
-  const hasSelection = useMemo7(
+  const hasSelection = useMemo8(
     () => (granularSelection[elementKey]?.size ?? 0) > 0,
     [elementKey, granularSelection]
   );
@@ -2800,10 +3089,10 @@ function useItemSelection(elementKey) {
 }
 
 // src/contexts/selection/use-dom-tracking.ts
-import { useCallback as useCallback8 } from "react";
+import { useCallback as useCallback9 } from "react";
 
 // src/contexts/selection/SelectableItem.tsx
-import { jsx as jsx6 } from "react/jsx-runtime";
+import { jsx as jsx7 } from "react/jsx-runtime";
 function SelectableItem({
   elementKey,
   itemId,
@@ -2821,7 +3110,7 @@ function SelectableItem({
     as: _as,
     ...domProps
   } = rest;
-  return /* @__PURE__ */ jsx6(
+  return /* @__PURE__ */ jsx7(
     Component,
     {
       "data-selectable-item": "true",
@@ -2900,39 +3189,39 @@ var createStyles = (theme) => ({
 });
 
 // src/contexts/markdown/internal-markdown.tsx
-import React6, { useMemo as useMemo9 } from "react";
+import React7, { useMemo as useMemo10 } from "react";
 import ReactMarkdown from "react-markdown";
 
 // src/contexts/citation/index.ts
 import {
-  createContext as createContext6,
-  useContext as useContext6,
-  useMemo as useMemo8,
-  useState,
-  useCallback as useCallback9,
-  useEffect as useEffect4
+  createContext as createContext7,
+  useContext as useContext7,
+  useMemo as useMemo9,
+  useState as useState2,
+  useCallback as useCallback10,
+  useEffect as useEffect5
 } from "react";
 import { createElement } from "react";
-var CitationContext = createContext6(null);
+var CitationContext = createContext7(null);
 function CitationProvider({ children }) {
-  const [citations, setCitationsState] = useState([]);
-  const setCitations = useCallback9((newCitations) => {
+  const [citations, setCitationsState] = useState2([]);
+  const setCitations = useCallback10((newCitations) => {
     setCitationsState(newCitations);
   }, []);
-  const addCitation = useCallback9((citation) => {
+  const addCitation = useCallback10((citation) => {
     setCitationsState((prev) => {
       if (prev.some((c) => c.id === citation.id)) return prev;
       return [...prev, citation];
     });
   }, []);
-  const clearCitations = useCallback9(() => {
+  const clearCitations = useCallback10(() => {
     setCitationsState([]);
   }, []);
-  const getCitation = useCallback9(
+  const getCitation = useCallback10(
     (id) => citations.find((c) => c.id === id),
     [citations]
   );
-  useEffect4(() => {
+  useEffect5(() => {
     if (typeof window === "undefined") return;
     const handleCitations = (event) => {
       const newCitations = event.detail?.citations;
@@ -2951,7 +3240,7 @@ function CitationProvider({ children }) {
       );
     };
   }, []);
-  const value = useMemo8(
+  const value = useMemo9(
     () => ({
       citations,
       setCitations,
@@ -2964,7 +3253,7 @@ function CitationProvider({ children }) {
   return createElement(CitationContext.Provider, { value }, children);
 }
 function useCitations() {
-  const context = useContext6(CitationContext);
+  const context = useContext7(CitationContext);
   if (!context) {
     return {
       citations: [],
@@ -2981,25 +3270,25 @@ function useCitations() {
 }
 
 // src/contexts/citation/inline-citation.tsx
-import { memo, useState as useState2, useRef as useRef3, useEffect as useEffect5, useCallback as useCallback10 } from "react";
-import { jsx as jsx7, jsxs as jsxs2 } from "react/jsx-runtime";
+import { memo, useState as useState3, useRef as useRef4, useEffect as useEffect6, useCallback as useCallback11 } from "react";
+import { jsx as jsx8, jsxs as jsxs2 } from "react/jsx-runtime";
 var InlineCitation = memo(function InlineCitation2({
   id,
   citation
 }) {
-  const [showPopover, setShowPopover] = useState2(false);
-  const [popoverPosition, setPopoverPosition] = useState2(
+  const [showPopover, setShowPopover] = useState3(false);
+  const [popoverPosition, setPopoverPosition] = useState3(
     "bottom"
   );
-  const buttonRef = useRef3(null);
-  const popoverRef = useRef3(null);
-  const updatePosition = useCallback10(() => {
+  const buttonRef = useRef4(null);
+  const popoverRef = useRef4(null);
+  const updatePosition = useCallback11(() => {
     if (!buttonRef.current) return;
     const rect = buttonRef.current.getBoundingClientRect();
     const spaceBelow = window.innerHeight - rect.bottom;
     setPopoverPosition(spaceBelow < 200 ? "top" : "bottom");
   }, []);
-  useEffect5(() => {
+  useEffect6(() => {
     if (!showPopover) return;
     const handleClick2 = (e) => {
       if (popoverRef.current && !popoverRef.current.contains(e.target) && buttonRef.current && !buttonRef.current.contains(e.target)) {
@@ -3010,7 +3299,7 @@ var InlineCitation = memo(function InlineCitation2({
     return () => document.removeEventListener("click", handleClick2);
   }, [showPopover]);
   if (!citation) {
-    return /* @__PURE__ */ jsx7(
+    return /* @__PURE__ */ jsx8(
       "span",
       {
         style: {
@@ -3044,7 +3333,7 @@ var InlineCitation = memo(function InlineCitation2({
     }
   };
   return /* @__PURE__ */ jsxs2("span", { style: { position: "relative", display: "inline-block" }, children: [
-    /* @__PURE__ */ jsx7(
+    /* @__PURE__ */ jsx8(
       "button",
       {
         ref: buttonRef,
@@ -3125,7 +3414,7 @@ var InlineCitation = memo(function InlineCitation2({
                     ]
                   }
                 ),
-                /* @__PURE__ */ jsx7(
+                /* @__PURE__ */ jsx8(
                   "span",
                   {
                     style: {
@@ -3189,7 +3478,7 @@ var InlineCitation = memo(function InlineCitation2({
 });
 
 // src/contexts/markdown/internal-markdown.tsx
-import { jsx as jsx8 } from "react/jsx-runtime";
+import { jsx as jsx9 } from "react/jsx-runtime";
 function parseCitationMarkers(text2, getCitation) {
   const parts = text2.split(/(\[\d+\])/g);
   return parts.map((part, idx) => {
@@ -3197,7 +3486,7 @@ function parseCitationMarkers(text2, getCitation) {
     if (match) {
       const id = match[1];
       const citation = getCitation(id);
-      return /* @__PURE__ */ jsx8(InlineCitation, { id, citation }, `cite-${idx}`);
+      return /* @__PURE__ */ jsx9(InlineCitation, { id, citation }, `cite-${idx}`);
     }
     return part;
   });
@@ -3209,13 +3498,13 @@ function InternalMarkdown({
   className,
   style
 }) {
-  const styles = useMemo9(() => createStyles(theme), [theme]);
+  const styles = useMemo10(() => createStyles(theme), [theme]);
   const { getCitation, citations } = useCitations();
   const hasCitations = citations.length > 0;
-  const components = useMemo9(
+  const components = useMemo10(
     () => ({
       // Images - responsive with high quality
-      img: (props) => /* @__PURE__ */ jsx8(
+      img: (props) => /* @__PURE__ */ jsx9(
         "img",
         {
           ...props,
@@ -3232,7 +3521,7 @@ function InternalMarkdown({
         }
       ),
       // Videos - native player with controls
-      video: (props) => /* @__PURE__ */ jsx8(
+      video: (props) => /* @__PURE__ */ jsx9(
         "video",
         {
           ...props,
@@ -3249,19 +3538,19 @@ function InternalMarkdown({
         }
       ),
       // Code blocks
-      pre: ({ children }) => /* @__PURE__ */ jsx8("pre", { style: styles.codeBlock, children }),
+      pre: ({ children }) => /* @__PURE__ */ jsx9("pre", { style: styles.codeBlock, children }),
       code: ({
         children,
         className: codeClassName
       }) => {
         const isInline = !codeClassName;
         if (isInline) {
-          return /* @__PURE__ */ jsx8("code", { style: styles.inlineCode, children });
+          return /* @__PURE__ */ jsx9("code", { style: styles.inlineCode, children });
         }
-        return /* @__PURE__ */ jsx8("code", { children });
+        return /* @__PURE__ */ jsx9("code", { children });
       },
       // Links
-      a: ({ href, children }) => /* @__PURE__ */ jsx8(
+      a: ({ href, children }) => /* @__PURE__ */ jsx9(
         "a",
         {
           href,
@@ -3272,8 +3561,8 @@ function InternalMarkdown({
         }
       ),
       // Lists
-      ul: ({ children }) => /* @__PURE__ */ jsx8("ul", { style: styles.list, children }),
-      ol: ({ children }) => /* @__PURE__ */ jsx8(
+      ul: ({ children }) => /* @__PURE__ */ jsx9("ul", { style: styles.list, children }),
+      ol: ({ children }) => /* @__PURE__ */ jsx9(
         "ol",
         {
           style: {
@@ -3284,82 +3573,82 @@ function InternalMarkdown({
           children
         }
       ),
-      li: ({ children }) => /* @__PURE__ */ jsx8("li", { style: styles.listItem, children }),
+      li: ({ children }) => /* @__PURE__ */ jsx9("li", { style: styles.listItem, children }),
       // Headings
-      h1: ({ children }) => /* @__PURE__ */ jsx8("h1", { style: { ...styles.headingBase, fontSize: 18 }, children }),
-      h2: ({ children }) => /* @__PURE__ */ jsx8("h2", { style: { ...styles.headingBase, fontSize: 16 }, children }),
-      h3: ({ children }) => /* @__PURE__ */ jsx8("h3", { style: { ...styles.headingBase, fontSize: 15 }, children }),
-      h4: ({ children }) => /* @__PURE__ */ jsx8("h4", { style: { ...styles.headingBase, fontSize: 14 }, children }),
-      h5: ({ children }) => /* @__PURE__ */ jsx8("h5", { style: { ...styles.headingBase, fontSize: 13 }, children }),
-      h6: ({ children }) => /* @__PURE__ */ jsx8("h6", { style: { ...styles.headingBase, fontSize: 12 }, children }),
+      h1: ({ children }) => /* @__PURE__ */ jsx9("h1", { style: { ...styles.headingBase, fontSize: 18 }, children }),
+      h2: ({ children }) => /* @__PURE__ */ jsx9("h2", { style: { ...styles.headingBase, fontSize: 16 }, children }),
+      h3: ({ children }) => /* @__PURE__ */ jsx9("h3", { style: { ...styles.headingBase, fontSize: 15 }, children }),
+      h4: ({ children }) => /* @__PURE__ */ jsx9("h4", { style: { ...styles.headingBase, fontSize: 14 }, children }),
+      h5: ({ children }) => /* @__PURE__ */ jsx9("h5", { style: { ...styles.headingBase, fontSize: 13 }, children }),
+      h6: ({ children }) => /* @__PURE__ */ jsx9("h6", { style: { ...styles.headingBase, fontSize: 12 }, children }),
       // Paragraphs - with citation parsing
       p: ({ children }) => {
-        const processedChildren = hasCitations ? React6.Children.map(children, (child) => {
+        const processedChildren = hasCitations ? React7.Children.map(children, (child) => {
           if (typeof child === "string") {
             return parseCitationMarkers(child, getCitation);
           }
           return child;
         }) : children;
-        return inline ? /* @__PURE__ */ jsx8("span", { children: processedChildren }) : /* @__PURE__ */ jsx8("p", { style: styles.paragraph, children: processedChildren });
+        return inline ? /* @__PURE__ */ jsx9("span", { children: processedChildren }) : /* @__PURE__ */ jsx9("p", { style: styles.paragraph, children: processedChildren });
       },
       // Blockquotes
-      blockquote: ({ children }) => /* @__PURE__ */ jsx8("blockquote", { style: styles.blockquote, children }),
+      blockquote: ({ children }) => /* @__PURE__ */ jsx9("blockquote", { style: styles.blockquote, children }),
       // Horizontal rules
-      hr: () => /* @__PURE__ */ jsx8("hr", { style: styles.hr }),
+      hr: () => /* @__PURE__ */ jsx9("hr", { style: styles.hr }),
       // Strong/Bold - with citation parsing
       strong: ({ children }) => {
-        const processedChildren = hasCitations ? React6.Children.map(children, (child) => {
+        const processedChildren = hasCitations ? React7.Children.map(children, (child) => {
           if (typeof child === "string") {
             return parseCitationMarkers(child, getCitation);
           }
           return child;
         }) : children;
-        return /* @__PURE__ */ jsx8("strong", { style: { fontWeight: 600 }, children: processedChildren });
+        return /* @__PURE__ */ jsx9("strong", { style: { fontWeight: 600 }, children: processedChildren });
       },
       // Emphasis/Italic - with citation parsing
       em: ({ children }) => {
-        const processedChildren = hasCitations ? React6.Children.map(children, (child) => {
+        const processedChildren = hasCitations ? React7.Children.map(children, (child) => {
           if (typeof child === "string") {
             return parseCitationMarkers(child, getCitation);
           }
           return child;
         }) : children;
-        return /* @__PURE__ */ jsx8("em", { style: { fontStyle: "italic" }, children: processedChildren });
+        return /* @__PURE__ */ jsx9("em", { style: { fontStyle: "italic" }, children: processedChildren });
       }
     }),
     [styles, inline, hasCitations, getCitation]
   );
   const Wrapper = inline ? "span" : "div";
-  return /* @__PURE__ */ jsx8(Wrapper, { className, style, children: /* @__PURE__ */ jsx8(ReactMarkdown, { components, children: content }) });
+  return /* @__PURE__ */ jsx9(Wrapper, { className, style, children: /* @__PURE__ */ jsx9(ReactMarkdown, { components, children: content }) });
 }
 
 // src/contexts/markdown/provider.tsx
 import {
-  createContext as createContext7,
-  useContext as useContext7,
-  useMemo as useMemo10
+  createContext as createContext8,
+  useContext as useContext8,
+  useMemo as useMemo11
 } from "react";
-import { jsx as jsx9 } from "react/jsx-runtime";
-var MarkdownContext = createContext7(null);
+import { jsx as jsx10 } from "react/jsx-runtime";
+var MarkdownContext = createContext8(null);
 function MarkdownProvider({
   children,
   enabled = true,
   theme: themeOverrides
 }) {
-  const theme = useMemo10(
+  const theme = useMemo11(
     () => ({ ...defaultTheme, ...themeOverrides }),
     [themeOverrides]
   );
-  const renderText = useMemo10(() => {
+  const renderText = useMemo11(() => {
     return (content, options = {}) => {
       if (!content) return null;
       if (!enabled) {
         if (options.inline) {
-          return /* @__PURE__ */ jsx9("span", { className: options.className, style: options.style, children: content });
+          return /* @__PURE__ */ jsx10("span", { className: options.className, style: options.style, children: content });
         }
-        return /* @__PURE__ */ jsx9("div", { className: options.className, style: options.style, children: content });
+        return /* @__PURE__ */ jsx10("div", { className: options.className, style: options.style, children: content });
       }
-      return /* @__PURE__ */ jsx9(
+      return /* @__PURE__ */ jsx10(
         InternalMarkdown,
         {
           content,
@@ -3371,7 +3660,7 @@ function MarkdownProvider({
       );
     };
   }, [enabled, theme]);
-  const value = useMemo10(
+  const value = useMemo11(
     () => ({
       enabled,
       theme,
@@ -3379,14 +3668,14 @@ function MarkdownProvider({
     }),
     [enabled, theme, renderText]
   );
-  return /* @__PURE__ */ jsx9(MarkdownContext.Provider, { value, children });
+  return /* @__PURE__ */ jsx10(MarkdownContext.Provider, { value, children });
 }
 var fallbackRenderText = (content, options = {}) => {
   if (!content) return null;
   if (options.inline) {
-    return /* @__PURE__ */ jsx9("span", { className: options.className, style: options.style, children: content });
+    return /* @__PURE__ */ jsx10("span", { className: options.className, style: options.style, children: content });
   }
-  return /* @__PURE__ */ jsx9("div", { className: options.className, style: options.style, children: content });
+  return /* @__PURE__ */ jsx10("div", { className: options.className, style: options.style, children: content });
 };
 var fallbackContextValue = {
   enabled: false,
@@ -3394,7 +3683,7 @@ var fallbackContextValue = {
   renderText: fallbackRenderText
 };
 function useMarkdown() {
-  const context = useContext7(MarkdownContext);
+  const context = useContext8(MarkdownContext);
   return context ?? fallbackContextValue;
 }
 function useRenderText() {
@@ -3404,12 +3693,12 @@ function useRenderText() {
 
 // src/contexts/ai-settings.tsx
 import {
-  createContext as createContext8,
-  useContext as useContext8,
-  useState as useState3,
-  useEffect as useEffect6,
-  useCallback as useCallback11,
-  useRef as useRef4
+  createContext as createContext9,
+  useContext as useContext9,
+  useState as useState4,
+  useEffect as useEffect7,
+  useCallback as useCallback12,
+  useRef as useRef5
 } from "react";
 
 // src/hooks/types.ts
@@ -3536,13 +3825,13 @@ async function saveSettingsToAPI(settings) {
 }
 
 // src/contexts/ai-settings.tsx
-import { jsx as jsx10 } from "react/jsx-runtime";
-var AISettingsContext = createContext8(null);
+import { jsx as jsx11 } from "react/jsx-runtime";
+var AISettingsContext = createContext9(null);
 function AISettingsProvider({
   children,
   initialSettings
 }) {
-  const [settings, setSettings] = useState3(() => {
+  const [settings, setSettings] = useState4(() => {
     const loaded = loadSettings();
     if (initialSettings) {
       return {
@@ -3558,10 +3847,10 @@ function AISettingsProvider({
     }
     return loaded;
   });
-  const [isLoading, setIsLoading] = useState3(true);
-  const [isSyncing, setIsSyncing] = useState3(false);
-  const syncTimeoutRef = useRef4(null);
-  useEffect6(() => {
+  const [isLoading, setIsLoading] = useState4(true);
+  const [isSyncing, setIsSyncing] = useState4(false);
+  const syncTimeoutRef = useRef5(null);
+  useEffect7(() => {
     fetchSettingsFromAPI().then((apiSettings) => {
       if (apiSettings) {
         setSettings(apiSettings);
@@ -3570,7 +3859,7 @@ function AISettingsProvider({
       setIsLoading(false);
     });
   }, []);
-  const syncToAPI = useCallback11((newSettings) => {
+  const syncToAPI = useCallback12((newSettings) => {
     if (syncTimeoutRef.current) {
       clearTimeout(syncTimeoutRef.current);
     }
@@ -3580,7 +3869,7 @@ function AISettingsProvider({
       setIsSyncing(false);
     }, 500);
   }, []);
-  const updateAndSync = useCallback11(
+  const updateAndSync = useCallback12(
     (newSettings, changedPart) => {
       setSettings(newSettings);
       saveSettings(newSettings);
@@ -3588,7 +3877,7 @@ function AISettingsProvider({
     },
     [syncToAPI]
   );
-  const updateSettings = useCallback11(
+  const updateSettings = useCallback12(
     (partial) => {
       setSettings((prev) => {
         const next = {
@@ -3605,7 +3894,7 @@ function AISettingsProvider({
     },
     [syncToAPI]
   );
-  const setProactivityMode = useCallback11(
+  const setProactivityMode = useCallback12(
     (mode) => {
       const change = {
         proactivity: {
@@ -3624,7 +3913,7 @@ function AISettingsProvider({
     },
     [settings, updateAndSync]
   );
-  const setProactivityEnabled = useCallback11(
+  const setProactivityEnabled = useCallback12(
     (enabled) => {
       const change = {
         proactivity: {
@@ -3643,14 +3932,14 @@ function AISettingsProvider({
     },
     [settings, updateAndSync]
   );
-  const setSuggestionsEnabled = useCallback11(
+  const setSuggestionsEnabled = useCallback12(
     (enabled) => {
       const change = { suggestions: { ...settings.suggestions, enabled } };
       updateAndSync({ ...settings, ...change }, change);
     },
     [settings, updateAndSync]
   );
-  const setDataCollectionPreferForm = useCallback11(
+  const setDataCollectionPreferForm = useCallback12(
     (preferForm) => {
       const change = {
         dataCollection: { ...settings.dataCollection, preferForm }
@@ -3659,19 +3948,19 @@ function AISettingsProvider({
     },
     [settings, updateAndSync]
   );
-  const setSmartParsingEnabled = useCallback11(
+  const setSmartParsingEnabled = useCallback12(
     (enabled) => {
       const change = { documents: { smartParsingEnabled: enabled } };
       updateAndSync({ ...settings, ...change }, change);
     },
     [settings, updateAndSync]
   );
-  const resetSettings = useCallback11(() => {
+  const resetSettings = useCallback12(() => {
     setSettings(DEFAULT_EXTENDED_SETTINGS);
     saveSettings(DEFAULT_EXTENDED_SETTINGS);
     syncToAPI(DEFAULT_EXTENDED_SETTINGS);
   }, [syncToAPI]);
-  const completeOnboarding = useCallback11(() => {
+  const completeOnboarding = useCallback12(() => {
     const change = { onboarding: { ...settings.onboarding, completed: true } };
     updateAndSync({ ...settings, ...change }, change);
   }, [settings, updateAndSync]);
@@ -3688,41 +3977,41 @@ function AISettingsProvider({
     isLoading,
     isSyncing
   };
-  return /* @__PURE__ */ jsx10(AISettingsContext.Provider, { value, children });
+  return /* @__PURE__ */ jsx11(AISettingsContext.Provider, { value, children });
 }
 function useAISettings() {
-  const context = useContext8(AISettingsContext);
+  const context = useContext9(AISettingsContext);
   if (!context) {
     throw new Error("useAISettings must be used within AISettingsProvider");
   }
   return context;
 }
 function useAISettingsOptional() {
-  return useContext8(AISettingsContext);
+  return useContext9(AISettingsContext);
 }
 function useIsProactivityEnabled() {
-  const context = useContext8(AISettingsContext);
+  const context = useContext9(AISettingsContext);
   if (!context) return true;
   return context.settings.proactivity.enabled && context.settings.proactivity.mode !== "disabled";
 }
 function useAreSuggestionsEnabled() {
-  const context = useContext8(AISettingsContext);
+  const context = useContext9(AISettingsContext);
   if (!context) return true;
   return context.settings.suggestions.enabled;
 }
 function useIsSmartParsingEnabled() {
-  const context = useContext8(AISettingsContext);
+  const context = useContext9(AISettingsContext);
   if (!context) return false;
   return context.settings.documents.smartParsingEnabled;
 }
 
 // src/contexts/action-tracking/provider.tsx
 import {
-  createContext as createContext9,
-  useState as useState4,
-  useCallback as useCallback12,
-  useRef as useRef5,
-  useEffect as useEffect7
+  createContext as createContext10,
+  useState as useState5,
+  useCallback as useCallback13,
+  useRef as useRef6,
+  useEffect as useEffect8
 } from "react";
 
 // src/contexts/action-tracking/types.ts
@@ -3764,24 +4053,24 @@ Based on these actions, you may proactively offer relevant assistance.
 }
 
 // src/contexts/action-tracking/provider.tsx
-import { jsx as jsx11 } from "react/jsx-runtime";
-var ActionContext2 = createContext9(null);
+import { jsx as jsx12 } from "react/jsx-runtime";
+var ActionContext2 = createContext10(null);
 function ActionProvider2({
   children,
   initialOptions
 }) {
-  const [options, setOptionsState] = useState4(() => ({
+  const [options, setOptionsState] = useState5(() => ({
     ...DEFAULT_OPTIONS,
     ...initialOptions
   }));
-  const [actions, setActions] = useState4([]);
-  const [lastAction, setLastAction] = useState4(null);
-  const subscribersRef = useRef5(
+  const [actions, setActions] = useState5([]);
+  const [lastAction, setLastAction] = useState5(null);
+  const subscribersRef = useRef6(
     /* @__PURE__ */ new Set()
   );
-  const pendingActionsRef = useRef5([]);
-  const timerRef = useRef5(null);
-  const notifySubscribers = useCallback12((batch) => {
+  const pendingActionsRef = useRef6([]);
+  const timerRef = useRef6(null);
+  const notifySubscribers = useCallback13((batch) => {
     subscribersRef.current.forEach((cb) => {
       try {
         cb(batch);
@@ -3790,7 +4079,7 @@ function ActionProvider2({
       }
     });
   }, []);
-  const tryFlush = useCallback12(() => {
+  const tryFlush = useCallback13(() => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
@@ -3804,7 +4093,7 @@ function ActionProvider2({
     pendingActionsRef.current = [];
     notifySubscribers(batch);
   }, [notifySubscribers]);
-  const scheduleFlush2 = useCallback12(
+  const scheduleFlush2 = useCallback13(
     (delayMs) => {
       if (timerRef.current) {
         clearTimeout(timerRef.current);
@@ -3813,7 +4102,7 @@ function ActionProvider2({
     },
     [tryFlush]
   );
-  const trackAction = useCallback12(
+  const trackAction = useCallback13(
     (actionData) => {
       if (!options.enabled) return;
       const action = {
@@ -3836,7 +4125,7 @@ function ActionProvider2({
       scheduleFlush2
     ]
   );
-  const clearActions = useCallback12(() => {
+  const clearActions = useCallback13(() => {
     setActions([]);
     setLastAction(null);
     pendingActionsRef.current = [];
@@ -3845,28 +4134,28 @@ function ActionProvider2({
       timerRef.current = null;
     }
   }, []);
-  const getActionsForContext = useCallback12(() => {
+  const getActionsForContext = useCallback13(() => {
     return actions.slice(-(options.maxActionsInContext ?? 5));
   }, [actions, options.maxActionsInContext]);
-  const onAction = useCallback12(
+  const onAction = useCallback13(
     (callback) => {
       subscribersRef.current.add(callback);
       return () => subscribersRef.current.delete(callback);
     },
     []
   );
-  const setOptions = useCallback12(
+  const setOptions = useCallback13(
     (newOptions) => {
       setOptionsState((prev) => ({ ...prev, ...newOptions }));
     },
     []
   );
-  useEffect7(() => {
+  useEffect8(() => {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, []);
-  useEffect7(() => {
+  useEffect8(() => {
     if (typeof document === "undefined") return;
     let focusOutTimeout = null;
     const handleFocusOut = (e) => {
@@ -3896,13 +4185,13 @@ function ActionProvider2({
     options,
     setOptions
   };
-  return /* @__PURE__ */ jsx11(ActionContext2.Provider, { value, children });
+  return /* @__PURE__ */ jsx12(ActionContext2.Provider, { value, children });
 }
 
 // src/contexts/action-tracking/hooks.ts
-import { useContext as useContext9, useCallback as useCallback13, useEffect as useEffect8 } from "react";
+import { useContext as useContext10, useCallback as useCallback14, useEffect as useEffect9 } from "react";
 function useActionContext() {
-  const context = useContext9(ActionContext2);
+  const context = useContext10(ActionContext2);
   if (!context) {
     throw new Error("useActionContext must be used within ActionProvider");
   }
@@ -3910,7 +4199,7 @@ function useActionContext() {
 }
 function useElementActionTracker(elementKey, elementType) {
   const { trackAction, options } = useActionContext();
-  const track = useCallback13(
+  const track = useCallback14(
     (type, context, payload) => {
       if (!options.enabled) return;
       trackAction({ type, elementKey, elementType, context, payload });
@@ -3921,21 +4210,21 @@ function useElementActionTracker(elementKey, elementType) {
 }
 function useActionSubscriber(callback, deps = []) {
   const { onAction } = useActionContext();
-  useEffect8(() => {
+  useEffect9(() => {
     return onAction(callback);
   }, [onAction, ...deps]);
 }
 
 // src/contexts/autosave.tsx
-import React8, {
-  createContext as createContext10,
-  useContext as useContext10,
-  useCallback as useCallback14,
-  useRef as useRef6,
-  useMemo as useMemo11
+import React9, {
+  createContext as createContext11,
+  useContext as useContext11,
+  useCallback as useCallback15,
+  useRef as useRef7,
+  useMemo as useMemo12
 } from "react";
-import { jsx as jsx12 } from "react/jsx-runtime";
-var AutoSaveContext = createContext10(null);
+import { jsx as jsx13 } from "react/jsx-runtime";
+var AutoSaveContext = createContext11(null);
 var DEFAULT_DEBOUNCE_MS = 1500;
 function AutoSaveProvider({
   children,
@@ -3945,9 +4234,9 @@ function AutoSaveProvider({
   onSaveComplete,
   onSaveError
 }) {
-  const debounceTimersRef = useRef6(/* @__PURE__ */ new Map());
-  const pendingRef = useRef6(/* @__PURE__ */ new Map());
-  const autoSave = useCallback14(
+  const debounceTimersRef = useRef7(/* @__PURE__ */ new Map());
+  const pendingRef = useRef7(/* @__PURE__ */ new Map());
+  const autoSave = useCallback15(
     async (payload) => {
       if (!chatId || !enabled) {
         return {
@@ -3982,7 +4271,7 @@ function AutoSaveProvider({
     },
     [chatId, enabled, saveEndpoint, onSaveComplete, onSaveError]
   );
-  const debouncedAutoSave = useCallback14(
+  const debouncedAutoSave = useCallback15(
     (payload, delayMs = DEFAULT_DEBOUNCE_MS) => {
       if (!chatId || !enabled) return;
       const key = `${payload.type}:${payload.elementKey}`;
@@ -4003,7 +4292,7 @@ function AutoSaveProvider({
     },
     [chatId, enabled, autoSave]
   );
-  const value = useMemo11(
+  const value = useMemo12(
     () => ({
       chatId,
       autoSave,
@@ -4012,10 +4301,10 @@ function AutoSaveProvider({
     }),
     [chatId, autoSave, debouncedAutoSave, enabled]
   );
-  return /* @__PURE__ */ jsx12(AutoSaveContext.Provider, { value, children });
+  return /* @__PURE__ */ jsx13(AutoSaveContext.Provider, { value, children });
 }
 function useAutoSave() {
-  const context = useContext10(AutoSaveContext);
+  const context = useContext11(AutoSaveContext);
   if (!context) {
     return {
       chatId: null,
@@ -4029,9 +4318,9 @@ function useAutoSave() {
 }
 function useDomainAutoSave(type, elementKey, data, options) {
   const { debouncedAutoSave, isEnabled } = useAutoSave();
-  const mountedRef = useRef6(false);
-  const lastDataRef = useRef6(null);
-  React8.useEffect(() => {
+  const mountedRef = useRef7(false);
+  const lastDataRef = useRef7(null);
+  React9.useEffect(() => {
     if (!isEnabled || !data || !elementKey) return;
     if (!mountedRef.current) {
       mountedRef.current = true;
@@ -4054,15 +4343,15 @@ function useDomainAutoSave(type, elementKey, data, options) {
 
 // src/contexts/tool-progress.tsx
 import {
-  createContext as createContext11,
-  useContext as useContext11,
-  useCallback as useCallback15,
-  useMemo as useMemo12,
-  useEffect as useEffect9
+  createContext as createContext12,
+  useContext as useContext12,
+  useCallback as useCallback16,
+  useMemo as useMemo13,
+  useEffect as useEffect10
 } from "react";
 import { useShallow as useShallow2 } from "zustand/react/shallow";
-import { jsx as jsx13 } from "react/jsx-runtime";
-var ToolProgressContext = createContext11(
+import { jsx as jsx14 } from "react/jsx-runtime";
+var ToolProgressContext = createContext12(
   null
 );
 function ToolProgressProvider({
@@ -4079,7 +4368,7 @@ function ToolProgressProvider({
   );
   const getActiveProgress = useStore((s) => s.getActiveProgress);
   const isToolRunning = useStore((s) => s.isToolRunning);
-  const addProgress = useCallback15(
+  const addProgress = useCallback16(
     (event) => {
       addProgressEvent({
         toolCallId: event.toolCallId,
@@ -4092,22 +4381,22 @@ function ToolProgressProvider({
     },
     [addProgressEvent]
   );
-  const updateProgress = useCallback15(
+  const updateProgress = useCallback16(
     (toolCallId, updates) => {
       updateProgressEvent(toolCallId, updates);
     },
     [updateProgressEvent]
   );
-  const clearProgress = useCallback15(() => {
+  const clearProgress = useCallback16(() => {
     clearProgressEvents();
   }, [clearProgressEvents]);
-  const clearCompletedOlderThan = useCallback15(
+  const clearCompletedOlderThan = useCallback16(
     (ms) => {
       clearCompletedProgressOlderThan(ms);
     },
     [clearCompletedProgressOlderThan]
   );
-  useEffect9(() => {
+  useEffect10(() => {
     if (autoClearCompleteMs <= 0) return;
     const interval = setInterval(() => {
       clearCompletedOlderThan(autoClearCompleteMs);
@@ -4116,7 +4405,7 @@ function ToolProgressProvider({
   }, [autoClearCompleteMs, clearCompletedOlderThan]);
   const activeProgress = getActiveProgress();
   const toolRunning = isToolRunning();
-  const value = useMemo12(
+  const value = useMemo13(
     () => ({
       activeProgress,
       allProgress: progressEvents,
@@ -4136,10 +4425,10 @@ function ToolProgressProvider({
       clearCompletedOlderThan
     ]
   );
-  return /* @__PURE__ */ jsx13(ToolProgressContext.Provider, { value, children });
+  return /* @__PURE__ */ jsx14(ToolProgressContext.Provider, { value, children });
 }
 function useToolProgress() {
-  const context = useContext11(ToolProgressContext);
+  const context = useContext12(ToolProgressContext);
   if (!context) {
     throw new Error(
       "useToolProgress must be used within a ToolProgressProvider"
@@ -4148,7 +4437,7 @@ function useToolProgress() {
   return context;
 }
 function useToolProgressOptional() {
-  return useContext11(ToolProgressContext);
+  return useContext12(ToolProgressContext);
 }
 function useIsToolRunning() {
   return useStore(
@@ -4169,14 +4458,14 @@ function useActiveToolProgress2() {
 
 // src/contexts/unified-progress.tsx
 import {
-  createContext as createContext12,
-  useContext as useContext12,
-  useMemo as useMemo13,
-  useCallback as useCallback16
+  createContext as createContext13,
+  useContext as useContext13,
+  useMemo as useMemo14,
+  useCallback as useCallback17
 } from "react";
 import { useShallow as useShallow3 } from "zustand/react/shallow";
-import { jsx as jsx14 } from "react/jsx-runtime";
-var UnifiedProgressContext = createContext12(null);
+import { jsx as jsx15 } from "react/jsx-runtime";
+var UnifiedProgressContext = createContext13(null);
 function mapPlanStepStatus(status) {
   switch (status) {
     case "running":
@@ -4241,7 +4530,7 @@ function UnifiedProgressProvider({
 }) {
   const planExecution = useStore((s) => s.planExecution);
   const progressEvents = useStore(useShallow3((s) => s.progressEvents));
-  const items = useMemo13(() => {
+  const items = useMemo14(() => {
     const result = [];
     if (planExecution.plan) {
       for (const step of planExecution.plan.steps) {
@@ -4255,18 +4544,18 @@ function UnifiedProgressProvider({
     }
     return result;
   }, [planExecution.plan, planExecution.isOrchestrating, progressEvents]);
-  const activeItems = useMemo13(
+  const activeItems = useMemo14(
     () => items.filter((item) => item.status === "running"),
     [items]
   );
-  const isGenerating = useMemo13(() => {
+  const isGenerating = useMemo14(() => {
     if (planExecution.isOrchestrating) return true;
     return progressEvents.some(
       (p) => p.status === "starting" || p.status === "progress"
     );
   }, [planExecution.isOrchestrating, progressEvents]);
   const goal = planExecution.plan?.goal ?? null;
-  const overallProgress = useMemo13(() => {
+  const overallProgress = useMemo14(() => {
     if (!planExecution.plan) {
       const activeTools = progressEvents.filter(
         (p) => p.status === "starting" || p.status === "progress"
@@ -4279,23 +4568,23 @@ function UnifiedProgressProvider({
     const completed = steps.filter((s) => s.status === "complete").length;
     return steps.length > 0 ? Math.round(completed / steps.length * 100) : 0;
   }, [planExecution.plan, progressEvents]);
-  const elapsedTime = useMemo13(() => {
+  const elapsedTime = useMemo14(() => {
     if (!planExecution.orchestrationStartTime) return null;
     if (!planExecution.isOrchestrating) return null;
     return Date.now() - planExecution.orchestrationStartTime;
   }, [planExecution.orchestrationStartTime, planExecution.isOrchestrating]);
-  const getItem = useCallback16(
+  const getItem = useCallback17(
     (id) => items.find((item) => item.id === id),
     [items]
   );
-  const isItemRunning = useCallback16(
+  const isItemRunning = useCallback17(
     (id) => {
       const item = items.find((i) => i.id === id);
       return item?.status === "running";
     },
     [items]
   );
-  const value = useMemo13(
+  const value = useMemo14(
     () => ({
       isGenerating,
       goal,
@@ -4317,10 +4606,10 @@ function UnifiedProgressProvider({
       isItemRunning
     ]
   );
-  return /* @__PURE__ */ jsx14(UnifiedProgressContext.Provider, { value, children });
+  return /* @__PURE__ */ jsx15(UnifiedProgressContext.Provider, { value, children });
 }
 function useUnifiedProgress() {
-  const context = useContext12(UnifiedProgressContext);
+  const context = useContext13(UnifiedProgressContext);
   if (!context) {
     throw new Error(
       "useUnifiedProgress must be used within a UnifiedProgressProvider"
@@ -4329,7 +4618,7 @@ function useUnifiedProgress() {
   return context;
 }
 function useUnifiedProgressOptional() {
-  return useContext12(UnifiedProgressContext);
+  return useContext13(UnifiedProgressContext);
 }
 function useIsGenerating() {
   return useStore((s) => {
@@ -4341,275 +4630,6 @@ function useIsGenerating() {
 }
 function useGeneratingGoal() {
   return useStore((s) => s.planExecution.plan?.goal ?? null);
-}
-
-// src/contexts/edit-mode.tsx
-import {
-  createContext as createContext13,
-  useContext as useContext13,
-  useState as useState5,
-  useCallback as useCallback17,
-  useMemo as useMemo14,
-  useRef as useRef7,
-  useEffect as useEffect10
-} from "react";
-import { jsx as jsx15 } from "react/jsx-runtime";
-var EditModeContext = createContext13(null);
-function EditModeProvider({
-  children,
-  initialEditing = false,
-  onCommit,
-  autoSaveDelay = 1500,
-  maxHistoryItems = 50
-}) {
-  const [isEditing, setIsEditing] = useState5(initialEditing);
-  const [focusedKey, setFocusedKey] = useState5(null);
-  const [pendingChanges, setPendingChanges] = useState5(/* @__PURE__ */ new Map());
-  const [previousValues, setPreviousValues] = useState5(/* @__PURE__ */ new Map());
-  const [history, setHistory] = useState5([]);
-  const [historyIndex, setHistoryIndex] = useState5(-1);
-  const autoSaveTimerRef = useRef7(null);
-  useEffect10(() => {
-    return () => {
-      if (autoSaveTimerRef.current) {
-        clearTimeout(autoSaveTimerRef.current);
-      }
-    };
-  }, []);
-  const enableEditing = useCallback17(() => setIsEditing(true), []);
-  const disableEditing = useCallback17(() => {
-    setIsEditing(false);
-    setFocusedKey(null);
-    if (pendingChanges.size > 0) {
-    }
-  }, [pendingChanges.size]);
-  const toggleEditing = useCallback17(() => setIsEditing((prev) => !prev), []);
-  const recordChange = useCallback17(
-    (elementKey, propName, newValue, previousValue) => {
-      setPendingChanges((prev) => {
-        const next = new Map(prev);
-        const existing = next.get(elementKey) || {};
-        next.set(elementKey, { ...existing, [propName]: newValue });
-        return next;
-      });
-      if (previousValue !== void 0) {
-        setPreviousValues((prev) => {
-          const next = new Map(prev);
-          const existing = next.get(elementKey) || {};
-          if (!(propName in existing)) {
-            next.set(elementKey, { ...existing, [propName]: previousValue });
-          }
-          return next;
-        });
-      }
-      if (autoSaveDelay > 0) {
-        if (autoSaveTimerRef.current) {
-          clearTimeout(autoSaveTimerRef.current);
-        }
-        autoSaveTimerRef.current = setTimeout(() => {
-          commitChangesRef.current?.();
-        }, autoSaveDelay);
-      }
-    },
-    [autoSaveDelay]
-  );
-  const commitChangesRef = useRef7(void 0);
-  const commitChanges = useCallback17(() => {
-    if (pendingChanges.size === 0) return;
-    const propChanges = [];
-    const elementChanges = [];
-    const now = Date.now();
-    pendingChanges.forEach((props, key) => {
-      const prevProps = previousValues.get(key) || {};
-      for (const [propName, newValue] of Object.entries(props)) {
-        propChanges.push({
-          elementKey: key,
-          propName,
-          oldValue: prevProps[propName],
-          newValue
-        });
-      }
-      elementChanges.push({
-        key,
-        props,
-        previousProps: prevProps,
-        timestamp: now
-      });
-    });
-    setHistory((prev) => {
-      const newHistory = prev.slice(0, historyIndex + 1);
-      newHistory.push({ changes: propChanges, timestamp: now });
-      if (newHistory.length > maxHistoryItems) {
-        return newHistory.slice(-maxHistoryItems);
-      }
-      return newHistory;
-    });
-    setHistoryIndex((prev) => prev + 1);
-    if (onCommit) {
-      onCommit(elementChanges);
-    }
-    setPendingChanges(/* @__PURE__ */ new Map());
-    setPreviousValues(/* @__PURE__ */ new Map());
-    if (autoSaveTimerRef.current) {
-      clearTimeout(autoSaveTimerRef.current);
-      autoSaveTimerRef.current = null;
-    }
-  }, [pendingChanges, previousValues, historyIndex, maxHistoryItems, onCommit]);
-  commitChangesRef.current = commitChanges;
-  const discardChanges = useCallback17(() => {
-    setPendingChanges(/* @__PURE__ */ new Map());
-    setPreviousValues(/* @__PURE__ */ new Map());
-    if (autoSaveTimerRef.current) {
-      clearTimeout(autoSaveTimerRef.current);
-      autoSaveTimerRef.current = null;
-    }
-  }, []);
-  const undo = useCallback17(() => {
-    if (historyIndex < 0) return;
-    const item = history[historyIndex];
-    if (!item) return;
-    const elementMap = /* @__PURE__ */ new Map();
-    for (const change of item.changes) {
-      const existing = elementMap.get(change.elementKey) || { props: {}, previousProps: {} };
-      existing.props[change.propName] = change.oldValue;
-      existing.previousProps[change.propName] = change.newValue;
-      elementMap.set(change.elementKey, existing);
-    }
-    const undoChanges = Array.from(elementMap.entries()).map(([key, data]) => ({
-      key,
-      props: data.props,
-      previousProps: data.previousProps,
-      timestamp: Date.now()
-    }));
-    if (onCommit) {
-      onCommit(undoChanges);
-    }
-    setHistoryIndex((prev) => prev - 1);
-  }, [history, historyIndex, onCommit]);
-  const redo = useCallback17(() => {
-    if (historyIndex >= history.length - 1) return;
-    const item = history[historyIndex + 1];
-    if (!item) return;
-    const elementMap = /* @__PURE__ */ new Map();
-    for (const change of item.changes) {
-      const existing = elementMap.get(change.elementKey) || { props: {}, previousProps: {} };
-      existing.props[change.propName] = change.newValue;
-      existing.previousProps[change.propName] = change.oldValue;
-      elementMap.set(change.elementKey, existing);
-    }
-    const redoChanges = Array.from(elementMap.entries()).map(([key, data]) => ({
-      key,
-      props: data.props,
-      previousProps: data.previousProps,
-      timestamp: Date.now()
-    }));
-    if (onCommit) {
-      onCommit(redoChanges);
-    }
-    setHistoryIndex((prev) => prev + 1);
-  }, [history, historyIndex, onCommit]);
-  const canUndo = historyIndex >= 0;
-  const canRedo = historyIndex < history.length - 1;
-  const pendingCount = pendingChanges.size;
-  const value = useMemo14(
-    () => ({
-      isEditing,
-      enableEditing,
-      disableEditing,
-      toggleEditing,
-      focusedKey,
-      setFocusedKey,
-      pendingChanges,
-      recordChange,
-      commitChanges,
-      discardChanges,
-      undo,
-      redo,
-      canUndo,
-      canRedo,
-      history,
-      pendingCount,
-      onCommit
-    }),
-    [
-      isEditing,
-      enableEditing,
-      disableEditing,
-      toggleEditing,
-      focusedKey,
-      setFocusedKey,
-      pendingChanges,
-      recordChange,
-      commitChanges,
-      discardChanges,
-      undo,
-      redo,
-      canUndo,
-      canRedo,
-      history,
-      pendingCount,
-      onCommit
-    ]
-  );
-  return /* @__PURE__ */ jsx15(EditModeContext.Provider, { value, children });
-}
-function useEditMode() {
-  const context = useContext13(EditModeContext);
-  if (!context) {
-    return {
-      isEditing: false,
-      enableEditing: () => {
-      },
-      disableEditing: () => {
-      },
-      toggleEditing: () => {
-      },
-      focusedKey: null,
-      setFocusedKey: () => {
-      },
-      pendingChanges: /* @__PURE__ */ new Map(),
-      recordChange: () => {
-      },
-      commitChanges: () => {
-      },
-      discardChanges: () => {
-      },
-      undo: () => {
-      },
-      redo: () => {
-      },
-      canUndo: false,
-      canRedo: false,
-      history: [],
-      pendingCount: 0
-    };
-  }
-  return context;
-}
-function useIsElementEditing(elementKey) {
-  const { isEditing, focusedKey } = useEditMode();
-  return isEditing && focusedKey === elementKey;
-}
-function useElementEdit(elementKey) {
-  const { isEditing, recordChange, focusedKey, setFocusedKey } = useEditMode();
-  const handleChange = useCallback17(
-    (propName, newValue) => {
-      recordChange(elementKey, propName, newValue);
-    },
-    [elementKey, recordChange]
-  );
-  const handleFocus = useCallback17(() => {
-    setFocusedKey(elementKey);
-  }, [elementKey, setFocusedKey]);
-  const handleBlur = useCallback17(() => {
-  }, []);
-  return {
-    isEditing,
-    isFocused: focusedKey === elementKey,
-    handleChange,
-    handleFocus,
-    handleBlur
-  };
 }
 
 // src/components/InteractionTrackingWrapper.tsx
@@ -6028,6 +6048,7 @@ function useHistory(tree, conversation, setTree, setConversation, treeRef) {
 }
 
 // src/hooks/ui-stream/logger.ts
+var DEBUG = typeof window !== "undefined" && process.env.NODE_ENV === "development" && process.env.NEXT_PUBLIC_DEBUG === "true";
 var LOG_ENDPOINT = "/api/debug-log";
 var LOG_BUFFER = [];
 var flushTimer = null;
@@ -6038,7 +6059,7 @@ function formatLog(level, message, data) {
   return `[${timestamp}] [${level}] [useUIStream] ${message}${dataStr}`;
 }
 function flushLogs() {
-  if (LOG_BUFFER.length === 0) return;
+  if (!DEBUG || LOG_BUFFER.length === 0) return;
   const logs = LOG_BUFFER.splice(0, LOG_BUFFER.length);
   if (typeof window !== "undefined") {
     fetch(LOG_ENDPOINT, {
@@ -6058,21 +6079,22 @@ function scheduleFlush() {
 }
 var streamLog = {
   debug: (msg, data) => {
-    console.log(`[useUIStream] ${msg}`, data ?? "");
+    if (!DEBUG) return;
     LOG_BUFFER.push(formatLog("DEBUG", msg, data));
     scheduleFlush();
   },
   info: (msg, data) => {
-    console.log(`[useUIStream] ${msg}`, data ?? "");
+    if (!DEBUG) return;
     LOG_BUFFER.push(formatLog("INFO", msg, data));
     scheduleFlush();
   },
   warn: (msg, data) => {
-    console.warn(`[useUIStream] ${msg}`, data ?? "");
+    if (!DEBUG) return;
     LOG_BUFFER.push(formatLog("WARN", msg, data));
     scheduleFlush();
   },
   error: (msg, data) => {
+    if (!DEBUG) return;
     console.error(`[useUIStream] ${msg}`, data ?? "");
     LOG_BUFFER.push(formatLog("ERROR", msg, data));
     scheduleFlush();
@@ -6473,6 +6495,9 @@ function parseSSELine(line) {
 }
 function parsePayload(payload) {
   if (!payload) return null;
+  if (payload.type === "streaming-started") {
+    return { type: "streaming-started", timestamp: payload.timestamp };
+  }
   if (payload.type === "text-delta") {
     return { type: "text-delta" };
   }
@@ -6583,7 +6608,7 @@ function parsePayload(payload) {
 }
 
 // src/hooks/ui-stream/stream-reader.ts
-var IDLE_TIMEOUT_MS = 9e4;
+var IDLE_TIMEOUT_MS = 3e5;
 async function* readStreamWithTimeout(reader) {
   const decoder = new TextDecoder();
   let buffer = "";
@@ -6618,12 +6643,63 @@ async function* readStreamWithTimeout(reader) {
   }
 }
 
+// src/hooks/ui-stream/patch-processor.ts
+var PATCH_FLUSH_INTERVAL_MS = 100;
+function getNodePath(node) {
+  const path = [];
+  let current = node;
+  while (current?.parentNode) {
+    const parent = current.parentNode;
+    const index = Array.from(parent.childNodes).indexOf(current);
+    path.unshift(index);
+    current = parent;
+  }
+  return path;
+}
+function resolveNodePath(path, root) {
+  let node = root.body;
+  for (const index of path) {
+    if (!node.childNodes[index]) return null;
+    node = node.childNodes[index];
+  }
+  return node;
+}
+function saveSelection() {
+  if (typeof window === "undefined") return null;
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
+  return {
+    anchorNodePath: getNodePath(sel.anchorNode),
+    anchorOffset: sel.anchorOffset,
+    focusNodePath: getNodePath(sel.focusNode),
+    focusOffset: sel.focusOffset
+  };
+}
+function restoreSelection(saved) {
+  if (!saved || typeof window === "undefined") return;
+  try {
+    const anchorNode = resolveNodePath(saved.anchorNodePath, document);
+    const focusNode = resolveNodePath(saved.focusNodePath, document);
+    if (!anchorNode || !focusNode) return;
+    const sel = window.getSelection();
+    if (!sel) return;
+    const range = document.createRange();
+    range.setStart(anchorNode, Math.min(saved.anchorOffset, anchorNode.textContent?.length ?? 0));
+    range.setEnd(focusNode, Math.min(saved.focusOffset, focusNode.textContent?.length ?? 0));
+    sel.removeAllRanges();
+    sel.addRange(range);
+  } catch {
+  }
+}
+
 // src/hooks/useUIStream.ts
 function useUIStream({
   api,
   onComplete,
   onError,
-  getHeaders
+  getHeaders,
+  getChatId,
+  onBackgroundComplete
 }) {
   const { storeTree, treeVersion } = useStore(
     useShallow4((s) => ({
@@ -6665,7 +6741,7 @@ function useUIStream({
   }, [tree]);
   const [isStreaming, setIsStreaming] = useState10(false);
   const [error, setError] = useState10(null);
-  const abortControllerRef = useRef15(null);
+  const abortControllersRef = useRef15(/* @__PURE__ */ new Map());
   const sendingRef = useRef15(false);
   const clear = useCallback22(() => {
     setTree(null);
@@ -6721,19 +6797,28 @@ function useUIStream({
   );
   const send = useCallback22(
     async (prompt, context, attachments) => {
+      const chatId = context?.chatId ?? getChatId?.();
       if (sendingRef.current) {
-        streamLog.warn("Ignoring concurrent send request", { prompt: prompt.slice(0, 100) });
+        streamLog.warn("Ignoring concurrent send", {
+          prompt: prompt.slice(0, 100)
+        });
         return;
       }
       sendingRef.current = true;
       streamLog.info("Starting send", {
         promptLength: prompt.length,
         hasContext: !!context,
-        attachmentCount: attachments?.length ?? 0
+        attachmentCount: attachments?.length ?? 0,
+        chatId
       });
-      abortControllerRef.current?.abort();
-      abortControllerRef.current = new AbortController();
-      const signal = abortControllerRef.current.signal;
+      if (abortControllersRef.current.size > 0) {
+        abortControllersRef.current.forEach((controller) => controller.abort());
+        abortControllersRef.current.clear();
+      }
+      const abortController = new AbortController();
+      const abortKey = chatId ?? "default";
+      abortControllersRef.current.set(abortKey, abortController);
+      const signal = abortController.signal;
       setIsStreaming(true);
       setError(null);
       let currentTree = treeRef.current ? JSON.parse(JSON.stringify(treeRef.current)) : { root: "", elements: {} };
@@ -6745,8 +6830,17 @@ function useUIStream({
       const isProactive = context?.hideUserMessage === true;
       const pendingTurn = createPendingTurn(prompt, { isProactive, attachments });
       const turnId = pendingTurn.id;
-      streamLog.debug("Creating turn", { turnId, isProactive });
-      setConversation((prev) => [...prev, pendingTurn]);
+      streamLog.debug("Creating turn", { turnId, isProactive, userMessage: prompt.slice(0, 50) });
+      setConversation((prev) => {
+        const updated = [...prev, pendingTurn];
+        streamLog.debug("Conversation updated", {
+          prevLength: prev.length,
+          newLength: updated.length,
+          pendingTurnId: pendingTurn.id,
+          userMessage: pendingTurn.userMessage?.slice(0, 50)
+        });
+        return updated;
+      });
       let patchBuffer = [];
       let patchFlushTimer = null;
       try {
@@ -6777,7 +6871,7 @@ function useUIStream({
           method: "POST",
           headers,
           body,
-          signal: abortControllerRef.current.signal
+          signal
         });
         streamLog.debug("Response received", { status: response.status, ok: response.ok });
         if (!response.ok) {
@@ -6860,17 +6954,21 @@ function useUIStream({
                     patchBuffer = [];
                     treeRef.current = updatedTree;
                     currentTree = updatedTree;
+                    const savedSel = saveSelection();
                     const store = storeRef.current;
                     store.setUITree({
                       root: updatedTree.root,
                       elements: { ...updatedTree.elements }
                     });
                     store.bumpTreeVersion();
+                    if (savedSel) {
+                      requestAnimationFrame(() => restoreSelection(savedSel));
+                    }
                     streamLog.debug("Tree updated", {
                       elementCount: Object.keys(updatedTree.elements).length
                     });
                   }
-                }, 16);
+                }, PATCH_FLUSH_INTERVAL_MS);
               }
             } else if (event.type === "plan-created" || event.type === "step-started" || event.type === "step-done" || event.type === "subtask-started" || event.type === "subtask-done" || event.type === "level-started" || event.type === "level-completed" || event.type === "orchestration-done") {
               processPlanEvent(event, planStoreRef.current);
@@ -6964,11 +7062,12 @@ function useUIStream({
         setConversation((prev) => markTurnFailed(prev, turnId, error2.message));
       } finally {
         sendingRef.current = false;
+        abortControllersRef.current.clear();
         setIsStreaming(false);
-        streamLog.debug("Send completed, isStreaming=false");
+        streamLog.debug("Send completed");
       }
     },
-    [api, onComplete, onError, setTree]
+    [api, onComplete, onError, setTree, getChatId]
   );
   const answerQuestion = useCallback22(
     (turnId, questionId, answers) => {
@@ -6991,7 +7090,10 @@ function useUIStream({
   );
   useEffect16(() => {
     return () => {
-      abortControllerRef.current?.abort();
+      for (const controller of abortControllersRef.current.values()) {
+        controller.abort();
+      }
+      abortControllersRef.current.clear();
     };
   }, []);
   const deleteTurn = useCallback22(
@@ -7018,6 +7120,12 @@ function useUIStream({
     },
     [conversation, send, pushHistory, setTree]
   );
+  const abort = useCallback22(() => {
+    abortControllersRef.current.forEach((controller) => controller.abort());
+    abortControllersRef.current.clear();
+    sendingRef.current = false;
+    setIsStreaming(false);
+  }, []);
   return {
     tree,
     conversation,
@@ -7036,7 +7144,8 @@ function useUIStream({
     redo,
     canUndo,
     canRedo,
-    answerQuestion
+    answerQuestion,
+    abort
   };
 }
 

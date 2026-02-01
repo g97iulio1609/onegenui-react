@@ -11,17 +11,16 @@
 
 import type { SliceCreator } from "../types";
 
-/** Serialized Lexical editor state (simplified type to avoid hard dependency) */
-export type SerializedEditorState = {
-  root: {
-    children: unknown[];
-    direction: string | null;
-    format: string;
-    indent: number;
-    type: string;
-    version: number;
-  };
-};
+/**
+ * Editor content type - supports both Lexical and Tiptap formats
+ * 
+ * Lexical format has a root node with children
+ * Tiptap format has a type and content array
+ */
+export type EditorContent = Record<string, unknown>;
+
+/** @deprecated Use EditorContent instead */
+export type SerializedEditorState = EditorContent;
 
 /** Document in workspace */
 export interface WorkspaceDocument {
@@ -29,8 +28,8 @@ export interface WorkspaceDocument {
   id: string;
   /** Document title */
   title: string;
-  /** Serialized Lexical content */
-  content: SerializedEditorState | null;
+  /** Editor content (Lexical or Tiptap format) */
+  content: EditorContent | null;
   /** Last saved timestamp */
   savedAt: number | null;
   /** Last modified timestamp */
@@ -38,7 +37,7 @@ export interface WorkspaceDocument {
   /** Has unsaved changes */
   isDirty: boolean;
   /** Document format */
-  format: "lexical" | "markdown" | "html";
+  format: "tiptap" | "lexical" | "markdown" | "html";
 }
 
 /** Pending AI edit requiring approval */
@@ -55,7 +54,7 @@ export interface PendingAIEdit {
     after: string;
   };
   /** New content if approved */
-  newContent: SerializedEditorState;
+  newContent: EditorContent;
   /** Created timestamp */
   createdAt: number;
 }
@@ -93,7 +92,7 @@ export interface WorkspaceSlice {
   /** Update document content */
   updateDocumentContent: (
     id: string,
-    content: SerializedEditorState | null,
+    content: EditorContent | null,
   ) => void;
   /** Rename document */
   renameDocument: (id: string, title: string) => void;
@@ -146,7 +145,7 @@ export const createWorkspaceSlice: SliceCreator<WorkspaceSlice> = (
       savedAt: null,
       modifiedAt: Date.now(),
       isDirty: false,
-      format: "lexical",
+      format: "tiptap",
     };
     set((state) => ({
       documents: [...state.documents, doc],

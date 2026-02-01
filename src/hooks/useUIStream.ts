@@ -44,6 +44,11 @@ import {
   addQuestionAnswer,
 } from "./ui-stream/question-handler";
 import { readStreamWithTimeout } from "./ui-stream/stream-reader";
+import {
+  saveSelection,
+  restoreSelection,
+  PATCH_FLUSH_INTERVAL_MS,
+} from "./ui-stream/patch-processor";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // useUIStream Hook
@@ -57,6 +62,8 @@ export function useUIStream({
   onComplete,
   onError,
   getHeaders,
+  getChatId,
+  onBackgroundComplete,
 }: UseUIStreamOptions): UseUIStreamReturn {
   // Use Zustand store for tree state with shallow comparison
   const { storeTree, treeVersion } = useStore(
@@ -114,7 +121,7 @@ export function useUIStream({
 
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<Error | null>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
   const sendingRef = useRef(false);
 
   const clear = useCallback(() => {
@@ -183,9 +190,14 @@ export function useUIStream({
       context?: Record<string, unknown>,
       attachments?: any[],
     ) => {
+      // Get chatId from context (set by handleChatSend)
+      const chatId = (context?.chatId as string | undefined) ?? getChatId?.();
+      
       // Prevent concurrent sends
       if (sendingRef.current) {
-        streamLog.warn("Ignoring concurrent send request", { prompt: prompt.slice(0, 100) });
+        streamLog.warn("Ignoring concurrent send", { 
+          prompt: prompt.slice(0, 100),
+        });
         return;
       }
       sendingRef.current = true;
@@ -193,13 +205,19 @@ export function useUIStream({
       streamLog.info("Starting send", { 
         promptLength: prompt.length, 
         hasContext: !!context,
-        attachmentCount: attachments?.length ?? 0 
+        attachmentCount: attachments?.length ?? 0,
+        chatId,
       });
 
       // Abort any existing request
-      abortControllerRef.current?.abort();
-      abortControllerRef.current = new AbortController();
-      const signal = abortControllerRef.current.signal;
+      if (abortControllersRef.current.size > 0) {
+        abortControllersRef.current.forEach((controller) => controller.abort());
+        abortControllersRef.current.clear();
+      }
+      const abortController = new AbortController();
+      const abortKey = chatId ?? "default";
+      abortControllersRef.current.set(abortKey, abortController);
+      const signal = abortController.signal;
 
       setIsStreaming(true);
       setError(null);
@@ -220,8 +238,19 @@ export function useUIStream({
       const isProactive = context?.hideUserMessage === true;
       const pendingTurn = createPendingTurn(prompt, { isProactive, attachments });
       const turnId = pendingTurn.id;
-      streamLog.debug("Creating turn", { turnId, isProactive });
-      setConversation((prev) => [...prev, pendingTurn]);
+      streamLog.debug("Creating turn", { turnId, isProactive, userMessage: prompt.slice(0, 50) });
+      
+      // Add turn to conversation
+      setConversation((prev) => {
+        const updated = [...prev, pendingTurn];
+        streamLog.debug("Conversation updated", { 
+          prevLength: prev.length, 
+          newLength: updated.length,
+          pendingTurnId: pendingTurn.id,
+          userMessage: pendingTurn.userMessage?.slice(0, 50),
+        });
+        return updated;
+      });
 
       // Batch processing variables
       let patchBuffer: JsonPatch[] = [];
@@ -261,7 +290,7 @@ export function useUIStream({
           method: "POST",
           headers,
           body,
-          signal: abortControllerRef.current.signal,
+          signal,
         });
 
         streamLog.debug("Response received", { status: response.status, ok: response.ok });
@@ -354,6 +383,7 @@ export function useUIStream({
                   patchFlushTimer = null;
                   if (patchBuffer.length > 0) {
                     streamLog.debug("Flushing patches", { count: patchBuffer.length });
+                    
                     const baseTree = treeRef.current ?? currentTree;
                     const protectedTypes =
                       context?.forceCanvasMode === true ? ["Canvas"] : [];
@@ -364,8 +394,13 @@ export function useUIStream({
                       { turnId, protectedTypes },
                     );
                     patchBuffer = [];
+                    
+                    // Update local tracking state and UI store
                     treeRef.current = updatedTree;
                     currentTree = updatedTree;
+                    
+                    // Save selection before DOM changes
+                    const savedSel = saveSelection();
                     
                     const store = storeRef.current;
                     store.setUITree({
@@ -374,11 +409,16 @@ export function useUIStream({
                     });
                     store.bumpTreeVersion();
                     
+                    // Restore selection after DOM update
+                    if (savedSel) {
+                      requestAnimationFrame(() => restoreSelection(savedSel));
+                    }
+                    
                     streamLog.debug("Tree updated", { 
                       elementCount: Object.keys(updatedTree.elements).length 
                     });
                   }
-                }, 16); // 60 FPS - responsive streaming updates
+                }, PATCH_FLUSH_INTERVAL_MS);
               }
             } else if (event.type === "plan-created" || event.type === "step-started" ||
                        event.type === "step-done" || event.type === "subtask-started" ||
@@ -419,6 +459,7 @@ export function useUIStream({
           treeElementCount: Object.keys(currentTree.elements).length 
         });
         treeRef.current = currentTree;
+        
         // Create a shallow copy with new elements reference to ensure React detects change
         setTree({
           root: currentTree.root,
@@ -445,7 +486,6 @@ export function useUIStream({
           patchBuffer = [];
           treeRef.current = currentTree;
           
-          // Update Zustand store for final state
           const store = storeRef.current;
           store.setUITree({
             root: currentTree.root,
@@ -454,7 +494,7 @@ export function useUIStream({
           store.bumpTreeVersion();
           
           streamLog.debug("Final tree state", { 
-            elementCount: Object.keys(currentTree.elements).length 
+            elementCount: Object.keys(currentTree.elements).length,
           });
         }
 
@@ -497,12 +537,14 @@ export function useUIStream({
         // Mark turn as failed using turn manager
         setConversation((prev) => markTurnFailed(prev, turnId, error.message));
       } finally {
+        // Cleanup
         sendingRef.current = false;
+        abortControllersRef.current.clear();
         setIsStreaming(false);
-        streamLog.debug("Send completed, isStreaming=false");
+        streamLog.debug("Send completed");
       }
     },
-    [api, onComplete, onError, setTree],
+    [api, onComplete, onError, setTree, getChatId],
   );
 
   const answerQuestion = useCallback(
@@ -531,10 +573,13 @@ export function useUIStream({
     [conversation, send],
   );
 
-  // Cleanup on unmount
+  // Cleanup on unmount - abort all active streams
   useEffect(() => {
     return () => {
-      abortControllerRef.current?.abort();
+      for (const controller of abortControllersRef.current.values()) {
+        controller.abort();
+      }
+      abortControllersRef.current.clear();
     };
   }, []);
 
@@ -570,6 +615,14 @@ export function useUIStream({
     [conversation, send, pushHistory, setTree],
   );
 
+  // Abort the current streaming request
+  const abort = useCallback(() => {
+    abortControllersRef.current.forEach((controller) => controller.abort());
+    abortControllersRef.current.clear();
+    sendingRef.current = false;
+    setIsStreaming(false);
+  }, []);
+
   return {
     tree,
     conversation,
@@ -589,5 +642,6 @@ export function useUIStream({
     canUndo,
     canRedo,
     answerQuestion,
+    abort,
   };
 }

@@ -3,9 +3,14 @@
 /**
  * Stream Logger - Buffered logger for useUIStream
  *
+ * DISABLED by default. Set NEXT_PUBLIC_DEBUG=true to enable.
  * Batches logs and sends them to debug endpoint every 500ms.
- * Works in browser only.
  */
+
+const DEBUG =
+  typeof window !== "undefined" &&
+  process.env.NODE_ENV === "development" &&
+  process.env.NEXT_PUBLIC_DEBUG === "true";
 
 const LOG_ENDPOINT = "/api/debug-log";
 const LOG_BUFFER: string[] = [];
@@ -20,7 +25,7 @@ function formatLog(level: string, message: string, data?: unknown): string {
 }
 
 function flushLogs(): void {
-  if (LOG_BUFFER.length === 0) return;
+  if (!DEBUG || LOG_BUFFER.length === 0) return;
   const logs = LOG_BUFFER.splice(0, LOG_BUFFER.length);
   if (typeof window !== "undefined") {
     fetch(LOG_ENDPOINT, {
@@ -47,25 +52,26 @@ export interface StreamLogger {
 }
 
 /**
- * Logger that buffers and sends to debug endpoint
+ * Logger - all output disabled by default, requires NEXT_PUBLIC_DEBUG=true
  */
 export const streamLog: StreamLogger = {
   debug: (msg: string, data?: unknown) => {
-    console.log(`[useUIStream] ${msg}`, data ?? "");
+    if (!DEBUG) return;
     LOG_BUFFER.push(formatLog("DEBUG", msg, data));
     scheduleFlush();
   },
   info: (msg: string, data?: unknown) => {
-    console.log(`[useUIStream] ${msg}`, data ?? "");
+    if (!DEBUG) return;
     LOG_BUFFER.push(formatLog("INFO", msg, data));
     scheduleFlush();
   },
   warn: (msg: string, data?: unknown) => {
-    console.warn(`[useUIStream] ${msg}`, data ?? "");
+    if (!DEBUG) return;
     LOG_BUFFER.push(formatLog("WARN", msg, data));
     scheduleFlush();
   },
   error: (msg: string, data?: unknown) => {
+    if (!DEBUG) return;
     console.error(`[useUIStream] ${msg}`, data ?? "");
     LOG_BUFFER.push(formatLog("ERROR", msg, data));
     scheduleFlush();

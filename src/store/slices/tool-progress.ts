@@ -13,10 +13,12 @@ import type { SliceCreator } from "../types";
 export type { ToolProgressStatus, ToolProgressEvent } from "@onegenui/core";
 
 /**
- * Slice-specific progress event (with required timestamp)
+ * Slice-specific progress event (with required timestamp and message history)
  */
 export interface StoredProgressEvent extends ToolProgressEvent {
   timestamp: number;
+  /** History of unique messages for this tool execution */
+  messageHistory?: Array<{ message: string; timestamp: number }>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -84,15 +86,35 @@ export const createToolProgressSlice: SliceCreator<ToolProgressSlice> = (
         (p) => p.toolCallId === event.toolCallId,
       );
 
-      const storedEvent: StoredProgressEvent = {
-        type: "tool-progress",
-        ...event,
-        timestamp,
-      };
-
       if (existingIndex >= 0) {
+        // Update existing: preserve message history
+        const existing = state.progressEvents[existingIndex];
+        const messageHistory = existing?.messageHistory ?? [];
+        
+        // Add new message to history if unique
+        if (event.message && !messageHistory.some(h => h.message === event.message)) {
+          messageHistory.push({ message: event.message, timestamp });
+        }
+
+        const storedEvent: StoredProgressEvent = {
+          type: "tool-progress",
+          ...event,
+          timestamp,
+          messageHistory,
+        };
         state.progressEvents[existingIndex] = storedEvent;
       } else {
+        // New event: initialize message history
+        const messageHistory = event.message 
+          ? [{ message: event.message, timestamp }]
+          : [];
+        
+        const storedEvent: StoredProgressEvent = {
+          type: "tool-progress",
+          ...event,
+          timestamp,
+          messageHistory,
+        };
         state.progressEvents.push(storedEvent);
         if (state.progressEvents.length > state.maxEvents) {
           state.progressEvents = state.progressEvents.slice(-state.maxEvents);
