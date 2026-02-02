@@ -49,8 +49,12 @@ export function buildConversationMessages(
 
     // Add assistant response (combine all messages)
     const assistantContent = turn.assistantMessages
-      .filter((m) => m.type === "text" && m.text)
-      .map((m) => m.text)
+      .map((m) => {
+        if (typeof m.content === "string") return m.content;
+        const fallback = (m as { text?: string }).text;
+        return typeof fallback === "string" ? fallback : "";
+      })
+      .filter(Boolean)
       .join("\n");
 
     if (assistantContent) {

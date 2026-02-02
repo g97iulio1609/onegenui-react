@@ -101,6 +101,17 @@ export {
   type DomainType,
 } from "./contexts/autosave";
 
+// Tree Sync Context (sync component state back to tree for AI context)
+export {
+  TreeSyncProvider,
+  useTreeSync,
+  useTreeSyncCallback,
+  useTreeSyncContext,
+  type TreeSyncContextValue,
+  type TreeSyncProviderProps,
+  type UpdateElementFn,
+} from "./contexts/tree-sync";
+
 // Tool Progress Context (real-time tool execution tracking)
 export {
   ToolProgressProvider,

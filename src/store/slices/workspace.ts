@@ -19,8 +19,7 @@ import type { SliceCreator } from "../types";
  */
 export type EditorContent = Record<string, unknown>;
 
-/** @deprecated Use EditorContent instead */
-export type SerializedEditorState = EditorContent;
+
 
 /** Document in workspace */
 export interface WorkspaceDocument {

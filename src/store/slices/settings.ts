@@ -8,7 +8,10 @@ import type { SliceCreator } from "../types";
 
 export type ThemeMode = "light" | "dark" | "system";
 
-/** @deprecated Use @onegenui/providers for model management */
+/**
+ * AI Model type - matches models from @onegenui/providers
+ * Use `createModelForTask()` or `getModelConfig()` from providers package for model selection.
+ */
 export type AIModel =
   | "gemini-3-flash-preview"
   | "gemini-3-pro-preview"
