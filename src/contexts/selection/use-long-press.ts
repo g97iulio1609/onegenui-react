@@ -4,7 +4,10 @@
  */
 
 import { useRef, useCallback, useEffect } from "react";
+import { createLogger } from "@onegenui/utils";
 import { isInteractiveElement, shouldNeverSelect } from "../../utils/dom";
+
+const logger = createLogger({ prefix: "use-long-press" });
 
 export interface LongPressConfig {
   /** Duration in ms to trigger long-press */
@@ -53,7 +56,7 @@ export function useLongPress(
   const log = useCallback(
     (message: string, ...args: unknown[]) => {
       if (debug) {
-        console.log(`[LongPress] ${message}`, ...args);
+        logger.debug(`[LongPress] ${message}`, ...args);
       }
     },
     [debug],

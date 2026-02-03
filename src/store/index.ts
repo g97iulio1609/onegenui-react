@@ -28,6 +28,7 @@ import {
   createUITreeSlice,
   createWorkspaceSlice,
   createCanvasSlice,
+  createComponentStateSlice,
 } from "./slices";
 
 import type { StoreState } from "./types";
@@ -91,6 +92,7 @@ export const useStore: OneGenUIStore = create<StoreState>()(
         ...createUITreeSlice(...args),
         ...createWorkspaceSlice(...args),
         ...createCanvasSlice(...args),
+        ...createComponentStateSlice(...args),
       })),
     ),
     {
@@ -356,6 +358,23 @@ export const useCanvasActions = () =>
     })),
   );
 
+// Component State selectors
+export const useComponentState = (elementKey: string) =>
+  useStore((s) => s.componentState[elementKey] ?? {});
+export const useAllComponentState = () =>
+  useStore(useShallow((s) => s.componentState));
+export const useComponentStateActions = () =>
+  useStore(
+    useShallow((s) => ({
+      setComponentState: s.setComponentState,
+      updateComponentState: s.updateComponentState,
+      mergeComponentState: s.mergeComponentState,
+      clearComponentState: s.clearComponentState,
+      clearAllComponentState: s.clearAllComponentState,
+      getElementState: s.getElementState,
+    })),
+  );
+
 // =============================================================================
 // Re-export slice creators for direct use
 // =============================================================================
@@ -374,6 +393,7 @@ export {
   createUITreeSlice,
   createWorkspaceSlice,
   createCanvasSlice,
+  createComponentStateSlice,
 } from "./slices";
 
 export type {

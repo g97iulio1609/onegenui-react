@@ -18,6 +18,11 @@ import {
 import { useSelection } from "../contexts/selection";
 import { useEditMode } from "../contexts/edit-mode";
 
+/** Extended style type with webkit vendor prefix */
+type ExtendedCSSStyleDeclaration = CSSStyleDeclaration & {
+  webkitUserSelect?: string;
+};
+
 export interface SelectionWrapperProps {
   element: UIElement;
   enabled: boolean;
@@ -171,7 +176,7 @@ export function SelectionWrapper({
     return () => {
       if (typeof document !== "undefined") {
         document.body.style.userSelect = "";
-        (document.body.style as any).webkitUserSelect = "";
+        (document.body.style as ExtendedCSSStyleDeclaration).webkitUserSelect = "";
       }
       setPressing(false);
       setPressPosition(null);

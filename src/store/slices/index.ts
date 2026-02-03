@@ -80,3 +80,7 @@ export {
   type CanvasEditorState,
   type CanvasPendingUpdate,
 } from "./canvas";
+export {
+  createComponentStateSlice,
+  type ComponentStateSlice,
+} from "./component-state";

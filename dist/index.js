@@ -60,7 +60,6 @@ __export(index_exports, {
   TextSelectionBadge: () => TextSelectionBadge,
   ToolProgressOverlay: () => ToolProgressOverlay,
   ToolProgressProvider: () => ToolProgressProvider,
-  TreeSyncProvider: () => TreeSyncProvider,
   UnifiedProgressProvider: () => UnifiedProgressProvider,
   ValidationProvider: () => ValidationProvider,
   VisibilityProvider: () => VisibilityProvider,
@@ -106,6 +105,7 @@ __export(index_exports, {
   useActiveStep: () => useActiveStep,
   useActiveToolProgress: () => useActiveToolProgress2,
   useActiveToolProgressStore: () => useActiveToolProgress,
+  useAllComponentState: () => useAllComponentState,
   useAreSuggestionsEnabled: () => useAreSuggestionsEnabled,
   useAuthenticatedSources: () => useAuthenticatedSources,
   useAutoSave: () => useAutoSave,
@@ -116,6 +116,8 @@ __export(index_exports, {
   useCanvasIsStreaming: () => useCanvasIsStreaming,
   useCanvasVersion: () => useCanvasVersion,
   useCitations: () => useCitations,
+  useComponentState: () => useComponentState,
+  useComponentStateActions: () => useComponentStateActions,
   useData: () => useData,
   useDataBinding: () => useDataBinding,
   useDataValue: () => useDataValue,
@@ -130,6 +132,7 @@ __export(index_exports, {
   useEditableContext: () => useEditableContext,
   useElementActionTracker: () => useElementActionTracker,
   useElementEdit: () => useElementEdit,
+  useElementState: () => useElementState,
   useFieldStates: () => useFieldStates,
   useFieldValidation: () => useFieldValidation,
   useFormState: () => useFormState,
@@ -166,9 +169,6 @@ __export(index_exports, {
   useTextSelection: () => useTextSelection,
   useToolProgress: () => useToolProgress,
   useToolProgressOptional: () => useToolProgressOptional,
-  useTreeSync: () => useTreeSync,
-  useTreeSyncCallback: () => useTreeSyncCallback,
-  useTreeSyncContext: () => useTreeSyncContext,
   useUIStore: () => useUIStore,
   useUIStream: () => useUIStream,
   useUnifiedProgress: () => useUnifiedProgress,
@@ -1085,6 +1085,8 @@ var createDeepResearchSlice = (set) => ({
 });
 
 // src/store/slices/ui-tree.ts
+var import_utils = require("@onegenui/utils");
+var log = import_utils.loggers.react;
 var initialTree = null;
 var createUITreeSlice = (set, get) => ({
   // State
@@ -1093,6 +1095,12 @@ var createUITreeSlice = (set, get) => ({
   treeVersion: 0,
   // Actions
   setUITree: (tree) => set((state) => {
+    log.debug("[UITreeSlice] setUITree called", {
+      hasTree: !!tree,
+      elementsCount: tree?.elements ? Object.keys(tree.elements).length : 0,
+      rootKey: tree?.root,
+      prevVersion: state.treeVersion
+    });
     state.uiTree = tree;
     state.treeVersion += 1;
   }),
@@ -1437,6 +1445,31 @@ var createCanvasSlice = (set, get) => ({
   }
 });
 
+// src/store/slices/component-state.ts
+var createComponentStateSlice = (set, get) => ({
+  componentState: {},
+  setComponentState: (elementKey, state) => set((s) => {
+    s.componentState[elementKey] = state;
+  }),
+  updateComponentState: (elementKey, updates) => set((s) => {
+    if (!s.componentState[elementKey]) {
+      s.componentState[elementKey] = {};
+    }
+    Object.assign(s.componentState[elementKey], updates);
+  }),
+  mergeComponentState: (elementKey, updates) => set((s) => {
+    s.componentState[elementKey] = {
+      ...s.componentState[elementKey] ?? {},
+      ...updates
+    };
+  }),
+  clearComponentState: (elementKey) => set((s) => {
+    delete s.componentState[elementKey];
+  }),
+  clearAllComponentState: () => set({ componentState: {} }),
+  getElementState: (elementKey) => get().componentState[elementKey] ?? {}
+});
+
 // src/store/index.ts
 (0, import_immer2.enableMapSet)();
 var useStore = (0, import_zustand.create)()(
@@ -1455,7 +1488,8 @@ var useStore = (0, import_zustand.create)()(
         ...createDeepResearchSlice(...args),
         ...createUITreeSlice(...args),
         ...createWorkspaceSlice(...args),
-        ...createCanvasSlice(...args)
+        ...createCanvasSlice(...args),
+        ...createComponentStateSlice(...args)
       }))
     ),
     {
@@ -1608,6 +1642,18 @@ var useCanvasActions = () => useStore(
     queueCanvasUpdate: s.queueCanvasUpdate,
     flushCanvasUpdates: s.flushCanvasUpdates,
     clearCanvasPendingUpdates: s.clearCanvasPendingUpdates
+  }))
+);
+var useComponentState = (elementKey) => useStore((s) => s.componentState[elementKey] ?? {});
+var useAllComponentState = () => useStore((0, import_shallow.useShallow)((s) => s.componentState));
+var useComponentStateActions = () => useStore(
+  (0, import_shallow.useShallow)((s) => ({
+    setComponentState: s.setComponentState,
+    updateComponentState: s.updateComponentState,
+    mergeComponentState: s.mergeComponentState,
+    clearComponentState: s.clearComponentState,
+    clearAllComponentState: s.clearAllComponentState,
+    getElementState: s.getElementState
   }))
 );
 
@@ -2485,6 +2531,7 @@ function findElementByCssPath(elementKey, cssPath) {
 
 // src/contexts/selection/use-long-press.ts
 var import_react7 = require("react");
+var import_utils3 = require("@onegenui/utils");
 
 // src/utils/dom.ts
 var NATIVE_INTERACTIVE_TAGS = /* @__PURE__ */ new Set([
@@ -2637,6 +2684,7 @@ function isSelectionInteraction(target, isDeepSelectionActive) {
 }
 
 // src/contexts/selection/use-long-press.ts
+var logger = (0, import_utils3.createLogger)({ prefix: "use-long-press" });
 var DEFAULT_LONG_PRESS_CONFIG = {
   duration: 450,
   movementThreshold: 10,
@@ -2648,10 +2696,10 @@ function useLongPress(callbacks, config = {}) {
   const pressTimerRef = (0, import_react7.useRef)(null);
   const pressTargetRef = (0, import_react7.useRef)(null);
   const longPressCompletedRef = (0, import_react7.useRef)(false);
-  const log = (0, import_react7.useCallback)(
+  const log4 = (0, import_react7.useCallback)(
     (message, ...args) => {
       if (debug) {
-        console.log(`[LongPress] ${message}`, ...args);
+        logger.debug(`[LongPress] ${message}`, ...args);
       }
     },
     [debug]
@@ -2666,19 +2714,19 @@ function useLongPress(callbacks, config = {}) {
   (0, import_react7.useEffect)(() => {
     const handlePointerDown = (e) => {
       if (e.button !== 0) {
-        log("pointerdown SKIPPED - not primary button:", e.button);
+        log4("pointerdown SKIPPED - not primary button:", e.button);
         return;
       }
       const target = e.target;
-      log("pointerdown on:", target.tagName, target.className);
+      log4("pointerdown on:", target.tagName, target.className);
       longPressCompletedRef.current = false;
       cancelPress();
       if (isInteractiveElement(target)) {
-        log("pointerdown SKIPPED - interactive element:", target.tagName);
+        log4("pointerdown SKIPPED - interactive element:", target.tagName);
         return;
       }
       if (shouldNeverSelect(target)) {
-        log("pointerdown SKIPPED - shouldNeverSelect:", target.tagName);
+        log4("pointerdown SKIPPED - shouldNeverSelect:", target.tagName);
         return;
       }
       const componentWrapper = target.closest(
@@ -2691,7 +2739,7 @@ function useLongPress(callbacks, config = {}) {
       pressTargetRef.current = target;
       pressTimerRef.current = setTimeout(() => {
         if (!pressTargetRef.current) return;
-        log("Long-press triggered on:", pressTargetRef.current.tagName);
+        log4("Long-press triggered on:", pressTargetRef.current.tagName);
         callbacks.onLongPress(pressTargetRef.current, componentWrapper);
         longPressCompletedRef.current = true;
         pressTargetRef.current = null;
@@ -2706,27 +2754,27 @@ function useLongPress(callbacks, config = {}) {
     const handlePointerCancel = () => cancelPress();
     const handleClick = (e) => {
       if (e.button !== 0) {
-        log("click SKIPPED - not primary button:", e.button);
+        log4("click SKIPPED - not primary button:", e.button);
         return;
       }
       const target = e.target;
-      log("click on:", target.tagName, target.className);
+      log4("click on:", target.tagName, target.className);
       if (longPressCompletedRef.current) {
-        log("click SKIPPED - long-press just completed");
+        log4("click SKIPPED - long-press just completed");
         longPressCompletedRef.current = false;
         return;
       }
       const textSelection = window.getSelection();
       if (textSelection && !textSelection.isCollapsed && textSelection.toString().trim()) {
-        log("click SKIPPED - text selection active");
+        log4("click SKIPPED - text selection active");
         return;
       }
       if (isInteractiveElement(target)) {
-        log("click SKIPPED - interactive element:", target.tagName);
+        log4("click SKIPPED - interactive element:", target.tagName);
         return;
       }
       if (shouldNeverSelect(target)) {
-        log("click SKIPPED - shouldNeverSelect:", target.tagName);
+        log4("click SKIPPED - shouldNeverSelect:", target.tagName);
         return;
       }
       callbacks.onClick(target, e);
@@ -2750,7 +2798,7 @@ function useLongPress(callbacks, config = {}) {
       document.removeEventListener("contextmenu", handleContextMenu, true);
       cancelPress();
     };
-  }, [callbacks, duration, movementThreshold, cancelPress, log]);
+  }, [callbacks, duration, movementThreshold, cancelPress, log4]);
   return {
     get longPressJustCompleted() {
       return longPressCompletedRef.current;
@@ -3091,6 +3139,12 @@ function SelectionProvider({ children }) {
   };
   const handleClick = (target, _event) => {
     if (isEditing) {
+      return;
+    }
+    const interactiveElement = target.closest(
+      'button, input, textarea, select, a[href], [role="button"], [data-radix-collection-item], [data-state], [contenteditable="true"]'
+    );
+    if (interactiveElement) {
       return;
     }
     const selectableItem = target.closest(
@@ -4218,7 +4272,7 @@ function ActionProvider2({
     pendingActionsRef.current = [];
     notifySubscribers(batch);
   }, [notifySubscribers]);
-  const scheduleFlush2 = (0, import_react18.useCallback)(
+  const scheduleFlush = (0, import_react18.useCallback)(
     (delayMs) => {
       if (timerRef.current) {
         clearTimeout(timerRef.current);
@@ -4241,13 +4295,13 @@ function ActionProvider2({
       });
       setLastAction(action);
       pendingActionsRef.current.push(action);
-      scheduleFlush2(options.debounceMs ?? 2500);
+      scheduleFlush(options.debounceMs ?? 2500);
     },
     [
       options.enabled,
       options.maxActionsInContext,
       options.debounceMs,
-      scheduleFlush2
+      scheduleFlush
     ]
   );
   const clearActions = (0, import_react18.useCallback)(() => {
@@ -4290,7 +4344,7 @@ function ActionProvider2({
       if (!isEditable) return;
       focusOutTimeout = setTimeout(() => {
         if (!isUserCurrentlyEditing() && pendingActionsRef.current.length > 0) {
-          scheduleFlush2(options.debounceMs ?? 2500);
+          scheduleFlush(options.debounceMs ?? 2500);
         }
       }, 100);
     };
@@ -4299,7 +4353,7 @@ function ActionProvider2({
       document.removeEventListener("focusout", handleFocusOut, true);
       if (focusOutTimeout) clearTimeout(focusOutTimeout);
     };
-  }, [options.debounceMs, scheduleFlush2]);
+  }, [options.debounceMs, scheduleFlush]);
   const value = {
     actions,
     trackAction,
@@ -4460,39 +4514,24 @@ function useDomainAutoSave(type, elementKey, data, options) {
   ]);
 }
 
-// src/contexts/tree-sync.tsx
+// src/hooks/useElementState.ts
 var import_react21 = require("react");
-var import_jsx_runtime14 = require("react/jsx-runtime");
-var TreeSyncContext = (0, import_react21.createContext)(null);
-function TreeSyncProvider({
-  updateElement,
-  children
-}) {
-  const value = {
-    updateElement,
-    isEnabled: true
-  };
-  return /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(TreeSyncContext.Provider, { value, children });
-}
-function useTreeSyncContext() {
-  const ctx = (0, import_react21.useContext)(TreeSyncContext);
-  if (!ctx) {
-    return {
-      updateElement: () => {
-      },
-      isEnabled: false
-    };
-  }
-  return ctx;
-}
-var DEFAULT_DEBOUNCE_MS2 = 300;
-function useTreeSync(elementKey, updates, options) {
-  const { updateElement, isEnabled } = useTreeSyncContext();
-  const debounceMs = options?.debounceMs ?? DEFAULT_DEBOUNCE_MS2;
-  const skipMount = options?.skipMount ?? false;
+var import_utils9 = require("@onegenui/utils");
+var log2 = import_utils9.loggers.react;
+function useElementState(elementKey, initialProps, options = {}) {
+  const { syncToTree = true, debounceMs = 300 } = options;
+  const componentState = useStore((s) => s.componentState[elementKey]);
+  const updateComponentState = useStore((s) => s.updateComponentState);
+  const updateUITree = useStore((s) => s.updateUITree);
   const mountedRef = (0, import_react21.useRef)(false);
-  const lastUpdatesRef = (0, import_react21.useRef)(null);
   const timerRef = (0, import_react21.useRef)(null);
+  const mergedState = (0, import_react21.useMemo)(
+    () => ({
+      ...initialProps,
+      ...componentState ?? {}
+    }),
+    [initialProps, componentState]
+  );
   (0, import_react21.useEffect)(() => {
     return () => {
       if (timerRef.current) {
@@ -4500,40 +4539,55 @@ function useTreeSync(elementKey, updates, options) {
       }
     };
   }, []);
-  (0, import_react21.useEffect)(() => {
-    if (!isEnabled || !elementKey) return;
-    if (!mountedRef.current) {
-      mountedRef.current = true;
-      if (skipMount) return;
-    }
-    const serialized = JSON.stringify(updates);
-    if (serialized === lastUpdatesRef.current) return;
-    lastUpdatesRef.current = serialized;
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-    }
-    timerRef.current = setTimeout(() => {
-      updateElement(elementKey, updates);
-      timerRef.current = null;
-    }, debounceMs);
-  }, [elementKey, updates, isEnabled, updateElement, debounceMs, skipMount]);
-}
-function useTreeSyncCallback(elementKey) {
-  const { updateElement, isEnabled } = useTreeSyncContext();
-  return (0, import_react21.useCallback)(
+  const updateState = (0, import_react21.useCallback)(
     (updates) => {
-      if (isEnabled && elementKey) {
-        updateElement(elementKey, updates);
+      updateComponentState(elementKey, updates);
+      if (syncToTree) {
+        if (timerRef.current) {
+          clearTimeout(timerRef.current);
+        }
+        timerRef.current = setTimeout(() => {
+          log2.debug("[useElementState] Syncing to tree", { elementKey });
+          updateUITree((tree) => {
+            const element = tree.elements[elementKey];
+            if (element) {
+              return {
+                ...tree,
+                elements: {
+                  ...tree.elements,
+                  [elementKey]: {
+                    ...element,
+                    props: { ...element.props, ...updates }
+                  }
+                }
+              };
+            }
+            return tree;
+          });
+          timerRef.current = null;
+        }, debounceMs);
       }
     },
-    [elementKey, updateElement, isEnabled]
+    [elementKey, updateComponentState, updateUITree, syncToTree, debounceMs]
   );
+  (0, import_react21.useEffect)(() => {
+    if (!mountedRef.current) {
+      mountedRef.current = true;
+      if (Object.keys(initialProps).length > 0) {
+        updateComponentState(
+          elementKey,
+          initialProps
+        );
+      }
+    }
+  }, [elementKey, initialProps, updateComponentState]);
+  return [mergedState, updateState];
 }
 
 // src/contexts/tool-progress.tsx
 var import_react22 = require("react");
 var import_shallow2 = require("zustand/react/shallow");
-var import_jsx_runtime15 = require("react/jsx-runtime");
+var import_jsx_runtime14 = require("react/jsx-runtime");
 var ToolProgressContext = (0, import_react22.createContext)(
   null
 );
@@ -4608,7 +4662,7 @@ function ToolProgressProvider({
       clearCompletedOlderThan
     ]
   );
-  return /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(ToolProgressContext.Provider, { value, children });
+  return /* @__PURE__ */ (0, import_jsx_runtime14.jsx)(ToolProgressContext.Provider, { value, children });
 }
 function useToolProgress() {
   const context = (0, import_react22.useContext)(ToolProgressContext);
@@ -4642,7 +4696,7 @@ function useActiveToolProgress2() {
 // src/contexts/unified-progress.tsx
 var import_react23 = require("react");
 var import_shallow3 = require("zustand/react/shallow");
-var import_jsx_runtime16 = require("react/jsx-runtime");
+var import_jsx_runtime15 = require("react/jsx-runtime");
 var UnifiedProgressContext = (0, import_react23.createContext)(null);
 function mapPlanStepStatus(status) {
   switch (status) {
@@ -4784,7 +4838,7 @@ function UnifiedProgressProvider({
       isItemRunning
     ]
   );
-  return /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(UnifiedProgressContext.Provider, { value, children });
+  return /* @__PURE__ */ (0, import_jsx_runtime15.jsx)(UnifiedProgressContext.Provider, { value, children });
 }
 function useUnifiedProgress() {
   const context = (0, import_react23.useContext)(UnifiedProgressContext);
@@ -4913,7 +4967,7 @@ function findClosestElementKey(target) {
 }
 
 // src/components/InteractionTrackingWrapper.tsx
-var import_jsx_runtime17 = require("react/jsx-runtime");
+var import_jsx_runtime16 = require("react/jsx-runtime");
 var InteractionTrackingContext = (0, import_react24.createContext)(null);
 function isNonProactiveElement(target) {
   const tagName = target.tagName.toLowerCase();
@@ -4972,14 +5026,14 @@ function InteractionTrackingWrapper({
       container.removeEventListener("change", handleInteraction, true);
     };
   }, [tree, onInteraction]);
-  return /* @__PURE__ */ (0, import_jsx_runtime17.jsx)(InteractionTrackingContext.Provider, { value: onInteraction, children: /* @__PURE__ */ (0, import_jsx_runtime17.jsx)("div", { ref: containerRef, style: { display: "contents" }, children }) });
+  return /* @__PURE__ */ (0, import_jsx_runtime16.jsx)(InteractionTrackingContext.Provider, { value: onInteraction, children: /* @__PURE__ */ (0, import_jsx_runtime16.jsx)("div", { ref: containerRef, style: { display: "contents" }, children }) });
 }
 
 // src/components/ErrorBoundary.tsx
 var import_react25 = require("react");
-var import_utils7 = require("@onegenui/utils");
-var import_jsx_runtime18 = require("react/jsx-runtime");
-var logger = (0, import_utils7.createLogger)({ prefix: "react:error-boundary" });
+var import_utils10 = require("@onegenui/utils");
+var import_jsx_runtime17 = require("react/jsx-runtime");
+var logger2 = (0, import_utils10.createLogger)({ prefix: "react:error-boundary" });
 var ErrorBoundary = class extends import_react25.Component {
   constructor(props) {
     super(props);
@@ -4990,7 +5044,7 @@ var ErrorBoundary = class extends import_react25.Component {
   }
   componentDidCatch(error, errorInfo) {
     const { onError, name } = this.props;
-    logger.error(
+    logger2.error(
       `Error caught${name ? ` in ${name}` : ""}:`,
       error.message,
       errorInfo.componentStack
@@ -5010,15 +5064,15 @@ var ErrorBoundary = class extends import_react25.Component {
       if (fallback) {
         return fallback;
       }
-      return /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)(
+      return /* @__PURE__ */ (0, import_jsx_runtime17.jsxs)(
         "div",
         {
           role: "alert",
           className: "p-4 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive",
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("h3", { className: "font-semibold mb-2", children: "Something went wrong" }),
-            /* @__PURE__ */ (0, import_jsx_runtime18.jsx)("p", { className: "text-sm text-muted-foreground mb-3", children: error.message }),
-            /* @__PURE__ */ (0, import_jsx_runtime18.jsx)(
+            /* @__PURE__ */ (0, import_jsx_runtime17.jsx)("h3", { className: "font-semibold mb-2", children: "Something went wrong" }),
+            /* @__PURE__ */ (0, import_jsx_runtime17.jsx)("p", { className: "text-sm text-muted-foreground mb-3", children: error.message }),
+            /* @__PURE__ */ (0, import_jsx_runtime17.jsx)(
               "button",
               {
                 onClick: this.reset,
@@ -5337,7 +5391,7 @@ function useResizable({
 }
 
 // src/components/ResizableWrapper.tsx
-var import_jsx_runtime19 = require("react/jsx-runtime");
+var import_jsx_runtime18 = require("react/jsx-runtime");
 function ResizeHandleComponent({
   position,
   onMouseDown,
@@ -5357,7 +5411,7 @@ function ResizeHandleComponent({
     ne: "right-[-6px] top-[-6px] w-3 h-3 cursor-nesw-resize rounded-full",
     nw: "left-[-6px] top-[-6px] w-3 h-3 cursor-nwse-resize rounded-full"
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime18.jsx)(
     "div",
     {
       className: cn(
@@ -5415,7 +5469,7 @@ function ResizableWrapper({
     elementRef: wrapperRef
   });
   if (!isEnabled) {
-    return /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(import_jsx_runtime19.Fragment, { children });
+    return /* @__PURE__ */ (0, import_jsx_runtime18.jsx)(import_jsx_runtime18.Fragment, { children });
   }
   const handles = (0, import_react27.useMemo)(() => {
     const result = [];
@@ -5465,7 +5519,7 @@ function ResizableWrapper({
     ...gridRowStyle && { gridRow: gridRowStyle }
   };
   const shouldShowHandles = showHandles || isHovered || state.isResizing;
-  return /* @__PURE__ */ (0, import_jsx_runtime19.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)(
     "div",
     {
       ref: wrapperRef,
@@ -5481,7 +5535,7 @@ function ResizableWrapper({
       "data-element-key": element.key,
       children: [
         children,
-        handles.map((handle) => /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(
+        handles.map((handle) => /* @__PURE__ */ (0, import_jsx_runtime18.jsx)(
           ResizeHandleComponent,
           {
             position: handle,
@@ -5492,7 +5546,7 @@ function ResizableWrapper({
           },
           handle
         )),
-        state.isResizing && /* @__PURE__ */ (0, import_jsx_runtime19.jsxs)("div", { className: "absolute bottom-2 right-2 px-2 py-1 bg-primary text-white text-[11px] font-medium rounded pointer-events-none z-11", children: [
+        state.isResizing && /* @__PURE__ */ (0, import_jsx_runtime18.jsxs)("div", { className: "absolute bottom-2 right-2 px-2 py-1 bg-primary text-white text-[11px] font-medium rounded pointer-events-none z-11", children: [
           Math.round(state.width),
           " x ",
           Math.round(state.height)
@@ -5508,7 +5562,7 @@ var import_react29 = require("react");
 // src/components/LongPressIndicator.tsx
 var import_react28 = require("react");
 var import_react_dom = require("react-dom");
-var import_jsx_runtime20 = require("react/jsx-runtime");
+var import_jsx_runtime19 = require("react/jsx-runtime");
 var RING_SIZE = 48;
 var STROKE_WIDTH = 3;
 var RADIUS = (RING_SIZE - STROKE_WIDTH) / 2;
@@ -5550,7 +5604,7 @@ function LongPressIndicator({
   }, [durationMs, onComplete]);
   if (!mounted || typeof document === "undefined") return null;
   return (0, import_react_dom.createPortal)(
-    /* @__PURE__ */ (0, import_jsx_runtime20.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(
       "div",
       {
         style: {
@@ -5565,14 +5619,14 @@ function LongPressIndicator({
           transition: "opacity 150ms ease-out"
         },
         "data-long-press-indicator": true,
-        children: /* @__PURE__ */ (0, import_jsx_runtime20.jsxs)(
+        children: /* @__PURE__ */ (0, import_jsx_runtime19.jsxs)(
           "svg",
           {
             width: RING_SIZE,
             height: RING_SIZE,
             style: { transform: "rotate(-90deg)" },
             children: [
-              /* @__PURE__ */ (0, import_jsx_runtime20.jsx)(
+              /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(
                 "circle",
                 {
                   cx: RING_SIZE / 2,
@@ -5583,7 +5637,7 @@ function LongPressIndicator({
                   strokeWidth: STROKE_WIDTH
                 }
               ),
-              /* @__PURE__ */ (0, import_jsx_runtime20.jsx)(
+              /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(
                 "circle",
                 {
                   ref: circleRef,
@@ -5611,7 +5665,7 @@ function LongPressIndicator({
 }
 
 // src/components/SelectionWrapper.tsx
-var import_jsx_runtime21 = require("react/jsx-runtime");
+var import_jsx_runtime20 = require("react/jsx-runtime");
 function SelectionWrapper({
   element,
   enabled,
@@ -5727,7 +5781,7 @@ function SelectionWrapper({
       setPressPosition(null);
     };
   }, []);
-  return /* @__PURE__ */ (0, import_jsx_runtime21.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime20.jsxs)(
     "div",
     {
       ref: wrapperRef,
@@ -5742,7 +5796,7 @@ function SelectionWrapper({
       "data-jsonui-element-key": element.key,
       children: [
         children,
-        pressing && pressPosition && /* @__PURE__ */ (0, import_jsx_runtime21.jsx)(
+        pressing && pressPosition && /* @__PURE__ */ (0, import_jsx_runtime20.jsx)(
           LongPressIndicator,
           {
             x: pressPosition.x,
@@ -5762,6 +5816,7 @@ var import_react41 = __toESM(require("react"));
 // src/hooks/useUIStream.ts
 var import_react32 = require("react");
 var import_shallow4 = require("zustand/shallow");
+var import_utils14 = require("@onegenui/utils");
 
 // src/hooks/patches/structural-sharing.ts
 function setByPathWithStructuralSharing(obj, path, value) {
@@ -6270,55 +6325,28 @@ function useHistory(tree, conversation, setTree, setConversation, treeRef) {
 
 // src/hooks/ui-stream/logger.ts
 var DEBUG = typeof window !== "undefined" && process.env.NODE_ENV === "development" && process.env.NEXT_PUBLIC_DEBUG === "true";
-var LOG_ENDPOINT = "/api/debug-log";
-var LOG_BUFFER = [];
-var flushTimer = null;
 function formatLog(level, message, data) {
   const timestamp = (/* @__PURE__ */ new Date()).toISOString();
   const dataStr = data ? `
   DATA: ${JSON.stringify(data, null, 2).replace(/\n/g, "\n  ")}` : "";
   return `[${timestamp}] [${level}] [useUIStream] ${message}${dataStr}`;
 }
-function flushLogs() {
-  if (!DEBUG || LOG_BUFFER.length === 0) return;
-  const logs = LOG_BUFFER.splice(0, LOG_BUFFER.length);
-  if (typeof window !== "undefined") {
-    fetch(LOG_ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ logs })
-    }).catch(() => {
-    });
-  }
-}
-function scheduleFlush() {
-  if (flushTimer) return;
-  flushTimer = setTimeout(() => {
-    flushTimer = null;
-    flushLogs();
-  }, 500);
-}
 var streamLog = {
   debug: (msg, data) => {
     if (!DEBUG) return;
-    LOG_BUFFER.push(formatLog("DEBUG", msg, data));
-    scheduleFlush();
+    console.debug(formatLog("DEBUG", msg, data));
   },
   info: (msg, data) => {
     if (!DEBUG) return;
-    LOG_BUFFER.push(formatLog("INFO", msg, data));
-    scheduleFlush();
+    console.info(formatLog("INFO", msg, data));
   },
   warn: (msg, data) => {
     if (!DEBUG) return;
-    LOG_BUFFER.push(formatLog("WARN", msg, data));
-    scheduleFlush();
+    console.warn(formatLog("WARN", msg, data));
   },
   error: (msg, data) => {
     if (!DEBUG) return;
-    console.error(`[useUIStream] ${msg}`, data ?? "");
-    LOG_BUFFER.push(formatLog("ERROR", msg, data));
-    scheduleFlush();
+    console.error(formatLog("ERROR", msg, data));
   }
 };
 
@@ -6423,7 +6451,7 @@ function buildConversationMessages2(conversation) {
   return messages;
 }
 function buildRequest(input) {
-  const { prompt, context, currentTree, conversation, attachments } = input;
+  const { prompt, context, currentTree, conversation, attachments, componentState } = input;
   const headers = {};
   const idempotencyKey = generateIdempotencyKey();
   headers["X-Idempotency-Key"] = idempotencyKey;
@@ -6443,6 +6471,9 @@ function buildRequest(input) {
     }
     if (conversationMessages.length > 0) {
       formData.append("messages", JSON.stringify(conversationMessages));
+    }
+    if (componentState && Object.keys(componentState).length > 0) {
+      formData.append("componentState", JSON.stringify(componentState));
     }
     fileAttachments.forEach((att) => {
       formData.append("files", att.file);
@@ -6468,6 +6499,9 @@ function buildRequest(input) {
     if (conversationMessages.length > 0) {
       bodyPayload2.messages = conversationMessages;
     }
+    if (componentState && Object.keys(componentState).length > 0) {
+      bodyPayload2.componentState = componentState;
+    }
     headers["Content-Type"] = "application/json";
     return { body: JSON.stringify(bodyPayload2), headers };
   }
@@ -6477,6 +6511,9 @@ function buildRequest(input) {
   }
   if (conversationMessages.length > 0) {
     bodyPayload.messages = conversationMessages;
+  }
+  if (componentState && Object.keys(componentState).length > 0) {
+    bodyPayload.componentState = componentState;
   }
   headers["Content-Type"] = "application/json";
   return { body: JSON.stringify(bodyPayload), headers };
@@ -6918,6 +6955,7 @@ function restoreSelection(saved) {
 }
 
 // src/hooks/useUIStream.ts
+var log3 = import_utils14.loggers.react;
 function useUIStream({
   api,
   onComplete,
@@ -6943,11 +6981,20 @@ function useUIStream({
     treeRef.current = tree;
   }, [tree, treeVersion]);
   const setTree = (0, import_react32.useCallback)((newTree) => {
+    log3.debug("[useUIStream] setTree called", { isFunction: typeof newTree === "function" });
     if (typeof newTree === "function") {
       const updatedTree = newTree(treeRef.current);
+      log3.debug("[useUIStream] setTree functional update", {
+        hasResult: !!updatedTree,
+        elementsCount: updatedTree?.elements ? Object.keys(updatedTree.elements).length : 0
+      });
       treeRef.current = updatedTree;
       storeSetUITreeRef.current(updatedTree);
     } else {
+      log3.debug("[useUIStream] setTree direct value", {
+        hasTree: !!newTree,
+        elementsCount: newTree?.elements ? Object.keys(newTree.elements).length : 0
+      });
       treeRef.current = newTree;
       storeSetUITreeRef.current(newTree);
     }
@@ -6979,11 +7026,20 @@ function useUIStream({
   }, [resetPlanExecution, setTree, storeRef]);
   const loadSession = (0, import_react32.useCallback)(
     (session) => {
+      const rootElement = session.tree?.elements?.[session.tree?.root];
+      log3.debug("[useUIStream] loadSession called", {
+        hasTree: !!session.tree,
+        rootKey: session.tree?.root,
+        rootChildrenCount: rootElement?.children?.length,
+        elementsCount: session.tree?.elements ? Object.keys(session.tree.elements).length : 0,
+        conversationLength: session.conversation?.length
+      });
       setTree(session.tree);
       treeRef.current = session.tree;
       setConversation(session.conversation);
       setHistory([]);
       setHistoryIndex(-1);
+      log3.debug("[useUIStream] loadSession complete, tree set");
     },
     [setTree, setHistory, setHistoryIndex]
   );
@@ -7089,7 +7145,8 @@ function useUIStream({
           context,
           currentTree,
           conversation,
-          attachments
+          attachments,
+          componentState: useStore.getState().componentState
         });
         if (getHeaders) {
           const dynamicHeaders = await getHeaders();
@@ -7632,7 +7689,7 @@ var import_react40 = __toESM(require("react"));
 
 // src/components/EditableText.tsx
 var import_react39 = require("react");
-var import_jsx_runtime22 = require("react/jsx-runtime");
+var import_jsx_runtime21 = require("react/jsx-runtime");
 var EditableText = (0, import_react39.memo)(function EditableText2({
   elementKey,
   propName,
@@ -7703,7 +7760,7 @@ var EditableText = (0, import_react39.memo)(function EditableText2({
   const canEdit = isEditing && !disabled;
   const isEmpty = !localValue || localValue.trim() === "";
   const ActualTag = multiline ? "div" : Tag;
-  return /* @__PURE__ */ (0, import_jsx_runtime22.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime21.jsx)(
     ActualTag,
     {
       ref,
@@ -7729,7 +7786,7 @@ var EditableText = (0, import_react39.memo)(function EditableText2({
 });
 
 // src/hooks/useRenderEditableText.tsx
-var import_jsx_runtime23 = require("react/jsx-runtime");
+var import_jsx_runtime22 = require("react/jsx-runtime");
 function createRenderEditableText(element, isEditing) {
   const canEdit = isEditing && element.editable !== false && !element.locked;
   return (propName, value, options) => {
@@ -7794,7 +7851,7 @@ function flatToTree(elements) {
 }
 
 // src/components/EditableWrapper.tsx
-var import_jsx_runtime24 = require("react/jsx-runtime");
+var import_jsx_runtime23 = require("react/jsx-runtime");
 var EditableTextNode = (0, import_react41.memo)(function EditableTextNode2({
   elementKey,
   propName,
@@ -7877,7 +7934,7 @@ var EditableTextNode = (0, import_react41.memo)(function EditableTextNode2({
     [value]
   );
   const isFocused = focusedKey === elementKey;
-  return /* @__PURE__ */ (0, import_jsx_runtime24.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime23.jsx)(
     "span",
     {
       ref,
@@ -7923,7 +7980,7 @@ var EditableWrapper = (0, import_react41.memo)(function EditableWrapper2({
   const [isActiveEditing, setIsActiveEditing] = (0, import_react41.useState)(false);
   const isElementEditable = forceEditable !== void 0 ? forceEditable : element.editable !== false;
   if (!isEditing || !isElementEditable || element.locked) {
-    return /* @__PURE__ */ (0, import_jsx_runtime24.jsx)(import_jsx_runtime24.Fragment, { children });
+    return /* @__PURE__ */ (0, import_jsx_runtime23.jsx)(import_jsx_runtime23.Fragment, { children });
   }
   const isFocused = focusedKey === element.key;
   const handleContainerClick = (0, import_react41.useCallback)(
@@ -7964,7 +8021,7 @@ var EditableWrapper = (0, import_react41.memo)(function EditableWrapper2({
     },
     []
   );
-  return /* @__PURE__ */ (0, import_jsx_runtime24.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime23.jsxs)(
     "div",
     {
       ref: containerRef,
@@ -7983,7 +8040,7 @@ var EditableWrapper = (0, import_react41.memo)(function EditableWrapper2({
         cursor: isEditing ? "text" : void 0
       },
       children: [
-        isMobile && isFocused && !isActiveEditing && /* @__PURE__ */ (0, import_jsx_runtime24.jsx)(
+        isMobile && isFocused && !isActiveEditing && /* @__PURE__ */ (0, import_jsx_runtime23.jsx)(
           "div",
           {
             className: "editable-indicator",
@@ -8001,7 +8058,7 @@ var EditableWrapper = (0, import_react41.memo)(function EditableWrapper2({
               zIndex: 10,
               boxShadow: "0 2px 8px rgba(14, 165, 233, 0.3)"
             },
-            children: /* @__PURE__ */ (0, import_jsx_runtime24.jsx)(
+            children: /* @__PURE__ */ (0, import_jsx_runtime23.jsx)(
               "svg",
               {
                 width: "12",
@@ -8010,7 +8067,7 @@ var EditableWrapper = (0, import_react41.memo)(function EditableWrapper2({
                 fill: "none",
                 stroke: "white",
                 strokeWidth: "2",
-                children: /* @__PURE__ */ (0, import_jsx_runtime24.jsx)("path", { d: "M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" })
+                children: /* @__PURE__ */ (0, import_jsx_runtime23.jsx)("path", { d: "M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" })
               }
             )
           }
@@ -8022,7 +8079,7 @@ var EditableWrapper = (0, import_react41.memo)(function EditableWrapper2({
 });
 
 // src/renderer/element-renderer.tsx
-var import_jsx_runtime25 = require("react/jsx-runtime");
+var import_jsx_runtime24 = require("react/jsx-runtime");
 function hasDescendantChanged(elementKey, prevTree, nextTree, visited = /* @__PURE__ */ new Set()) {
   if (visited.has(elementKey)) return false;
   visited.add(elementKey);
@@ -8088,7 +8145,7 @@ var ElementRenderer = import_react42.default.memo(function ElementRenderer2({
     return null;
   }
   if (element.type === "__placeholder__" || element._meta?.isPlaceholder) {
-    return /* @__PURE__ */ (0, import_jsx_runtime25.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime24.jsx)(
       "div",
       {
         className: "w-full h-16 bg-muted/10 animate-pulse rounded-lg my-2 border border-border/20",
@@ -8106,7 +8163,7 @@ var ElementRenderer = import_react42.default.memo(function ElementRenderer2({
     const childElement = tree.elements[childKey];
     if (!childElement) {
       if (loading) {
-        return /* @__PURE__ */ (0, import_jsx_runtime25.jsx)(
+        return /* @__PURE__ */ (0, import_jsx_runtime24.jsx)(
           "div",
           {
             className: "w-full h-12 bg-muted/10 animate-pulse rounded-md my-1"
@@ -8116,7 +8173,7 @@ var ElementRenderer = import_react42.default.memo(function ElementRenderer2({
       }
       return null;
     }
-    return /* @__PURE__ */ (0, import_jsx_runtime25.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime24.jsx)(
       ElementRenderer2,
       {
         element: childElement,
@@ -8135,7 +8192,7 @@ var ElementRenderer = import_react42.default.memo(function ElementRenderer2({
   });
   const isResizable = element.layout?.resizable !== false;
   const isEditable = isEditing && element.editable !== false && !element.locked;
-  const content = /* @__PURE__ */ (0, import_jsx_runtime25.jsx)(
+  const content = /* @__PURE__ */ (0, import_jsx_runtime24.jsx)(
     Component2,
     {
       element,
@@ -8146,9 +8203,9 @@ var ElementRenderer = import_react42.default.memo(function ElementRenderer2({
       children
     }
   );
-  const editableContent = isEditable ? /* @__PURE__ */ (0, import_jsx_runtime25.jsx)(EditableWrapper, { element, children: content }) : content;
+  const editableContent = isEditable ? /* @__PURE__ */ (0, import_jsx_runtime24.jsx)(EditableWrapper, { element, children: content }) : content;
   if (selectable && onElementSelect) {
-    const selectionContent = /* @__PURE__ */ (0, import_jsx_runtime25.jsx)(
+    const selectionContent = /* @__PURE__ */ (0, import_jsx_runtime24.jsx)(
       SelectionWrapper,
       {
         element,
@@ -8160,7 +8217,7 @@ var ElementRenderer = import_react42.default.memo(function ElementRenderer2({
       }
     );
     if (isResizable) {
-      return /* @__PURE__ */ (0, import_jsx_runtime25.jsx)(
+      return /* @__PURE__ */ (0, import_jsx_runtime24.jsx)(
         ResizableWrapper,
         {
           element,
@@ -8173,19 +8230,19 @@ var ElementRenderer = import_react42.default.memo(function ElementRenderer2({
     return selectionContent;
   }
   if (isResizable) {
-    return /* @__PURE__ */ (0, import_jsx_runtime25.jsx)(ResizableWrapper, { element, onResize, children: editableContent });
+    return /* @__PURE__ */ (0, import_jsx_runtime24.jsx)(ResizableWrapper, { element, onResize, children: editableContent });
   }
   return editableContent;
 }, elementRendererPropsAreEqual);
 
 // src/renderer/provider.tsx
-var import_jsx_runtime26 = require("react/jsx-runtime");
+var import_jsx_runtime25 = require("react/jsx-runtime");
 function ConfirmationDialogManager() {
   const { pendingConfirmation, confirm, cancel } = useActions();
   if (!pendingConfirmation?.action.confirm) {
     return null;
   }
-  return /* @__PURE__ */ (0, import_jsx_runtime26.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime25.jsx)(
     ConfirmDialog,
     {
       confirm: pendingConfirmation.action.confirm,
@@ -8204,32 +8261,32 @@ function JSONUIProvider({
   onDataChange,
   children
 }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime26.jsx)(MarkdownProvider, { children: /* @__PURE__ */ (0, import_jsx_runtime26.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime25.jsx)(MarkdownProvider, { children: /* @__PURE__ */ (0, import_jsx_runtime25.jsx)(
     DataProvider,
     {
       initialData,
       authState,
       onDataChange,
-      children: /* @__PURE__ */ (0, import_jsx_runtime26.jsx)(VisibilityProvider, { children: /* @__PURE__ */ (0, import_jsx_runtime26.jsx)(ActionProvider, { handlers: actionHandlers, navigate, children: /* @__PURE__ */ (0, import_jsx_runtime26.jsxs)(ValidationProvider, { customFunctions: validationFunctions, children: [
+      children: /* @__PURE__ */ (0, import_jsx_runtime25.jsx)(VisibilityProvider, { children: /* @__PURE__ */ (0, import_jsx_runtime25.jsx)(ActionProvider, { handlers: actionHandlers, navigate, children: /* @__PURE__ */ (0, import_jsx_runtime25.jsxs)(ValidationProvider, { customFunctions: validationFunctions, children: [
         children,
-        /* @__PURE__ */ (0, import_jsx_runtime26.jsx)(ConfirmationDialogManager, {})
+        /* @__PURE__ */ (0, import_jsx_runtime25.jsx)(ConfirmationDialogManager, {})
       ] }) }) })
     }
   ) });
 }
 
 // src/renderer.tsx
-var import_jsx_runtime27 = require("react/jsx-runtime");
+var import_jsx_runtime26 = require("react/jsx-runtime");
 function RendererErrorFallback(error, reset) {
-  return /* @__PURE__ */ (0, import_jsx_runtime27.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime26.jsxs)(
     "div",
     {
       role: "alert",
       className: "p-4 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive",
       children: [
-        /* @__PURE__ */ (0, import_jsx_runtime27.jsx)("h3", { className: "font-semibold mb-2", children: "Render Error" }),
-        /* @__PURE__ */ (0, import_jsx_runtime27.jsx)("p", { className: "text-sm text-muted-foreground mb-3", children: error.message }),
-        /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime26.jsx)("h3", { className: "font-semibold mb-2", children: "Render Error" }),
+        /* @__PURE__ */ (0, import_jsx_runtime26.jsx)("p", { className: "text-sm text-muted-foreground mb-3", children: error.message }),
+        /* @__PURE__ */ (0, import_jsx_runtime26.jsx)(
           "button",
           {
             onClick: reset,
@@ -8259,13 +8316,13 @@ function Renderer({
   if (!tree || !tree.root) return null;
   const rootElement = tree.elements[tree.root];
   if (!rootElement) return null;
-  const content = /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(
+  const content = /* @__PURE__ */ (0, import_jsx_runtime26.jsx)(
     ErrorBoundary,
     {
       name: "ElementRenderer",
       fallback: RendererErrorFallback,
       onError: (error) => onError?.(error),
-      children: /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(
+      children: /* @__PURE__ */ (0, import_jsx_runtime26.jsx)(
         ElementRenderer,
         {
           element: rootElement,
@@ -8282,7 +8339,7 @@ function Renderer({
       )
     }
   );
-  const gridContent = autoGrid ? /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(
+  const gridContent = autoGrid ? /* @__PURE__ */ (0, import_jsx_runtime26.jsx)(
     "div",
     {
       style: {
@@ -8297,13 +8354,13 @@ function Renderer({
     }
   ) : content;
   if (trackInteractions && onInteraction) {
-    return /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(InteractionTrackingWrapper, { tree, onInteraction, children: gridContent });
+    return /* @__PURE__ */ (0, import_jsx_runtime26.jsx)(InteractionTrackingWrapper, { tree, onInteraction, children: gridContent });
   }
   return gridContent;
 }
 function createRendererFromCatalog(_catalog, registry) {
   return function CatalogRenderer(props) {
-    return /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(Renderer, { ...props, registry });
+    return /* @__PURE__ */ (0, import_jsx_runtime26.jsx)(Renderer, { ...props, registry });
   };
 }
 
@@ -8334,9 +8391,9 @@ function elementRendererPropsAreEqual2(prevProps, nextProps) {
 }
 
 // src/renderer/skeleton-loader.tsx
-var import_jsx_runtime28 = require("react/jsx-runtime");
+var import_jsx_runtime27 = require("react/jsx-runtime");
 function PlaceholderSkeleton({ elementKey }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(
     "div",
     {
       className: "w-full h-16 bg-muted/10 animate-pulse rounded-lg my-2 border border-border/20",
@@ -8346,7 +8403,7 @@ function PlaceholderSkeleton({ elementKey }) {
   );
 }
 function ChildSkeleton({ elementKey }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime27.jsx)(
     "div",
     {
       className: "w-full h-12 bg-muted/10 animate-pulse rounded-md my-1"
@@ -8360,7 +8417,7 @@ function isPlaceholderElement(element) {
 
 // src/editable.tsx
 var import_react43 = __toESM(require("react"));
-var import_jsx_runtime29 = require("react/jsx-runtime");
+var import_jsx_runtime28 = require("react/jsx-runtime");
 var EditableContext = (0, import_react43.createContext)(null);
 function EditableProvider({
   children,
@@ -8384,7 +8441,7 @@ function EditableProvider({
     setEditingPath(null);
     setEditingValue(null);
   }, []);
-  return /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(
     EditableContext.Provider,
     {
       value: {
@@ -8445,7 +8502,7 @@ function EditableText3({
     }
   }, [value, isEditing]);
   if (isEditing) {
-    return /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(
       "input",
       {
         type: "text",
@@ -8470,7 +8527,7 @@ function EditableText3({
       }
     );
   }
-  return /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(
     Component2,
     {
       className: cn(editableClassName, className),
@@ -8494,7 +8551,7 @@ function EditableNumber({
     }
   }, [value, isEditing]);
   if (isEditing) {
-    return /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(
+    return /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(
       "input",
       {
         type: "number",
@@ -8519,7 +8576,7 @@ function EditableNumber({
       }
     );
   }
-  return /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(
     "span",
     {
       className: cn(editableClassName, className),
@@ -8535,7 +8592,7 @@ var import_react44 = require("react");
 var import_react_markdown2 = __toESM(require("react-markdown"));
 var import_remark_math = __toESM(require("remark-math"));
 var import_rehype_katex = __toESM(require("rehype-katex"));
-var import_jsx_runtime30 = require("react/jsx-runtime");
+var import_jsx_runtime29 = require("react/jsx-runtime");
 var defaultTheme2 = {
   codeBlockBg: "rgba(0, 0, 0, 0.3)",
   codeBlockBorder: "rgba(255, 255, 255, 0.08)",
@@ -8563,18 +8620,18 @@ var MarkdownText = (0, import_react44.memo)(function MarkdownText2({
     ...style
   };
   const components = {
-    pre: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("pre", { className: "bg-[var(--markdown-code-bg)] rounded-lg p-3 overflow-x-auto text-[13px] font-mono border border-[var(--markdown-code-border)] my-2", children }),
+    pre: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("pre", { className: "bg-[var(--markdown-code-bg)] rounded-lg p-3 overflow-x-auto text-[13px] font-mono border border-[var(--markdown-code-border)] my-2", children }),
     code: ({
       children,
       className: codeClassName
     }) => {
       const isInline = !codeClassName;
       if (isInline) {
-        return /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("code", { className: "bg-[var(--markdown-inline-code-bg)] rounded px-1.5 py-0.5 text-[0.9em] font-mono", children });
+        return /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("code", { className: "bg-[var(--markdown-inline-code-bg)] rounded px-1.5 py-0.5 text-[0.9em] font-mono", children });
       }
-      return /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("code", { children });
+      return /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("code", { children });
     },
-    a: ({ href, children }) => /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(
+    a: ({ href, children }) => /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(
       "a",
       {
         href,
@@ -8584,25 +8641,25 @@ var MarkdownText = (0, import_react44.memo)(function MarkdownText2({
         children
       }
     ),
-    ul: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("ul", { className: "my-2 pl-5 list-disc", children }),
-    ol: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("ol", { className: "my-2 pl-5 list-decimal", children }),
-    li: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("li", { className: "mb-1", children }),
-    h1: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("h1", { className: "font-semibold mt-3 mb-2 text-lg", children }),
-    h2: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("h2", { className: "font-semibold mt-3 mb-2 text-base", children }),
-    h3: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("h3", { className: "font-semibold mt-3 mb-2 text-[15px]", children }),
-    h4: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("h4", { className: "font-semibold mt-3 mb-2 text-sm", children }),
-    h5: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("h5", { className: "font-semibold mt-3 mb-2 text-[13px]", children }),
-    h6: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("h6", { className: "font-semibold mt-3 mb-2 text-xs", children }),
-    p: ({ children }) => inline ? /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("span", { children }) : /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("p", { className: "my-1.5 leading-relaxed", children }),
-    blockquote: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("blockquote", { className: "border-l-[3px] border-[var(--markdown-quote-border)] pl-3 my-2 opacity-90 italic", children }),
-    hr: () => /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("hr", { className: "border-none border-t border-[var(--markdown-hr-color)] my-3" }),
-    strong: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("strong", { className: "font-semibold", children }),
-    em: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("em", { className: "italic", children })
+    ul: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("ul", { className: "my-2 pl-5 list-disc", children }),
+    ol: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("ol", { className: "my-2 pl-5 list-decimal", children }),
+    li: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("li", { className: "mb-1", children }),
+    h1: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("h1", { className: "font-semibold mt-3 mb-2 text-lg", children }),
+    h2: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("h2", { className: "font-semibold mt-3 mb-2 text-base", children }),
+    h3: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("h3", { className: "font-semibold mt-3 mb-2 text-[15px]", children }),
+    h4: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("h4", { className: "font-semibold mt-3 mb-2 text-sm", children }),
+    h5: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("h5", { className: "font-semibold mt-3 mb-2 text-[13px]", children }),
+    h6: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("h6", { className: "font-semibold mt-3 mb-2 text-xs", children }),
+    p: ({ children }) => inline ? /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("span", { children }) : /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("p", { className: "my-1.5 leading-relaxed", children }),
+    blockquote: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("blockquote", { className: "border-l-[3px] border-[var(--markdown-quote-border)] pl-3 my-2 opacity-90 italic", children }),
+    hr: () => /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("hr", { className: "border-none border-t border-[var(--markdown-hr-color)] my-3" }),
+    strong: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("strong", { className: "font-semibold", children }),
+    em: ({ children }) => /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("em", { className: "italic", children })
   };
   const Wrapper = inline ? "span" : "div";
   const remarkPlugins = enableMath ? [import_remark_math.default] : [];
   const rehypePlugins = enableMath ? [import_rehype_katex.default] : [];
-  return /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(Wrapper, { className: cn("markdown-content", className), style: wrapperStyle, children: /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Wrapper, { className: cn("markdown-content", className), style: wrapperStyle, children: /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(
     import_react_markdown2.default,
     {
       components,
@@ -8614,7 +8671,7 @@ var MarkdownText = (0, import_react44.memo)(function MarkdownText2({
 });
 
 // src/components/TextSelectionBadge.tsx
-var import_jsx_runtime31 = require("react/jsx-runtime");
+var import_jsx_runtime30 = require("react/jsx-runtime");
 function TextSelectionBadge({
   selection,
   onClear,
@@ -8623,7 +8680,7 @@ function TextSelectionBadge({
   className
 }) {
   const truncatedText = selection.text.length > maxLength ? `${selection.text.substring(0, maxLength)}...` : selection.text;
-  return /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(
     "div",
     {
       className: cn(
@@ -8632,7 +8689,7 @@ function TextSelectionBadge({
         className
       ),
       children: [
-        /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(
           "svg",
           {
             width: "14",
@@ -8645,13 +8702,13 @@ function TextSelectionBadge({
             strokeLinejoin: "round",
             className: "shrink-0 text-primary",
             children: [
-              /* @__PURE__ */ (0, import_jsx_runtime31.jsx)("path", { d: "M17 6.1H3" }),
-              /* @__PURE__ */ (0, import_jsx_runtime31.jsx)("path", { d: "M21 12.1H3" }),
-              /* @__PURE__ */ (0, import_jsx_runtime31.jsx)("path", { d: "M15.1 18H3" })
+              /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("path", { d: "M17 6.1H3" }),
+              /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("path", { d: "M21 12.1H3" }),
+              /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("path", { d: "M15.1 18H3" })
             ]
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(
           "span",
           {
             className: "flex-1 overflow-hidden text-ellipsis whitespace-nowrap italic text-muted-foreground",
@@ -8663,9 +8720,9 @@ function TextSelectionBadge({
             ]
           }
         ),
-        selection.copiedToClipboard && /* @__PURE__ */ (0, import_jsx_runtime31.jsx)("span", { className: "text-[10px] px-1.5 py-0.5 bg-green-500/20 text-green-500 rounded font-medium", children: "Copied" }),
-        selection.elementType && /* @__PURE__ */ (0, import_jsx_runtime31.jsx)("span", { className: "text-[10px] px-1.5 py-0.5 bg-violet-500/20 text-violet-500 rounded", children: selection.elementType }),
-        onRestore && /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(
+        selection.copiedToClipboard && /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("span", { className: "text-[10px] px-1.5 py-0.5 bg-green-500/20 text-green-500 rounded font-medium", children: "Copied" }),
+        selection.elementType && /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("span", { className: "text-[10px] px-1.5 py-0.5 bg-violet-500/20 text-violet-500 rounded", children: selection.elementType }),
+        onRestore && /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(
           "button",
           {
             type: "button",
@@ -8676,7 +8733,7 @@ function TextSelectionBadge({
             },
             title: "Restore selection",
             className: "flex items-center justify-center p-1 border-none rounded bg-transparent text-muted-foreground cursor-pointer transition-all hover:bg-primary/20 hover:text-primary",
-            children: /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)(
+            children: /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(
               "svg",
               {
                 width: "12",
@@ -8688,14 +8745,14 @@ function TextSelectionBadge({
                 strokeLinecap: "round",
                 strokeLinejoin: "round",
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime31.jsx)("path", { d: "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" }),
-                  /* @__PURE__ */ (0, import_jsx_runtime31.jsx)("path", { d: "M3 3v5h5" })
+                  /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("path", { d: "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" }),
+                  /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("path", { d: "M3 3v5h5" })
                 ]
               }
             )
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime30.jsx)(
           "button",
           {
             type: "button",
@@ -8706,7 +8763,7 @@ function TextSelectionBadge({
             },
             title: "Clear",
             className: "flex items-center justify-center p-1 border-none rounded bg-transparent text-muted-foreground cursor-pointer transition-all hover:bg-destructive/20 hover:text-destructive",
-            children: /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)(
+            children: /* @__PURE__ */ (0, import_jsx_runtime30.jsxs)(
               "svg",
               {
                 width: "12",
@@ -8718,8 +8775,8 @@ function TextSelectionBadge({
                 strokeLinecap: "round",
                 strokeLinejoin: "round",
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime31.jsx)("path", { d: "M18 6 6 18" }),
-                  /* @__PURE__ */ (0, import_jsx_runtime31.jsx)("path", { d: "m6 6 12 12" })
+                  /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("path", { d: "M18 6 6 18" }),
+                  /* @__PURE__ */ (0, import_jsx_runtime30.jsx)("path", { d: "m6 6 12 12" })
                 ]
               }
             )
@@ -8756,21 +8813,21 @@ var gridCellBaseStyle = {
 
 // src/components/free-grid/grid-lines.tsx
 var import_react45 = require("react");
-var import_jsx_runtime32 = require("react/jsx-runtime");
+var import_jsx_runtime31 = require("react/jsx-runtime");
 function GridLines({ columns, rows, color }) {
   const patternId = (0, import_react45.useMemo)(
     () => `grid-pattern-${Math.random().toString(36).substr(2, 9)}`,
     []
   );
-  return /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)("svg", { style: gridLinesOverlayStyle, "aria-hidden": "true", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("defs", { children: /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime31.jsxs)("svg", { style: gridLinesOverlayStyle, "aria-hidden": "true", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime31.jsx)("defs", { children: /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(
       "pattern",
       {
         id: patternId,
         width: `${100 / columns}%`,
         height: `${100 / Math.max(rows, 1)}%`,
         patternUnits: "objectBoundingBox",
-        children: /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(
+        children: /* @__PURE__ */ (0, import_jsx_runtime31.jsx)(
           "rect",
           {
             width: "100%",
@@ -8783,12 +8840,12 @@ function GridLines({ columns, rows, color }) {
         )
       }
     ) }),
-    /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("rect", { width: "100%", height: "100%", fill: `url(#${patternId})` })
+    /* @__PURE__ */ (0, import_jsx_runtime31.jsx)("rect", { width: "100%", height: "100%", fill: `url(#${patternId})` })
   ] });
 }
 
 // src/components/free-grid/canvas.tsx
-var import_jsx_runtime33 = require("react/jsx-runtime");
+var import_jsx_runtime32 = require("react/jsx-runtime");
 function FreeGridCanvas({
   columns = 12,
   rows,
@@ -8826,7 +8883,7 @@ function FreeGridCanvas({
     backgroundColor,
     ...style
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime33.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)(
     "div",
     {
       style: containerStyle,
@@ -8835,7 +8892,7 @@ function FreeGridCanvas({
       "data-columns": columns,
       "data-rows": rows,
       children: [
-        showGrid && /* @__PURE__ */ (0, import_jsx_runtime33.jsx)(GridLines, { columns, rows: rows ?? 4, color: gridLineColor }),
+        showGrid && /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(GridLines, { columns, rows: rows ?? 4, color: gridLineColor }),
         children
       ]
     }
@@ -8843,7 +8900,7 @@ function FreeGridCanvas({
 }
 
 // src/components/free-grid/grid-cell.tsx
-var import_jsx_runtime34 = require("react/jsx-runtime");
+var import_jsx_runtime33 = require("react/jsx-runtime");
 function GridCell({
   column,
   row,
@@ -8861,7 +8918,7 @@ function GridCell({
     gridRowEnd: rowSpan > 1 ? `span ${rowSpan}` : void 0,
     ...style
   };
-  return /* @__PURE__ */ (0, import_jsx_runtime34.jsx)("div", { style: cellStyle, className, "data-grid-cell": true, children });
+  return /* @__PURE__ */ (0, import_jsx_runtime33.jsx)("div", { style: cellStyle, className, "data-grid-cell": true, children });
 }
 
 // src/components/free-grid/layout-utils.ts
@@ -8916,9 +8973,9 @@ function createLayout(options = {}) {
 var import_react48 = require("react");
 
 // src/components/tool-progress/icons.tsx
-var import_jsx_runtime35 = require("react/jsx-runtime");
+var import_jsx_runtime34 = require("react/jsx-runtime");
 var toolIcons = {
-  "web-search": /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(
+  "web-search": /* @__PURE__ */ (0, import_jsx_runtime34.jsxs)(
     "svg",
     {
       width: "16",
@@ -8930,12 +8987,12 @@ var toolIcons = {
       strokeLinecap: "round",
       strokeLinejoin: "round",
       children: [
-        /* @__PURE__ */ (0, import_jsx_runtime35.jsx)("circle", { cx: "11", cy: "11", r: "8" }),
-        /* @__PURE__ */ (0, import_jsx_runtime35.jsx)("path", { d: "m21 21-4.3-4.3" })
+        /* @__PURE__ */ (0, import_jsx_runtime34.jsx)("circle", { cx: "11", cy: "11", r: "8" }),
+        /* @__PURE__ */ (0, import_jsx_runtime34.jsx)("path", { d: "m21 21-4.3-4.3" })
       ]
     }
   ),
-  "web-scrape": /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(
+  "web-scrape": /* @__PURE__ */ (0, import_jsx_runtime34.jsxs)(
     "svg",
     {
       width: "16",
@@ -8947,14 +9004,14 @@ var toolIcons = {
       strokeLinecap: "round",
       strokeLinejoin: "round",
       children: [
-        /* @__PURE__ */ (0, import_jsx_runtime35.jsx)("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
-        /* @__PURE__ */ (0, import_jsx_runtime35.jsx)("polyline", { points: "14,2 14,8 20,8" }),
-        /* @__PURE__ */ (0, import_jsx_runtime35.jsx)("line", { x1: "16", y1: "13", x2: "8", y2: "13" }),
-        /* @__PURE__ */ (0, import_jsx_runtime35.jsx)("line", { x1: "16", y1: "17", x2: "8", y2: "17" })
+        /* @__PURE__ */ (0, import_jsx_runtime34.jsx)("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
+        /* @__PURE__ */ (0, import_jsx_runtime34.jsx)("polyline", { points: "14,2 14,8 20,8" }),
+        /* @__PURE__ */ (0, import_jsx_runtime34.jsx)("line", { x1: "16", y1: "13", x2: "8", y2: "13" }),
+        /* @__PURE__ */ (0, import_jsx_runtime34.jsx)("line", { x1: "16", y1: "17", x2: "8", y2: "17" })
       ]
     }
   ),
-  "search-flight": /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(
+  "search-flight": /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(
     "svg",
     {
       width: "16",
@@ -8965,10 +9022,10 @@ var toolIcons = {
       strokeWidth: "2",
       strokeLinecap: "round",
       strokeLinejoin: "round",
-      children: /* @__PURE__ */ (0, import_jsx_runtime35.jsx)("path", { d: "M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" })
+      children: /* @__PURE__ */ (0, import_jsx_runtime34.jsx)("path", { d: "M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" })
     }
   ),
-  "search-hotel": /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(
+  "search-hotel": /* @__PURE__ */ (0, import_jsx_runtime34.jsxs)(
     "svg",
     {
       width: "16",
@@ -8980,17 +9037,17 @@ var toolIcons = {
       strokeLinecap: "round",
       strokeLinejoin: "round",
       children: [
-        /* @__PURE__ */ (0, import_jsx_runtime35.jsx)("path", { d: "M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z" }),
-        /* @__PURE__ */ (0, import_jsx_runtime35.jsx)("path", { d: "M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2" }),
-        /* @__PURE__ */ (0, import_jsx_runtime35.jsx)("path", { d: "M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2" }),
-        /* @__PURE__ */ (0, import_jsx_runtime35.jsx)("path", { d: "M10 6h4" }),
-        /* @__PURE__ */ (0, import_jsx_runtime35.jsx)("path", { d: "M10 10h4" }),
-        /* @__PURE__ */ (0, import_jsx_runtime35.jsx)("path", { d: "M10 14h4" }),
-        /* @__PURE__ */ (0, import_jsx_runtime35.jsx)("path", { d: "M10 18h4" })
+        /* @__PURE__ */ (0, import_jsx_runtime34.jsx)("path", { d: "M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z" }),
+        /* @__PURE__ */ (0, import_jsx_runtime34.jsx)("path", { d: "M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2" }),
+        /* @__PURE__ */ (0, import_jsx_runtime34.jsx)("path", { d: "M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2" }),
+        /* @__PURE__ */ (0, import_jsx_runtime34.jsx)("path", { d: "M10 6h4" }),
+        /* @__PURE__ */ (0, import_jsx_runtime34.jsx)("path", { d: "M10 10h4" }),
+        /* @__PURE__ */ (0, import_jsx_runtime34.jsx)("path", { d: "M10 14h4" }),
+        /* @__PURE__ */ (0, import_jsx_runtime34.jsx)("path", { d: "M10 18h4" })
       ]
     }
   ),
-  "document-index": /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(
+  "document-index": /* @__PURE__ */ (0, import_jsx_runtime34.jsxs)(
     "svg",
     {
       width: "16",
@@ -9002,14 +9059,14 @@ var toolIcons = {
       strokeLinecap: "round",
       strokeLinejoin: "round",
       children: [
-        /* @__PURE__ */ (0, import_jsx_runtime35.jsx)("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
-        /* @__PURE__ */ (0, import_jsx_runtime35.jsx)("polyline", { points: "14,2 14,8 20,8" }),
-        /* @__PURE__ */ (0, import_jsx_runtime35.jsx)("path", { d: "M12 18v-6" }),
-        /* @__PURE__ */ (0, import_jsx_runtime35.jsx)("path", { d: "M9 15l3 3 3-3" })
+        /* @__PURE__ */ (0, import_jsx_runtime34.jsx)("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
+        /* @__PURE__ */ (0, import_jsx_runtime34.jsx)("polyline", { points: "14,2 14,8 20,8" }),
+        /* @__PURE__ */ (0, import_jsx_runtime34.jsx)("path", { d: "M12 18v-6" }),
+        /* @__PURE__ */ (0, import_jsx_runtime34.jsx)("path", { d: "M9 15l3 3 3-3" })
       ]
     }
   ),
-  "document-index-cache": /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(
+  "document-index-cache": /* @__PURE__ */ (0, import_jsx_runtime34.jsxs)(
     "svg",
     {
       width: "16",
@@ -9021,13 +9078,13 @@ var toolIcons = {
       strokeLinecap: "round",
       strokeLinejoin: "round",
       children: [
-        /* @__PURE__ */ (0, import_jsx_runtime35.jsx)("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
-        /* @__PURE__ */ (0, import_jsx_runtime35.jsx)("polyline", { points: "14,2 14,8 20,8" }),
-        /* @__PURE__ */ (0, import_jsx_runtime35.jsx)("path", { d: "M9 15l2 2 4-4" })
+        /* @__PURE__ */ (0, import_jsx_runtime34.jsx)("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
+        /* @__PURE__ */ (0, import_jsx_runtime34.jsx)("polyline", { points: "14,2 14,8 20,8" }),
+        /* @__PURE__ */ (0, import_jsx_runtime34.jsx)("path", { d: "M9 15l2 2 4-4" })
       ]
     }
   ),
-  "document-search": /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(
+  "document-search": /* @__PURE__ */ (0, import_jsx_runtime34.jsxs)(
     "svg",
     {
       width: "16",
@@ -9039,14 +9096,14 @@ var toolIcons = {
       strokeLinecap: "round",
       strokeLinejoin: "round",
       children: [
-        /* @__PURE__ */ (0, import_jsx_runtime35.jsx)("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
-        /* @__PURE__ */ (0, import_jsx_runtime35.jsx)("polyline", { points: "14,2 14,8 20,8" }),
-        /* @__PURE__ */ (0, import_jsx_runtime35.jsx)("circle", { cx: "11.5", cy: "14.5", r: "2.5" }),
-        /* @__PURE__ */ (0, import_jsx_runtime35.jsx)("path", { d: "M13.3 16.3 15 18" })
+        /* @__PURE__ */ (0, import_jsx_runtime34.jsx)("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
+        /* @__PURE__ */ (0, import_jsx_runtime34.jsx)("polyline", { points: "14,2 14,8 20,8" }),
+        /* @__PURE__ */ (0, import_jsx_runtime34.jsx)("circle", { cx: "11.5", cy: "14.5", r: "2.5" }),
+        /* @__PURE__ */ (0, import_jsx_runtime34.jsx)("path", { d: "M13.3 16.3 15 18" })
       ]
     }
   ),
-  default: /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(
+  default: /* @__PURE__ */ (0, import_jsx_runtime34.jsx)(
     "svg",
     {
       width: "16",
@@ -9057,7 +9114,7 @@ var toolIcons = {
       strokeWidth: "2",
       strokeLinecap: "round",
       strokeLinejoin: "round",
-      children: /* @__PURE__ */ (0, import_jsx_runtime35.jsx)("polygon", { points: "13,2 3,14 12,14 11,22 21,10 12,10 13,2" })
+      children: /* @__PURE__ */ (0, import_jsx_runtime34.jsx)("polygon", { points: "13,2 3,14 12,14 11,22 21,10 12,10 13,2" })
     }
   )
 };
@@ -9116,14 +9173,14 @@ var progressAnimations = `
 
 // src/components/tool-progress/progress-item.tsx
 var import_react47 = require("react");
-var import_jsx_runtime36 = require("react/jsx-runtime");
+var import_jsx_runtime35 = require("react/jsx-runtime");
 var DefaultProgressItem = (0, import_react47.memo)(function DefaultProgressItem2({
   progress
 }) {
   const label = toolLabels[progress.toolName] || progress.toolName;
   const icon = toolIcons[progress.toolName] || toolIcons.default;
   const isActive = progress.status === "starting" || progress.status === "progress";
-  return /* @__PURE__ */ (0, import_jsx_runtime36.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(
     "div",
     {
       style: {
@@ -9140,8 +9197,8 @@ var DefaultProgressItem = (0, import_react47.memo)(function DefaultProgressItem2
         animation: "slideIn 0.3s ease-out"
       },
       children: [
-        /* @__PURE__ */ (0, import_jsx_runtime36.jsxs)("div", { style: { position: "relative" }, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(
+        /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)("div", { style: { position: "relative" }, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(
             "div",
             {
               style: {
@@ -9157,7 +9214,7 @@ var DefaultProgressItem = (0, import_react47.memo)(function DefaultProgressItem2
               children: icon
             }
           ),
-          isActive && /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(
+          isActive && /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(
             "span",
             {
               style: {
@@ -9173,8 +9230,8 @@ var DefaultProgressItem = (0, import_react47.memo)(function DefaultProgressItem2
             }
           )
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime36.jsxs)("div", { style: { flex: 1, minWidth: 0 }, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime36.jsxs)(
+        /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)("div", { style: { flex: 1, minWidth: 0 }, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime35.jsxs)(
             "div",
             {
               style: {
@@ -9183,7 +9240,7 @@ var DefaultProgressItem = (0, import_react47.memo)(function DefaultProgressItem2
                 gap: 6
               },
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(
+                /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(
                   "span",
                   {
                     style: {
@@ -9194,7 +9251,7 @@ var DefaultProgressItem = (0, import_react47.memo)(function DefaultProgressItem2
                     children: label
                   }
                 ),
-                isActive && /* @__PURE__ */ (0, import_jsx_runtime36.jsx)("span", { style: { display: "flex", gap: 2 }, children: [0, 1, 2].map((i) => /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(
+                isActive && /* @__PURE__ */ (0, import_jsx_runtime35.jsx)("span", { style: { display: "flex", gap: 2 }, children: [0, 1, 2].map((i) => /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(
                   "span",
                   {
                     style: {
@@ -9210,7 +9267,7 @@ var DefaultProgressItem = (0, import_react47.memo)(function DefaultProgressItem2
               ]
             }
           ),
-          progress.message && /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(
+          progress.message && /* @__PURE__ */ (0, import_jsx_runtime35.jsx)(
             "p",
             {
               style: {
@@ -9232,7 +9289,7 @@ var DefaultProgressItem = (0, import_react47.memo)(function DefaultProgressItem2
 });
 
 // src/components/ToolProgressOverlay.tsx
-var import_jsx_runtime37 = require("react/jsx-runtime");
+var import_jsx_runtime36 = require("react/jsx-runtime");
 var ToolProgressOverlay = (0, import_react48.memo)(function ToolProgressOverlay2({
   position = "top-right",
   className,
@@ -9251,9 +9308,9 @@ var ToolProgressOverlay = (0, import_react48.memo)(function ToolProgressOverlay2
     return null;
   }
   const visibleProgress = activeProgress.slice(0, maxItems);
-  return /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)(import_jsx_runtime37.Fragment, { children: [
-    /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("style", { children: progressAnimations }),
-    /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(
+  return /* @__PURE__ */ (0, import_jsx_runtime36.jsxs)(import_jsx_runtime36.Fragment, { children: [
+    /* @__PURE__ */ (0, import_jsx_runtime36.jsx)("style", { children: progressAnimations }),
+    /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(
       "div",
       {
         className,
@@ -9267,7 +9324,7 @@ var ToolProgressOverlay = (0, import_react48.memo)(function ToolProgressOverlay2
           ...positionStyles[position]
         },
         children: visibleProgress.map(
-          (progress) => renderItem ? /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("div", { style: { pointerEvents: "auto" }, children: renderItem(progress) }, progress.toolCallId) : /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(
+          (progress) => renderItem ? /* @__PURE__ */ (0, import_jsx_runtime36.jsx)("div", { style: { pointerEvents: "auto" }, children: renderItem(progress) }, progress.toolCallId) : /* @__PURE__ */ (0, import_jsx_runtime36.jsx)(
             DefaultProgressItem,
             {
               progress
@@ -9282,9 +9339,9 @@ var ToolProgressOverlay = (0, import_react48.memo)(function ToolProgressOverlay2
 
 // src/components/Canvas/CanvasBlock.tsx
 var import_react49 = require("react");
-var import_jsx_runtime38 = require("react/jsx-runtime");
+var import_jsx_runtime37 = require("react/jsx-runtime");
 function CanvasBlockSkeleton() {
-  return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("div", { className: "w-full min-h-[200px] bg-zinc-900/50 rounded-xl border border-white/5 flex items-center justify-center", children: /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("div", { className: "text-zinc-500 text-sm", children: "Loading editor..." }) });
+  return /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("div", { className: "w-full min-h-[200px] bg-zinc-900/50 rounded-xl border border-white/5 flex items-center justify-center", children: /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("div", { className: "text-zinc-500 text-sm", children: "Loading editor..." }) });
 }
 var CanvasBlock = (0, import_react49.memo)(function CanvasBlock2({
   element,
@@ -9357,31 +9414,31 @@ var CanvasBlock = (0, import_react49.memo)(function CanvasBlock2({
     });
   }, [documentId, title, initialContent, onAction]);
   if (loading) {
-    return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(CanvasBlockSkeleton, {});
+    return /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(CanvasBlockSkeleton, {});
   }
   if (!EditorComponent) {
-    return /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)(
+    return /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)(
       "div",
       {
         className: "canvas-block w-full bg-zinc-900/50 rounded-xl border border-white/5 overflow-hidden",
         style: { minHeight: height },
         "data-document-id": documentId,
         children: [
-          title && /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("div", { className: "px-4 py-3 border-b border-white/5", children: /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("h3", { className: "text-lg font-semibold text-white", children: title }) }),
-          /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)(
+          title && /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("div", { className: "px-4 py-3 border-b border-white/5", children: /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("h3", { className: "text-lg font-semibold text-white", children: title }) }),
+          /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)(
             "div",
             {
               className: "flex flex-col items-center justify-center gap-4 p-8",
               style: { minHeight: "200px" },
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("p", { className: "text-zinc-400 text-sm", children: initialContent ? "Document content available" : "Empty document" }),
-                /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)(
+                /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("p", { className: "text-zinc-400 text-sm", children: initialContent ? "Document content available" : "Empty document" }),
+                /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)(
                   "button",
                   {
                     onClick: handleOpenInCanvas,
                     className: "flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-sm font-medium transition-colors border-none cursor-pointer",
                     children: [
-                      /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)(
+                      /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)(
                         "svg",
                         {
                           width: "16",
@@ -9393,8 +9450,8 @@ var CanvasBlock = (0, import_react49.memo)(function CanvasBlock2({
                           strokeLinecap: "round",
                           strokeLinejoin: "round",
                           children: [
-                            /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("path", { d: "M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" }),
-                            /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("path", { d: "M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" })
+                            /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("path", { d: "M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" }),
+                            /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("path", { d: "M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" })
                           ]
                         }
                       ),
@@ -9409,15 +9466,15 @@ var CanvasBlock = (0, import_react49.memo)(function CanvasBlock2({
       }
     );
   }
-  return /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime37.jsxs)(
     "div",
     {
       className: "canvas-block",
       style: { width, minHeight: height },
       "data-document-id": documentId,
       children: [
-        title && /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("h3", { className: "text-lg font-semibold text-white mb-3", children: title }),
-        /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("div", { className: "bg-zinc-900/50 rounded-xl border border-white/5 overflow-hidden", children: /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(
+        title && /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("h3", { className: "text-lg font-semibold text-white mb-3", children: title }),
+        /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("div", { className: "bg-zinc-900/50 rounded-xl border border-white/5 overflow-hidden", children: /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(
           EditorComponent,
           {
             initialState: content,
@@ -9432,7 +9489,7 @@ var CanvasBlock = (0, import_react49.memo)(function CanvasBlock2({
           },
           editorKey
         ) }),
-        mode === "edit" && /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("div", { className: "flex justify-end mt-2", children: /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(
+        mode === "edit" && /* @__PURE__ */ (0, import_jsx_runtime37.jsx)("div", { className: "flex justify-end mt-2", children: /* @__PURE__ */ (0, import_jsx_runtime37.jsx)(
           "button",
           {
             onClick: handleSave,
@@ -10466,7 +10523,7 @@ var purify = createDOMPurify();
 
 // src/components/Document/DocumentBlock.tsx
 var import_react50 = require("react");
-var import_jsx_runtime39 = require("react/jsx-runtime");
+var import_jsx_runtime38 = require("react/jsx-runtime");
 var DocumentBlock = (0, import_react50.memo)(function DocumentBlock2({
   element,
   onAction,
@@ -10483,7 +10540,7 @@ var DocumentBlock = (0, import_react50.memo)(function DocumentBlock2({
   } = element.props;
   const renderedContent = (0, import_react50.useMemo)(() => {
     if (format === "html") {
-      return /* @__PURE__ */ (0, import_jsx_runtime39.jsx)(
+      return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(
         "div",
         {
           className: "prose prose-invert max-w-none",
@@ -10494,7 +10551,7 @@ var DocumentBlock = (0, import_react50.memo)(function DocumentBlock2({
     if (format === "markdown" && renderText) {
       return renderText(content, { markdown: true });
     }
-    return /* @__PURE__ */ (0, import_jsx_runtime39.jsx)("pre", { className: "whitespace-pre-wrap text-sm", children: content });
+    return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("pre", { className: "whitespace-pre-wrap text-sm", children: content });
   }, [content, format, renderText]);
   const handleOpenInCanvas = () => {
     onAction?.({
@@ -10508,19 +10565,19 @@ var DocumentBlock = (0, import_react50.memo)(function DocumentBlock2({
     });
   };
   if (loading) {
-    return /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)("div", { className: "w-full p-6 bg-zinc-900/50 rounded-xl border border-white/5 animate-pulse", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime39.jsx)("div", { className: "h-6 w-1/3 bg-zinc-800 rounded mb-4" }),
-      /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)("div", { className: "space-y-2", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime39.jsx)("div", { className: "h-4 bg-zinc-800 rounded w-full" }),
-        /* @__PURE__ */ (0, import_jsx_runtime39.jsx)("div", { className: "h-4 bg-zinc-800 rounded w-5/6" }),
-        /* @__PURE__ */ (0, import_jsx_runtime39.jsx)("div", { className: "h-4 bg-zinc-800 rounded w-4/6" })
+    return /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: "w-full p-6 bg-zinc-900/50 rounded-xl border border-white/5 animate-pulse", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("div", { className: "h-6 w-1/3 bg-zinc-800 rounded mb-4" }),
+      /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: "space-y-2", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("div", { className: "h-4 bg-zinc-800 rounded w-full" }),
+        /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("div", { className: "h-4 bg-zinc-800 rounded w-5/6" }),
+        /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("div", { className: "h-4 bg-zinc-800 rounded w-4/6" })
       ] })
     ] });
   }
-  return /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)("div", { className: "document-block w-full bg-zinc-900/50 rounded-xl border border-white/5 overflow-hidden", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)("div", { className: "flex items-center justify-between px-4 py-3 border-b border-white/5 bg-zinc-900/30", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)("div", { className: "flex items-center gap-2", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)(
+  return /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: "document-block w-full bg-zinc-900/50 rounded-xl border border-white/5 overflow-hidden", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: "flex items-center justify-between px-4 py-3 border-b border-white/5 bg-zinc-900/30", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: "flex items-center gap-2", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)(
           "svg",
           {
             width: "16",
@@ -10533,23 +10590,23 @@ var DocumentBlock = (0, import_react50.memo)(function DocumentBlock2({
             strokeLinejoin: "round",
             className: "text-zinc-400",
             children: [
-              /* @__PURE__ */ (0, import_jsx_runtime39.jsx)("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
-              /* @__PURE__ */ (0, import_jsx_runtime39.jsx)("polyline", { points: "14 2 14 8 20 8" }),
-              /* @__PURE__ */ (0, import_jsx_runtime39.jsx)("line", { x1: "16", x2: "8", y1: "13", y2: "13" }),
-              /* @__PURE__ */ (0, import_jsx_runtime39.jsx)("line", { x1: "16", x2: "8", y1: "17", y2: "17" }),
-              /* @__PURE__ */ (0, import_jsx_runtime39.jsx)("line", { x1: "10", x2: "8", y1: "9", y2: "9" })
+              /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
+              /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("polyline", { points: "14 2 14 8 20 8" }),
+              /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("line", { x1: "16", x2: "8", y1: "13", y2: "13" }),
+              /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("line", { x1: "16", x2: "8", y1: "17", y2: "17" }),
+              /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("line", { x1: "10", x2: "8", y1: "9", y2: "9" })
             ]
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime39.jsx)("h3", { className: "text-sm font-medium text-white", children: title })
+        /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("h3", { className: "text-sm font-medium text-white", children: title })
       ] }),
-      showOpenInCanvas && /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)(
+      showOpenInCanvas && /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)(
         "button",
         {
           onClick: handleOpenInCanvas,
           className: "flex items-center gap-1.5 px-2.5 py-1 text-xs text-zinc-400 hover:text-white bg-zinc-800 hover:bg-zinc-700 rounded-md transition-colors border-none cursor-pointer",
           children: [
-            /* @__PURE__ */ (0, import_jsx_runtime39.jsxs)(
+            /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)(
               "svg",
               {
                 width: "12",
@@ -10561,8 +10618,8 @@ var DocumentBlock = (0, import_react50.memo)(function DocumentBlock2({
                 strokeLinecap: "round",
                 strokeLinejoin: "round",
                 children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime39.jsx)("path", { d: "M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" }),
-                  /* @__PURE__ */ (0, import_jsx_runtime39.jsx)("path", { d: "M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" })
+                  /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("path", { d: "M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" }),
+                  /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("path", { d: "M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" })
                 ]
               }
             ),
@@ -10571,7 +10628,7 @@ var DocumentBlock = (0, import_react50.memo)(function DocumentBlock2({
         }
       )
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime39.jsx)("div", { className: "p-4", children: renderedContent })
+    /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("div", { className: "p-4", children: renderedContent })
   ] });
 });
 
@@ -10782,7 +10839,6 @@ function groupDeepSelectionsByElement(selections) {
   TextSelectionBadge,
   ToolProgressOverlay,
   ToolProgressProvider,
-  TreeSyncProvider,
   UnifiedProgressProvider,
   ValidationProvider,
   VisibilityProvider,
@@ -10828,6 +10884,7 @@ function groupDeepSelectionsByElement(selections) {
   useActiveStep,
   useActiveToolProgress,
   useActiveToolProgressStore,
+  useAllComponentState,
   useAreSuggestionsEnabled,
   useAuthenticatedSources,
   useAutoSave,
@@ -10838,6 +10895,8 @@ function groupDeepSelectionsByElement(selections) {
   useCanvasIsStreaming,
   useCanvasVersion,
   useCitations,
+  useComponentState,
+  useComponentStateActions,
   useData,
   useDataBinding,
   useDataValue,
@@ -10852,6 +10911,7 @@ function groupDeepSelectionsByElement(selections) {
   useEditableContext,
   useElementActionTracker,
   useElementEdit,
+  useElementState,
   useFieldStates,
   useFieldValidation,
   useFormState,
@@ -10888,9 +10948,6 @@ function groupDeepSelectionsByElement(selections) {
   useTextSelection,
   useToolProgress,
   useToolProgressOptional,
-  useTreeSync,
-  useTreeSyncCallback,
-  useTreeSyncContext,
   useUIStore,
   useUIStream,
   useUnifiedProgress,

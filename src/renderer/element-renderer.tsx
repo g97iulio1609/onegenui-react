@@ -132,7 +132,7 @@ export const ElementRenderer = React.memo(function ElementRenderer({
 
   if (
     element.type === "__placeholder__" ||
-    (element._meta as any)?.isPlaceholder
+    element._meta?.isPlaceholder
   ) {
     return (
       <div

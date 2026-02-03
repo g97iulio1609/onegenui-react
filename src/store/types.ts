@@ -20,6 +20,7 @@ import type { DeepResearchSlice } from "./slices/deep-research";
 import type { UITreeSlice } from "./slices/ui-tree";
 import type { WorkspaceSlice } from "./slices/workspace";
 import type { CanvasSlice } from "./slices/canvas";
+import type { ComponentStateSlice } from "./slices/component-state";
 
 // =============================================================================
 // Combined Store Type
@@ -40,7 +41,8 @@ export type StoreState = DomainSlice &
   DeepResearchSlice &
   UITreeSlice &
   WorkspaceSlice &
-  CanvasSlice;
+  CanvasSlice &
+  ComponentStateSlice;
 
 // =============================================================================
 // Slice Creator Type (with immer middleware)
@@ -85,4 +87,5 @@ export type {
   UITreeSlice,
   WorkspaceSlice,
   CanvasSlice,
+  ComponentStateSlice,
 };

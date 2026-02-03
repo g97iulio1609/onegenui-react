@@ -71,6 +71,8 @@ export interface RequestBuilderInput {
   currentTree: UITree;
   conversation: ConversationTurn[];
   attachments?: Attachment[];
+  /** Component state from Zustand store - current values modified by user */
+  componentState?: Record<string, Record<string, unknown>>;
 }
 
 export interface RequestBuilderOutput {
@@ -82,7 +84,7 @@ export interface RequestBuilderOutput {
  * Build request body and headers based on attachment types
  */
 export function buildRequest(input: RequestBuilderInput): RequestBuilderOutput {
-  const { prompt, context, currentTree, conversation, attachments } = input;
+  const { prompt, context, currentTree, conversation, attachments, componentState } = input;
   const headers: Record<string, string> = {};
 
   // Generate idempotency key for deduplication
@@ -113,6 +115,10 @@ export function buildRequest(input: RequestBuilderInput): RequestBuilderOutput {
     // Include conversation history for multi-turn context
     if (conversationMessages.length > 0) {
       formData.append("messages", JSON.stringify(conversationMessages));
+    }
+    // Include component state for user modifications
+    if (componentState && Object.keys(componentState).length > 0) {
+      formData.append("componentState", JSON.stringify(componentState));
     }
 
     fileAttachments.forEach((att) => {
@@ -145,6 +151,10 @@ export function buildRequest(input: RequestBuilderInput): RequestBuilderOutput {
     if (conversationMessages.length > 0) {
       bodyPayload.messages = conversationMessages;
     }
+    // Include component state for user modifications
+    if (componentState && Object.keys(componentState).length > 0) {
+      bodyPayload.componentState = componentState;
+    }
     headers["Content-Type"] = "application/json";
     return { body: JSON.stringify(bodyPayload), headers };
   }
@@ -157,6 +167,10 @@ export function buildRequest(input: RequestBuilderInput): RequestBuilderOutput {
   // Include conversation history for multi-turn context
   if (conversationMessages.length > 0) {
     bodyPayload.messages = conversationMessages;
+  }
+  // Include component state for user modifications
+  if (componentState && Object.keys(componentState).length > 0) {
+    bodyPayload.componentState = componentState;
   }
   headers["Content-Type"] = "application/json";
   return { body: JSON.stringify(bodyPayload), headers };

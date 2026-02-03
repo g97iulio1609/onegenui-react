@@ -907,6 +907,8 @@ var createDeepResearchSlice = (set) => ({
 });
 
 // src/store/slices/ui-tree.ts
+import { loggers } from "@onegenui/utils";
+var log = loggers.react;
 var initialTree = null;
 var createUITreeSlice = (set, get) => ({
   // State
@@ -915,6 +917,12 @@ var createUITreeSlice = (set, get) => ({
   treeVersion: 0,
   // Actions
   setUITree: (tree) => set((state) => {
+    log.debug("[UITreeSlice] setUITree called", {
+      hasTree: !!tree,
+      elementsCount: tree?.elements ? Object.keys(tree.elements).length : 0,
+      rootKey: tree?.root,
+      prevVersion: state.treeVersion
+    });
     state.uiTree = tree;
     state.treeVersion += 1;
   }),
@@ -1259,6 +1267,31 @@ var createCanvasSlice = (set, get) => ({
   }
 });
 
+// src/store/slices/component-state.ts
+var createComponentStateSlice = (set, get) => ({
+  componentState: {},
+  setComponentState: (elementKey, state) => set((s) => {
+    s.componentState[elementKey] = state;
+  }),
+  updateComponentState: (elementKey, updates) => set((s) => {
+    if (!s.componentState[elementKey]) {
+      s.componentState[elementKey] = {};
+    }
+    Object.assign(s.componentState[elementKey], updates);
+  }),
+  mergeComponentState: (elementKey, updates) => set((s) => {
+    s.componentState[elementKey] = {
+      ...s.componentState[elementKey] ?? {},
+      ...updates
+    };
+  }),
+  clearComponentState: (elementKey) => set((s) => {
+    delete s.componentState[elementKey];
+  }),
+  clearAllComponentState: () => set({ componentState: {} }),
+  getElementState: (elementKey) => get().componentState[elementKey] ?? {}
+});
+
 // src/store/index.ts
 enableMapSet();
 var useStore = create()(
@@ -1277,7 +1310,8 @@ var useStore = create()(
         ...createDeepResearchSlice(...args),
         ...createUITreeSlice(...args),
         ...createWorkspaceSlice(...args),
-        ...createCanvasSlice(...args)
+        ...createCanvasSlice(...args),
+        ...createComponentStateSlice(...args)
       }))
     ),
     {
@@ -1430,6 +1464,18 @@ var useCanvasActions = () => useStore(
     queueCanvasUpdate: s.queueCanvasUpdate,
     flushCanvasUpdates: s.flushCanvasUpdates,
     clearCanvasPendingUpdates: s.clearCanvasPendingUpdates
+  }))
+);
+var useComponentState = (elementKey) => useStore((s) => s.componentState[elementKey] ?? {});
+var useAllComponentState = () => useStore(useShallow((s) => s.componentState));
+var useComponentStateActions = () => useStore(
+  useShallow((s) => ({
+    setComponentState: s.setComponentState,
+    updateComponentState: s.updateComponentState,
+    mergeComponentState: s.mergeComponentState,
+    clearComponentState: s.clearComponentState,
+    clearAllComponentState: s.clearAllComponentState,
+    getElementState: s.getElementState
   }))
 );
 
@@ -2328,6 +2374,7 @@ function findElementByCssPath(elementKey, cssPath) {
 
 // src/contexts/selection/use-long-press.ts
 import { useRef as useRef2, useCallback as useCallback5, useEffect as useEffect2 } from "react";
+import { createLogger } from "@onegenui/utils";
 
 // src/utils/dom.ts
 var NATIVE_INTERACTIVE_TAGS = /* @__PURE__ */ new Set([
@@ -2480,6 +2527,7 @@ function isSelectionInteraction(target, isDeepSelectionActive) {
 }
 
 // src/contexts/selection/use-long-press.ts
+var logger = createLogger({ prefix: "use-long-press" });
 var DEFAULT_LONG_PRESS_CONFIG = {
   duration: 450,
   movementThreshold: 10,
@@ -2491,10 +2539,10 @@ function useLongPress(callbacks, config = {}) {
   const pressTimerRef = useRef2(null);
   const pressTargetRef = useRef2(null);
   const longPressCompletedRef = useRef2(false);
-  const log = useCallback5(
+  const log4 = useCallback5(
     (message, ...args) => {
       if (debug) {
-        console.log(`[LongPress] ${message}`, ...args);
+        logger.debug(`[LongPress] ${message}`, ...args);
       }
     },
     [debug]
@@ -2509,19 +2557,19 @@ function useLongPress(callbacks, config = {}) {
   useEffect2(() => {
     const handlePointerDown = (e) => {
       if (e.button !== 0) {
-        log("pointerdown SKIPPED - not primary button:", e.button);
+        log4("pointerdown SKIPPED - not primary button:", e.button);
         return;
       }
       const target = e.target;
-      log("pointerdown on:", target.tagName, target.className);
+      log4("pointerdown on:", target.tagName, target.className);
       longPressCompletedRef.current = false;
       cancelPress();
       if (isInteractiveElement(target)) {
-        log("pointerdown SKIPPED - interactive element:", target.tagName);
+        log4("pointerdown SKIPPED - interactive element:", target.tagName);
         return;
       }
       if (shouldNeverSelect(target)) {
-        log("pointerdown SKIPPED - shouldNeverSelect:", target.tagName);
+        log4("pointerdown SKIPPED - shouldNeverSelect:", target.tagName);
         return;
       }
       const componentWrapper = target.closest(
@@ -2534,7 +2582,7 @@ function useLongPress(callbacks, config = {}) {
       pressTargetRef.current = target;
       pressTimerRef.current = setTimeout(() => {
         if (!pressTargetRef.current) return;
-        log("Long-press triggered on:", pressTargetRef.current.tagName);
+        log4("Long-press triggered on:", pressTargetRef.current.tagName);
         callbacks.onLongPress(pressTargetRef.current, componentWrapper);
         longPressCompletedRef.current = true;
         pressTargetRef.current = null;
@@ -2549,27 +2597,27 @@ function useLongPress(callbacks, config = {}) {
     const handlePointerCancel = () => cancelPress();
     const handleClick = (e) => {
       if (e.button !== 0) {
-        log("click SKIPPED - not primary button:", e.button);
+        log4("click SKIPPED - not primary button:", e.button);
         return;
       }
       const target = e.target;
-      log("click on:", target.tagName, target.className);
+      log4("click on:", target.tagName, target.className);
       if (longPressCompletedRef.current) {
-        log("click SKIPPED - long-press just completed");
+        log4("click SKIPPED - long-press just completed");
         longPressCompletedRef.current = false;
         return;
       }
       const textSelection = window.getSelection();
       if (textSelection && !textSelection.isCollapsed && textSelection.toString().trim()) {
-        log("click SKIPPED - text selection active");
+        log4("click SKIPPED - text selection active");
         return;
       }
       if (isInteractiveElement(target)) {
-        log("click SKIPPED - interactive element:", target.tagName);
+        log4("click SKIPPED - interactive element:", target.tagName);
         return;
       }
       if (shouldNeverSelect(target)) {
-        log("click SKIPPED - shouldNeverSelect:", target.tagName);
+        log4("click SKIPPED - shouldNeverSelect:", target.tagName);
         return;
       }
       callbacks.onClick(target, e);
@@ -2593,7 +2641,7 @@ function useLongPress(callbacks, config = {}) {
       document.removeEventListener("contextmenu", handleContextMenu, true);
       cancelPress();
     };
-  }, [callbacks, duration, movementThreshold, cancelPress, log]);
+  }, [callbacks, duration, movementThreshold, cancelPress, log4]);
   return {
     get longPressJustCompleted() {
       return longPressCompletedRef.current;
@@ -2942,6 +2990,12 @@ function SelectionProvider({ children }) {
   };
   const handleClick = (target, _event) => {
     if (isEditing) {
+      return;
+    }
+    const interactiveElement = target.closest(
+      'button, input, textarea, select, a[href], [role="button"], [data-radix-collection-item], [data-state], [contenteditable="true"]'
+    );
+    if (interactiveElement) {
       return;
     }
     const selectableItem = target.closest(
@@ -4093,7 +4147,7 @@ function ActionProvider2({
     pendingActionsRef.current = [];
     notifySubscribers(batch);
   }, [notifySubscribers]);
-  const scheduleFlush2 = useCallback13(
+  const scheduleFlush = useCallback13(
     (delayMs) => {
       if (timerRef.current) {
         clearTimeout(timerRef.current);
@@ -4116,13 +4170,13 @@ function ActionProvider2({
       });
       setLastAction(action);
       pendingActionsRef.current.push(action);
-      scheduleFlush2(options.debounceMs ?? 2500);
+      scheduleFlush(options.debounceMs ?? 2500);
     },
     [
       options.enabled,
       options.maxActionsInContext,
       options.debounceMs,
-      scheduleFlush2
+      scheduleFlush
     ]
   );
   const clearActions = useCallback13(() => {
@@ -4165,7 +4219,7 @@ function ActionProvider2({
       if (!isEditable) return;
       focusOutTimeout = setTimeout(() => {
         if (!isUserCurrentlyEditing() && pendingActionsRef.current.length > 0) {
-          scheduleFlush2(options.debounceMs ?? 2500);
+          scheduleFlush(options.debounceMs ?? 2500);
         }
       }, 100);
     };
@@ -4174,7 +4228,7 @@ function ActionProvider2({
       document.removeEventListener("focusout", handleFocusOut, true);
       if (focusOutTimeout) clearTimeout(focusOutTimeout);
     };
-  }, [options.debounceMs, scheduleFlush2]);
+  }, [options.debounceMs, scheduleFlush]);
   const value = {
     actions,
     trackAction,
@@ -4341,45 +4395,24 @@ function useDomainAutoSave(type, elementKey, data, options) {
   ]);
 }
 
-// src/contexts/tree-sync.tsx
-import {
-  createContext as createContext12,
-  useContext as useContext12,
-  useCallback as useCallback16,
-  useRef as useRef8,
-  useEffect as useEffect10
-} from "react";
-import { jsx as jsx14 } from "react/jsx-runtime";
-var TreeSyncContext = createContext12(null);
-function TreeSyncProvider({
-  updateElement,
-  children
-}) {
-  const value = {
-    updateElement,
-    isEnabled: true
-  };
-  return /* @__PURE__ */ jsx14(TreeSyncContext.Provider, { value, children });
-}
-function useTreeSyncContext() {
-  const ctx = useContext12(TreeSyncContext);
-  if (!ctx) {
-    return {
-      updateElement: () => {
-      },
-      isEnabled: false
-    };
-  }
-  return ctx;
-}
-var DEFAULT_DEBOUNCE_MS2 = 300;
-function useTreeSync(elementKey, updates, options) {
-  const { updateElement, isEnabled } = useTreeSyncContext();
-  const debounceMs = options?.debounceMs ?? DEFAULT_DEBOUNCE_MS2;
-  const skipMount = options?.skipMount ?? false;
+// src/hooks/useElementState.ts
+import { useCallback as useCallback16, useEffect as useEffect10, useRef as useRef8, useMemo as useMemo13 } from "react";
+import { loggers as loggers2 } from "@onegenui/utils";
+var log2 = loggers2.react;
+function useElementState(elementKey, initialProps, options = {}) {
+  const { syncToTree = true, debounceMs = 300 } = options;
+  const componentState = useStore((s) => s.componentState[elementKey]);
+  const updateComponentState = useStore((s) => s.updateComponentState);
+  const updateUITree = useStore((s) => s.updateUITree);
   const mountedRef = useRef8(false);
-  const lastUpdatesRef = useRef8(null);
   const timerRef = useRef8(null);
+  const mergedState = useMemo13(
+    () => ({
+      ...initialProps,
+      ...componentState ?? {}
+    }),
+    [initialProps, componentState]
+  );
   useEffect10(() => {
     return () => {
       if (timerRef.current) {
@@ -4387,47 +4420,62 @@ function useTreeSync(elementKey, updates, options) {
       }
     };
   }, []);
-  useEffect10(() => {
-    if (!isEnabled || !elementKey) return;
-    if (!mountedRef.current) {
-      mountedRef.current = true;
-      if (skipMount) return;
-    }
-    const serialized = JSON.stringify(updates);
-    if (serialized === lastUpdatesRef.current) return;
-    lastUpdatesRef.current = serialized;
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-    }
-    timerRef.current = setTimeout(() => {
-      updateElement(elementKey, updates);
-      timerRef.current = null;
-    }, debounceMs);
-  }, [elementKey, updates, isEnabled, updateElement, debounceMs, skipMount]);
-}
-function useTreeSyncCallback(elementKey) {
-  const { updateElement, isEnabled } = useTreeSyncContext();
-  return useCallback16(
+  const updateState = useCallback16(
     (updates) => {
-      if (isEnabled && elementKey) {
-        updateElement(elementKey, updates);
+      updateComponentState(elementKey, updates);
+      if (syncToTree) {
+        if (timerRef.current) {
+          clearTimeout(timerRef.current);
+        }
+        timerRef.current = setTimeout(() => {
+          log2.debug("[useElementState] Syncing to tree", { elementKey });
+          updateUITree((tree) => {
+            const element = tree.elements[elementKey];
+            if (element) {
+              return {
+                ...tree,
+                elements: {
+                  ...tree.elements,
+                  [elementKey]: {
+                    ...element,
+                    props: { ...element.props, ...updates }
+                  }
+                }
+              };
+            }
+            return tree;
+          });
+          timerRef.current = null;
+        }, debounceMs);
       }
     },
-    [elementKey, updateElement, isEnabled]
+    [elementKey, updateComponentState, updateUITree, syncToTree, debounceMs]
   );
+  useEffect10(() => {
+    if (!mountedRef.current) {
+      mountedRef.current = true;
+      if (Object.keys(initialProps).length > 0) {
+        updateComponentState(
+          elementKey,
+          initialProps
+        );
+      }
+    }
+  }, [elementKey, initialProps, updateComponentState]);
+  return [mergedState, updateState];
 }
 
 // src/contexts/tool-progress.tsx
 import {
-  createContext as createContext13,
-  useContext as useContext13,
+  createContext as createContext12,
+  useContext as useContext12,
   useCallback as useCallback17,
-  useMemo as useMemo13,
+  useMemo as useMemo14,
   useEffect as useEffect11
 } from "react";
 import { useShallow as useShallow2 } from "zustand/react/shallow";
-import { jsx as jsx15 } from "react/jsx-runtime";
-var ToolProgressContext = createContext13(
+import { jsx as jsx14 } from "react/jsx-runtime";
+var ToolProgressContext = createContext12(
   null
 );
 function ToolProgressProvider({
@@ -4481,7 +4529,7 @@ function ToolProgressProvider({
   }, [autoClearCompleteMs, clearCompletedOlderThan]);
   const activeProgress = getActiveProgress();
   const toolRunning = isToolRunning();
-  const value = useMemo13(
+  const value = useMemo14(
     () => ({
       activeProgress,
       allProgress: progressEvents,
@@ -4501,10 +4549,10 @@ function ToolProgressProvider({
       clearCompletedOlderThan
     ]
   );
-  return /* @__PURE__ */ jsx15(ToolProgressContext.Provider, { value, children });
+  return /* @__PURE__ */ jsx14(ToolProgressContext.Provider, { value, children });
 }
 function useToolProgress() {
-  const context = useContext13(ToolProgressContext);
+  const context = useContext12(ToolProgressContext);
   if (!context) {
     throw new Error(
       "useToolProgress must be used within a ToolProgressProvider"
@@ -4513,7 +4561,7 @@ function useToolProgress() {
   return context;
 }
 function useToolProgressOptional() {
-  return useContext13(ToolProgressContext);
+  return useContext12(ToolProgressContext);
 }
 function useIsToolRunning() {
   return useStore(
@@ -4534,14 +4582,14 @@ function useActiveToolProgress2() {
 
 // src/contexts/unified-progress.tsx
 import {
-  createContext as createContext14,
-  useContext as useContext14,
-  useMemo as useMemo14,
+  createContext as createContext13,
+  useContext as useContext13,
+  useMemo as useMemo15,
   useCallback as useCallback18
 } from "react";
 import { useShallow as useShallow3 } from "zustand/react/shallow";
-import { jsx as jsx16 } from "react/jsx-runtime";
-var UnifiedProgressContext = createContext14(null);
+import { jsx as jsx15 } from "react/jsx-runtime";
+var UnifiedProgressContext = createContext13(null);
 function mapPlanStepStatus(status) {
   switch (status) {
     case "running":
@@ -4606,7 +4654,7 @@ function UnifiedProgressProvider({
 }) {
   const planExecution = useStore((s) => s.planExecution);
   const progressEvents = useStore(useShallow3((s) => s.progressEvents));
-  const items = useMemo14(() => {
+  const items = useMemo15(() => {
     const result = [];
     if (planExecution.plan) {
       for (const step of planExecution.plan.steps) {
@@ -4620,18 +4668,18 @@ function UnifiedProgressProvider({
     }
     return result;
   }, [planExecution.plan, planExecution.isOrchestrating, progressEvents]);
-  const activeItems = useMemo14(
+  const activeItems = useMemo15(
     () => items.filter((item) => item.status === "running"),
     [items]
   );
-  const isGenerating = useMemo14(() => {
+  const isGenerating = useMemo15(() => {
     if (planExecution.isOrchestrating) return true;
     return progressEvents.some(
       (p) => p.status === "starting" || p.status === "progress"
     );
   }, [planExecution.isOrchestrating, progressEvents]);
   const goal = planExecution.plan?.goal ?? null;
-  const overallProgress = useMemo14(() => {
+  const overallProgress = useMemo15(() => {
     if (!planExecution.plan) {
       const activeTools = progressEvents.filter(
         (p) => p.status === "starting" || p.status === "progress"
@@ -4644,7 +4692,7 @@ function UnifiedProgressProvider({
     const completed = steps.filter((s) => s.status === "complete").length;
     return steps.length > 0 ? Math.round(completed / steps.length * 100) : 0;
   }, [planExecution.plan, progressEvents]);
-  const elapsedTime = useMemo14(() => {
+  const elapsedTime = useMemo15(() => {
     if (!planExecution.orchestrationStartTime) return null;
     if (!planExecution.isOrchestrating) return null;
     return Date.now() - planExecution.orchestrationStartTime;
@@ -4660,7 +4708,7 @@ function UnifiedProgressProvider({
     },
     [items]
   );
-  const value = useMemo14(
+  const value = useMemo15(
     () => ({
       isGenerating,
       goal,
@@ -4682,10 +4730,10 @@ function UnifiedProgressProvider({
       isItemRunning
     ]
   );
-  return /* @__PURE__ */ jsx16(UnifiedProgressContext.Provider, { value, children });
+  return /* @__PURE__ */ jsx15(UnifiedProgressContext.Provider, { value, children });
 }
 function useUnifiedProgress() {
-  const context = useContext14(UnifiedProgressContext);
+  const context = useContext13(UnifiedProgressContext);
   if (!context) {
     throw new Error(
       "useUnifiedProgress must be used within a UnifiedProgressProvider"
@@ -4694,7 +4742,7 @@ function useUnifiedProgress() {
   return context;
 }
 function useUnifiedProgressOptional() {
-  return useContext14(UnifiedProgressContext);
+  return useContext13(UnifiedProgressContext);
 }
 function useIsGenerating() {
   return useStore((s) => {
@@ -4712,8 +4760,8 @@ function useGeneratingGoal() {
 import {
   useEffect as useEffect12,
   useRef as useRef9,
-  createContext as createContext15,
-  useContext as useContext15
+  createContext as createContext14,
+  useContext as useContext14
 } from "react";
 
 // src/utils/selection.ts
@@ -4816,8 +4864,8 @@ function findClosestElementKey(target) {
 }
 
 // src/components/InteractionTrackingWrapper.tsx
-import { jsx as jsx17 } from "react/jsx-runtime";
-var InteractionTrackingContext = createContext15(null);
+import { jsx as jsx16 } from "react/jsx-runtime";
+var InteractionTrackingContext = createContext14(null);
 function isNonProactiveElement(target) {
   const tagName = target.tagName.toLowerCase();
   if (tagName === "a" || target.closest("a[href]")) return true;
@@ -4875,14 +4923,14 @@ function InteractionTrackingWrapper({
       container.removeEventListener("change", handleInteraction, true);
     };
   }, [tree, onInteraction]);
-  return /* @__PURE__ */ jsx17(InteractionTrackingContext.Provider, { value: onInteraction, children: /* @__PURE__ */ jsx17("div", { ref: containerRef, style: { display: "contents" }, children }) });
+  return /* @__PURE__ */ jsx16(InteractionTrackingContext.Provider, { value: onInteraction, children: /* @__PURE__ */ jsx16("div", { ref: containerRef, style: { display: "contents" }, children }) });
 }
 
 // src/components/ErrorBoundary.tsx
 import { Component } from "react";
-import { createLogger } from "@onegenui/utils";
-import { jsx as jsx18, jsxs as jsxs3 } from "react/jsx-runtime";
-var logger = createLogger({ prefix: "react:error-boundary" });
+import { createLogger as createLogger2 } from "@onegenui/utils";
+import { jsx as jsx17, jsxs as jsxs3 } from "react/jsx-runtime";
+var logger2 = createLogger2({ prefix: "react:error-boundary" });
 var ErrorBoundary = class extends Component {
   constructor(props) {
     super(props);
@@ -4893,7 +4941,7 @@ var ErrorBoundary = class extends Component {
   }
   componentDidCatch(error, errorInfo) {
     const { onError, name } = this.props;
-    logger.error(
+    logger2.error(
       `Error caught${name ? ` in ${name}` : ""}:`,
       error.message,
       errorInfo.componentStack
@@ -4919,9 +4967,9 @@ var ErrorBoundary = class extends Component {
           role: "alert",
           className: "p-4 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive",
           children: [
-            /* @__PURE__ */ jsx18("h3", { className: "font-semibold mb-2", children: "Something went wrong" }),
-            /* @__PURE__ */ jsx18("p", { className: "text-sm text-muted-foreground mb-3", children: error.message }),
-            /* @__PURE__ */ jsx18(
+            /* @__PURE__ */ jsx17("h3", { className: "font-semibold mb-2", children: "Something went wrong" }),
+            /* @__PURE__ */ jsx17("p", { className: "text-sm text-muted-foreground mb-3", children: error.message }),
+            /* @__PURE__ */ jsx17(
               "button",
               {
                 onClick: this.reset,
@@ -4938,10 +4986,10 @@ var ErrorBoundary = class extends Component {
 };
 
 // src/renderer/element-renderer.tsx
-import React17, { useMemo as useMemo18 } from "react";
+import React16, { useMemo as useMemo19 } from "react";
 
 // src/components/ResizableWrapper.tsx
-import React13, { useRef as useRef11, useCallback as useCallback20, useMemo as useMemo15 } from "react";
+import React12, { useRef as useRef11, useCallback as useCallback20, useMemo as useMemo16 } from "react";
 
 // src/hooks/resizable/types.ts
 var MOBILE_BREAKPOINT = 768;
@@ -5240,7 +5288,7 @@ function useResizable({
 }
 
 // src/components/ResizableWrapper.tsx
-import { Fragment, jsx as jsx19, jsxs as jsxs4 } from "react/jsx-runtime";
+import { Fragment, jsx as jsx18, jsxs as jsxs4 } from "react/jsx-runtime";
 function ResizeHandleComponent({
   position,
   onMouseDown,
@@ -5248,8 +5296,8 @@ function ResizeHandleComponent({
   isResizing,
   visible
 }) {
-  const [isHovered, setIsHovered] = React13.useState(false);
-  const [isTouching, setIsTouching] = React13.useState(false);
+  const [isHovered, setIsHovered] = React12.useState(false);
+  const [isTouching, setIsTouching] = React12.useState(false);
   const positionClasses = {
     e: "right-[-4px] top-0 bottom-0 w-2 cursor-ew-resize",
     w: "left-[-4px] top-0 bottom-0 w-2 cursor-ew-resize",
@@ -5260,7 +5308,7 @@ function ResizeHandleComponent({
     ne: "right-[-6px] top-[-6px] w-3 h-3 cursor-nesw-resize rounded-full",
     nw: "left-[-6px] top-[-6px] w-3 h-3 cursor-nwse-resize rounded-full"
   };
-  return /* @__PURE__ */ jsx19(
+  return /* @__PURE__ */ jsx18(
     "div",
     {
       className: cn(
@@ -5294,7 +5342,7 @@ function ResizableWrapper({
   showHandles = false
 }) {
   const wrapperRef = useRef11(null);
-  const [isHovered, setIsHovered] = React13.useState(false);
+  const [isHovered, setIsHovered] = React12.useState(false);
   const layout = overrideLayout ?? element.layout;
   const resizableConfig = layout?.resizable;
   const isEnabled = overrideEnabled !== void 0 ? overrideEnabled : resizableConfig !== false;
@@ -5318,9 +5366,9 @@ function ResizableWrapper({
     elementRef: wrapperRef
   });
   if (!isEnabled) {
-    return /* @__PURE__ */ jsx19(Fragment, { children });
+    return /* @__PURE__ */ jsx18(Fragment, { children });
   }
-  const handles = useMemo15(() => {
+  const handles = useMemo16(() => {
     const result = [];
     if (resizeConfig.horizontal) {
       result.push("e", "w");
@@ -5384,7 +5432,7 @@ function ResizableWrapper({
       "data-element-key": element.key,
       children: [
         children,
-        handles.map((handle) => /* @__PURE__ */ jsx19(
+        handles.map((handle) => /* @__PURE__ */ jsx18(
           ResizeHandleComponent,
           {
             position: handle,
@@ -5416,7 +5464,7 @@ import {
 // src/components/LongPressIndicator.tsx
 import { useState as useState7, useRef as useRef12, useEffect as useEffect14 } from "react";
 import { createPortal } from "react-dom";
-import { jsx as jsx20, jsxs as jsxs5 } from "react/jsx-runtime";
+import { jsx as jsx19, jsxs as jsxs5 } from "react/jsx-runtime";
 var RING_SIZE = 48;
 var STROKE_WIDTH = 3;
 var RADIUS = (RING_SIZE - STROKE_WIDTH) / 2;
@@ -5458,7 +5506,7 @@ function LongPressIndicator({
   }, [durationMs, onComplete]);
   if (!mounted || typeof document === "undefined") return null;
   return createPortal(
-    /* @__PURE__ */ jsx20(
+    /* @__PURE__ */ jsx19(
       "div",
       {
         style: {
@@ -5480,7 +5528,7 @@ function LongPressIndicator({
             height: RING_SIZE,
             style: { transform: "rotate(-90deg)" },
             children: [
-              /* @__PURE__ */ jsx20(
+              /* @__PURE__ */ jsx19(
                 "circle",
                 {
                   cx: RING_SIZE / 2,
@@ -5491,7 +5539,7 @@ function LongPressIndicator({
                   strokeWidth: STROKE_WIDTH
                 }
               ),
-              /* @__PURE__ */ jsx20(
+              /* @__PURE__ */ jsx19(
                 "circle",
                 {
                   ref: circleRef,
@@ -5519,7 +5567,7 @@ function LongPressIndicator({
 }
 
 // src/components/SelectionWrapper.tsx
-import { jsx as jsx21, jsxs as jsxs6 } from "react/jsx-runtime";
+import { jsx as jsx20, jsxs as jsxs6 } from "react/jsx-runtime";
 function SelectionWrapper({
   element,
   enabled,
@@ -5650,7 +5698,7 @@ function SelectionWrapper({
       "data-jsonui-element-key": element.key,
       children: [
         children,
-        pressing && pressPosition && /* @__PURE__ */ jsx21(
+        pressing && pressPosition && /* @__PURE__ */ jsx20(
           LongPressIndicator,
           {
             x: pressPosition.x,
@@ -5665,7 +5713,7 @@ function SelectionWrapper({
 }
 
 // src/components/EditableWrapper.tsx
-import React16, {
+import React15, {
   memo as memo3,
   useCallback as useCallback31,
   useRef as useRef20,
@@ -5674,8 +5722,9 @@ import React16, {
 } from "react";
 
 // src/hooks/useUIStream.ts
-import { useState as useState10, useCallback as useCallback23, useRef as useRef16, useEffect as useEffect17, useMemo as useMemo16 } from "react";
+import { useState as useState10, useCallback as useCallback23, useRef as useRef16, useEffect as useEffect17, useMemo as useMemo17 } from "react";
 import { useShallow as useShallow4 } from "zustand/shallow";
+import { loggers as loggers3 } from "@onegenui/utils";
 
 // src/hooks/patches/structural-sharing.ts
 function setByPathWithStructuralSharing(obj, path, value) {
@@ -6184,55 +6233,28 @@ function useHistory(tree, conversation, setTree, setConversation, treeRef) {
 
 // src/hooks/ui-stream/logger.ts
 var DEBUG = typeof window !== "undefined" && process.env.NODE_ENV === "development" && process.env.NEXT_PUBLIC_DEBUG === "true";
-var LOG_ENDPOINT = "/api/debug-log";
-var LOG_BUFFER = [];
-var flushTimer = null;
 function formatLog(level, message, data) {
   const timestamp = (/* @__PURE__ */ new Date()).toISOString();
   const dataStr = data ? `
   DATA: ${JSON.stringify(data, null, 2).replace(/\n/g, "\n  ")}` : "";
   return `[${timestamp}] [${level}] [useUIStream] ${message}${dataStr}`;
 }
-function flushLogs() {
-  if (!DEBUG || LOG_BUFFER.length === 0) return;
-  const logs = LOG_BUFFER.splice(0, LOG_BUFFER.length);
-  if (typeof window !== "undefined") {
-    fetch(LOG_ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ logs })
-    }).catch(() => {
-    });
-  }
-}
-function scheduleFlush() {
-  if (flushTimer) return;
-  flushTimer = setTimeout(() => {
-    flushTimer = null;
-    flushLogs();
-  }, 500);
-}
 var streamLog = {
   debug: (msg, data) => {
     if (!DEBUG) return;
-    LOG_BUFFER.push(formatLog("DEBUG", msg, data));
-    scheduleFlush();
+    console.debug(formatLog("DEBUG", msg, data));
   },
   info: (msg, data) => {
     if (!DEBUG) return;
-    LOG_BUFFER.push(formatLog("INFO", msg, data));
-    scheduleFlush();
+    console.info(formatLog("INFO", msg, data));
   },
   warn: (msg, data) => {
     if (!DEBUG) return;
-    LOG_BUFFER.push(formatLog("WARN", msg, data));
-    scheduleFlush();
+    console.warn(formatLog("WARN", msg, data));
   },
   error: (msg, data) => {
     if (!DEBUG) return;
-    console.error(`[useUIStream] ${msg}`, data ?? "");
-    LOG_BUFFER.push(formatLog("ERROR", msg, data));
-    scheduleFlush();
+    console.error(formatLog("ERROR", msg, data));
   }
 };
 
@@ -6337,7 +6359,7 @@ function buildConversationMessages2(conversation) {
   return messages;
 }
 function buildRequest(input) {
-  const { prompt, context, currentTree, conversation, attachments } = input;
+  const { prompt, context, currentTree, conversation, attachments, componentState } = input;
   const headers = {};
   const idempotencyKey = generateIdempotencyKey();
   headers["X-Idempotency-Key"] = idempotencyKey;
@@ -6357,6 +6379,9 @@ function buildRequest(input) {
     }
     if (conversationMessages.length > 0) {
       formData.append("messages", JSON.stringify(conversationMessages));
+    }
+    if (componentState && Object.keys(componentState).length > 0) {
+      formData.append("componentState", JSON.stringify(componentState));
     }
     fileAttachments.forEach((att) => {
       formData.append("files", att.file);
@@ -6382,6 +6407,9 @@ function buildRequest(input) {
     if (conversationMessages.length > 0) {
       bodyPayload2.messages = conversationMessages;
     }
+    if (componentState && Object.keys(componentState).length > 0) {
+      bodyPayload2.componentState = componentState;
+    }
     headers["Content-Type"] = "application/json";
     return { body: JSON.stringify(bodyPayload2), headers };
   }
@@ -6391,6 +6419,9 @@ function buildRequest(input) {
   }
   if (conversationMessages.length > 0) {
     bodyPayload.messages = conversationMessages;
+  }
+  if (componentState && Object.keys(componentState).length > 0) {
+    bodyPayload.componentState = componentState;
   }
   headers["Content-Type"] = "application/json";
   return { body: JSON.stringify(bodyPayload), headers };
@@ -6832,6 +6863,7 @@ function restoreSelection(saved) {
 }
 
 // src/hooks/useUIStream.ts
+var log3 = loggers3.react;
 function useUIStream({
   api,
   onComplete,
@@ -6847,7 +6879,7 @@ function useUIStream({
     }))
   );
   const { storeRef, planStoreRef, addProgressRef, storeSetUITreeRef, resetPlanExecution } = useStoreRefs();
-  const tree = useMemo16(() => {
+  const tree = useMemo17(() => {
     if (!storeTree) return null;
     return { ...storeTree, elements: { ...storeTree.elements } };
   }, [storeTree, treeVersion]);
@@ -6857,11 +6889,20 @@ function useUIStream({
     treeRef.current = tree;
   }, [tree, treeVersion]);
   const setTree = useCallback23((newTree) => {
+    log3.debug("[useUIStream] setTree called", { isFunction: typeof newTree === "function" });
     if (typeof newTree === "function") {
       const updatedTree = newTree(treeRef.current);
+      log3.debug("[useUIStream] setTree functional update", {
+        hasResult: !!updatedTree,
+        elementsCount: updatedTree?.elements ? Object.keys(updatedTree.elements).length : 0
+      });
       treeRef.current = updatedTree;
       storeSetUITreeRef.current(updatedTree);
     } else {
+      log3.debug("[useUIStream] setTree direct value", {
+        hasTree: !!newTree,
+        elementsCount: newTree?.elements ? Object.keys(newTree.elements).length : 0
+      });
       treeRef.current = newTree;
       storeSetUITreeRef.current(newTree);
     }
@@ -6893,11 +6934,20 @@ function useUIStream({
   }, [resetPlanExecution, setTree, storeRef]);
   const loadSession = useCallback23(
     (session) => {
+      const rootElement = session.tree?.elements?.[session.tree?.root];
+      log3.debug("[useUIStream] loadSession called", {
+        hasTree: !!session.tree,
+        rootKey: session.tree?.root,
+        rootChildrenCount: rootElement?.children?.length,
+        elementsCount: session.tree?.elements ? Object.keys(session.tree.elements).length : 0,
+        conversationLength: session.conversation?.length
+      });
       setTree(session.tree);
       treeRef.current = session.tree;
       setConversation(session.conversation);
       setHistory([]);
       setHistoryIndex(-1);
+      log3.debug("[useUIStream] loadSession complete, tree set");
     },
     [setTree, setHistory, setHistoryIndex]
   );
@@ -7003,7 +7053,8 @@ function useUIStream({
           context,
           currentTree,
           conversation,
-          attachments
+          attachments,
+          componentState: useStore.getState().componentState
         });
         if (getHeaders) {
           const dynamicHeaders = await getHeaders();
@@ -7451,7 +7502,7 @@ function usePreservedSelection() {
 }
 
 // src/hooks/useLayoutManager.ts
-import { useCallback as useCallback26, useMemo as useMemo17 } from "react";
+import { useCallback as useCallback26, useMemo as useMemo18 } from "react";
 function useLayoutManager({
   tree,
   onTreeUpdate,
@@ -7516,7 +7567,7 @@ function useLayoutManager({
     },
     [tree]
   );
-  const getLayoutElements = useMemo17(() => {
+  const getLayoutElements = useMemo18(() => {
     return () => {
       if (!tree) return [];
       return Object.entries(tree.elements).filter(([, element]) => element.layout !== void 0).map(([key, element]) => ({
@@ -7542,7 +7593,7 @@ import { useState as useState13, useCallback as useCallback27 } from "react";
 import { useCallback as useCallback28, useRef as useRef18 } from "react";
 
 // src/hooks/useRenderEditableText.tsx
-import React15, { useCallback as useCallback30 } from "react";
+import React14, { useCallback as useCallback30 } from "react";
 
 // src/components/EditableText.tsx
 import {
@@ -7552,7 +7603,7 @@ import {
   useState as useState14,
   memo as memo2
 } from "react";
-import { jsx as jsx22 } from "react/jsx-runtime";
+import { jsx as jsx21 } from "react/jsx-runtime";
 var EditableText = memo2(function EditableText2({
   elementKey,
   propName,
@@ -7623,7 +7674,7 @@ var EditableText = memo2(function EditableText2({
   const canEdit = isEditing && !disabled;
   const isEmpty = !localValue || localValue.trim() === "";
   const ActualTag = multiline ? "div" : Tag;
-  return /* @__PURE__ */ jsx22(
+  return /* @__PURE__ */ jsx21(
     ActualTag,
     {
       ref,
@@ -7649,13 +7700,13 @@ var EditableText = memo2(function EditableText2({
 });
 
 // src/hooks/useRenderEditableText.tsx
-import { jsx as jsx23 } from "react/jsx-runtime";
+import { jsx as jsx22 } from "react/jsx-runtime";
 function createRenderEditableText(element, isEditing) {
   const canEdit = isEditing && element.editable !== false && !element.locked;
   return (propName, value, options) => {
     if (value === null || value === void 0 || value === "") {
       if (canEdit && options?.placeholder) {
-        return React15.createElement(EditableText, {
+        return React14.createElement(EditableText, {
           elementKey: element.key,
           propName,
           value: "",
@@ -7669,9 +7720,9 @@ function createRenderEditableText(element, isEditing) {
     }
     if (!canEdit) {
       const Tag = options?.as || "span";
-      return React15.createElement(Tag, { className: options?.className }, value);
+      return React14.createElement(Tag, { className: options?.className }, value);
     }
-    return React15.createElement(EditableText, {
+    return React14.createElement(EditableText, {
       elementKey: element.key,
       propName,
       value,
@@ -7714,7 +7765,7 @@ function flatToTree(elements) {
 }
 
 // src/components/EditableWrapper.tsx
-import { Fragment as Fragment2, jsx as jsx24, jsxs as jsxs7 } from "react/jsx-runtime";
+import { Fragment as Fragment2, jsx as jsx23, jsxs as jsxs7 } from "react/jsx-runtime";
 var EditableTextNode = memo3(function EditableTextNode2({
   elementKey,
   propName,
@@ -7797,7 +7848,7 @@ var EditableTextNode = memo3(function EditableTextNode2({
     [value]
   );
   const isFocused = focusedKey === elementKey;
-  return /* @__PURE__ */ jsx24(
+  return /* @__PURE__ */ jsx23(
     "span",
     {
       ref,
@@ -7843,7 +7894,7 @@ var EditableWrapper = memo3(function EditableWrapper2({
   const [isActiveEditing, setIsActiveEditing] = useState15(false);
   const isElementEditable = forceEditable !== void 0 ? forceEditable : element.editable !== false;
   if (!isEditing || !isElementEditable || element.locked) {
-    return /* @__PURE__ */ jsx24(Fragment2, { children });
+    return /* @__PURE__ */ jsx23(Fragment2, { children });
   }
   const isFocused = focusedKey === element.key;
   const handleContainerClick = useCallback31(
@@ -7903,7 +7954,7 @@ var EditableWrapper = memo3(function EditableWrapper2({
         cursor: isEditing ? "text" : void 0
       },
       children: [
-        isMobile && isFocused && !isActiveEditing && /* @__PURE__ */ jsx24(
+        isMobile && isFocused && !isActiveEditing && /* @__PURE__ */ jsx23(
           "div",
           {
             className: "editable-indicator",
@@ -7921,7 +7972,7 @@ var EditableWrapper = memo3(function EditableWrapper2({
               zIndex: 10,
               boxShadow: "0 2px 8px rgba(14, 165, 233, 0.3)"
             },
-            children: /* @__PURE__ */ jsx24(
+            children: /* @__PURE__ */ jsx23(
               "svg",
               {
                 width: "12",
@@ -7930,7 +7981,7 @@ var EditableWrapper = memo3(function EditableWrapper2({
                 fill: "none",
                 stroke: "white",
                 strokeWidth: "2",
-                children: /* @__PURE__ */ jsx24("path", { d: "M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" })
+                children: /* @__PURE__ */ jsx23("path", { d: "M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" })
               }
             )
           }
@@ -7942,7 +7993,7 @@ var EditableWrapper = memo3(function EditableWrapper2({
 });
 
 // src/renderer/element-renderer.tsx
-import { jsx as jsx25 } from "react/jsx-runtime";
+import { jsx as jsx24 } from "react/jsx-runtime";
 function hasDescendantChanged(elementKey, prevTree, nextTree, visited = /* @__PURE__ */ new Set()) {
   if (visited.has(elementKey)) return false;
   visited.add(elementKey);
@@ -7984,7 +8035,7 @@ function elementRendererPropsAreEqual(prevProps, nextProps) {
   }
   return true;
 }
-var ElementRenderer = React17.memo(function ElementRenderer2({
+var ElementRenderer = React16.memo(function ElementRenderer2({
   element,
   tree,
   registry,
@@ -8000,7 +8051,7 @@ var ElementRenderer = React17.memo(function ElementRenderer2({
   const { execute } = useActions();
   const { renderText } = useMarkdown();
   const { isEditing } = useEditMode();
-  const renderEditableText = useMemo18(
+  const renderEditableText = useMemo19(
     () => createRenderEditableText(element, isEditing),
     [element, isEditing]
   );
@@ -8008,7 +8059,7 @@ var ElementRenderer = React17.memo(function ElementRenderer2({
     return null;
   }
   if (element.type === "__placeholder__" || element._meta?.isPlaceholder) {
-    return /* @__PURE__ */ jsx25(
+    return /* @__PURE__ */ jsx24(
       "div",
       {
         className: "w-full h-16 bg-muted/10 animate-pulse rounded-lg my-2 border border-border/20",
@@ -8026,7 +8077,7 @@ var ElementRenderer = React17.memo(function ElementRenderer2({
     const childElement = tree.elements[childKey];
     if (!childElement) {
       if (loading) {
-        return /* @__PURE__ */ jsx25(
+        return /* @__PURE__ */ jsx24(
           "div",
           {
             className: "w-full h-12 bg-muted/10 animate-pulse rounded-md my-1"
@@ -8036,7 +8087,7 @@ var ElementRenderer = React17.memo(function ElementRenderer2({
       }
       return null;
     }
-    return /* @__PURE__ */ jsx25(
+    return /* @__PURE__ */ jsx24(
       ElementRenderer2,
       {
         element: childElement,
@@ -8055,7 +8106,7 @@ var ElementRenderer = React17.memo(function ElementRenderer2({
   });
   const isResizable = element.layout?.resizable !== false;
   const isEditable = isEditing && element.editable !== false && !element.locked;
-  const content = /* @__PURE__ */ jsx25(
+  const content = /* @__PURE__ */ jsx24(
     Component2,
     {
       element,
@@ -8066,9 +8117,9 @@ var ElementRenderer = React17.memo(function ElementRenderer2({
       children
     }
   );
-  const editableContent = isEditable ? /* @__PURE__ */ jsx25(EditableWrapper, { element, children: content }) : content;
+  const editableContent = isEditable ? /* @__PURE__ */ jsx24(EditableWrapper, { element, children: content }) : content;
   if (selectable && onElementSelect) {
-    const selectionContent = /* @__PURE__ */ jsx25(
+    const selectionContent = /* @__PURE__ */ jsx24(
       SelectionWrapper,
       {
         element,
@@ -8080,7 +8131,7 @@ var ElementRenderer = React17.memo(function ElementRenderer2({
       }
     );
     if (isResizable) {
-      return /* @__PURE__ */ jsx25(
+      return /* @__PURE__ */ jsx24(
         ResizableWrapper,
         {
           element,
@@ -8093,19 +8144,19 @@ var ElementRenderer = React17.memo(function ElementRenderer2({
     return selectionContent;
   }
   if (isResizable) {
-    return /* @__PURE__ */ jsx25(ResizableWrapper, { element, onResize, children: editableContent });
+    return /* @__PURE__ */ jsx24(ResizableWrapper, { element, onResize, children: editableContent });
   }
   return editableContent;
 }, elementRendererPropsAreEqual);
 
 // src/renderer/provider.tsx
-import { jsx as jsx26, jsxs as jsxs8 } from "react/jsx-runtime";
+import { jsx as jsx25, jsxs as jsxs8 } from "react/jsx-runtime";
 function ConfirmationDialogManager() {
   const { pendingConfirmation, confirm, cancel } = useActions();
   if (!pendingConfirmation?.action.confirm) {
     return null;
   }
-  return /* @__PURE__ */ jsx26(
+  return /* @__PURE__ */ jsx25(
     ConfirmDialog,
     {
       confirm: pendingConfirmation.action.confirm,
@@ -8124,22 +8175,22 @@ function JSONUIProvider({
   onDataChange,
   children
 }) {
-  return /* @__PURE__ */ jsx26(MarkdownProvider, { children: /* @__PURE__ */ jsx26(
+  return /* @__PURE__ */ jsx25(MarkdownProvider, { children: /* @__PURE__ */ jsx25(
     DataProvider,
     {
       initialData,
       authState,
       onDataChange,
-      children: /* @__PURE__ */ jsx26(VisibilityProvider, { children: /* @__PURE__ */ jsx26(ActionProvider, { handlers: actionHandlers, navigate, children: /* @__PURE__ */ jsxs8(ValidationProvider, { customFunctions: validationFunctions, children: [
+      children: /* @__PURE__ */ jsx25(VisibilityProvider, { children: /* @__PURE__ */ jsx25(ActionProvider, { handlers: actionHandlers, navigate, children: /* @__PURE__ */ jsxs8(ValidationProvider, { customFunctions: validationFunctions, children: [
         children,
-        /* @__PURE__ */ jsx26(ConfirmationDialogManager, {})
+        /* @__PURE__ */ jsx25(ConfirmationDialogManager, {})
       ] }) }) })
     }
   ) });
 }
 
 // src/renderer.tsx
-import { jsx as jsx27, jsxs as jsxs9 } from "react/jsx-runtime";
+import { jsx as jsx26, jsxs as jsxs9 } from "react/jsx-runtime";
 function RendererErrorFallback(error, reset) {
   return /* @__PURE__ */ jsxs9(
     "div",
@@ -8147,9 +8198,9 @@ function RendererErrorFallback(error, reset) {
       role: "alert",
       className: "p-4 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive",
       children: [
-        /* @__PURE__ */ jsx27("h3", { className: "font-semibold mb-2", children: "Render Error" }),
-        /* @__PURE__ */ jsx27("p", { className: "text-sm text-muted-foreground mb-3", children: error.message }),
-        /* @__PURE__ */ jsx27(
+        /* @__PURE__ */ jsx26("h3", { className: "font-semibold mb-2", children: "Render Error" }),
+        /* @__PURE__ */ jsx26("p", { className: "text-sm text-muted-foreground mb-3", children: error.message }),
+        /* @__PURE__ */ jsx26(
           "button",
           {
             onClick: reset,
@@ -8179,13 +8230,13 @@ function Renderer({
   if (!tree || !tree.root) return null;
   const rootElement = tree.elements[tree.root];
   if (!rootElement) return null;
-  const content = /* @__PURE__ */ jsx27(
+  const content = /* @__PURE__ */ jsx26(
     ErrorBoundary,
     {
       name: "ElementRenderer",
       fallback: RendererErrorFallback,
       onError: (error) => onError?.(error),
-      children: /* @__PURE__ */ jsx27(
+      children: /* @__PURE__ */ jsx26(
         ElementRenderer,
         {
           element: rootElement,
@@ -8202,7 +8253,7 @@ function Renderer({
       )
     }
   );
-  const gridContent = autoGrid ? /* @__PURE__ */ jsx27(
+  const gridContent = autoGrid ? /* @__PURE__ */ jsx26(
     "div",
     {
       style: {
@@ -8217,13 +8268,13 @@ function Renderer({
     }
   ) : content;
   if (trackInteractions && onInteraction) {
-    return /* @__PURE__ */ jsx27(InteractionTrackingWrapper, { tree, onInteraction, children: gridContent });
+    return /* @__PURE__ */ jsx26(InteractionTrackingWrapper, { tree, onInteraction, children: gridContent });
   }
   return gridContent;
 }
 function createRendererFromCatalog(_catalog, registry) {
   return function CatalogRenderer(props) {
-    return /* @__PURE__ */ jsx27(Renderer, { ...props, registry });
+    return /* @__PURE__ */ jsx26(Renderer, { ...props, registry });
   };
 }
 
@@ -8254,9 +8305,9 @@ function elementRendererPropsAreEqual2(prevProps, nextProps) {
 }
 
 // src/renderer/skeleton-loader.tsx
-import { jsx as jsx28 } from "react/jsx-runtime";
+import { jsx as jsx27 } from "react/jsx-runtime";
 function PlaceholderSkeleton({ elementKey }) {
-  return /* @__PURE__ */ jsx28(
+  return /* @__PURE__ */ jsx27(
     "div",
     {
       className: "w-full h-16 bg-muted/10 animate-pulse rounded-lg my-2 border border-border/20",
@@ -8266,7 +8317,7 @@ function PlaceholderSkeleton({ elementKey }) {
   );
 }
 function ChildSkeleton({ elementKey }) {
-  return /* @__PURE__ */ jsx28(
+  return /* @__PURE__ */ jsx27(
     "div",
     {
       className: "w-full h-12 bg-muted/10 animate-pulse rounded-md my-1"
@@ -8279,14 +8330,14 @@ function isPlaceholderElement(element) {
 }
 
 // src/editable.tsx
-import React18, {
-  createContext as createContext16,
-  useContext as useContext16,
+import React17, {
+  createContext as createContext15,
+  useContext as useContext15,
   useState as useState16,
   useCallback as useCallback32
 } from "react";
-import { jsx as jsx29 } from "react/jsx-runtime";
-var EditableContext = createContext16(null);
+import { jsx as jsx28 } from "react/jsx-runtime";
+var EditableContext = createContext15(null);
 function EditableProvider({
   children,
   onValueChange
@@ -8309,7 +8360,7 @@ function EditableProvider({
     setEditingPath(null);
     setEditingValue(null);
   }, []);
-  return /* @__PURE__ */ jsx29(
+  return /* @__PURE__ */ jsx28(
     EditableContext.Provider,
     {
       value: {
@@ -8325,7 +8376,7 @@ function EditableProvider({
   );
 }
 function useEditableContext() {
-  return useContext16(EditableContext);
+  return useContext15(EditableContext);
 }
 function useEditable(path, currentValue, locked = false) {
   const ctx = useEditableContext();
@@ -8364,13 +8415,13 @@ function EditableText3({
 }) {
   const { isEditing, onStartEdit, onCommit, onCancel, editableClassName } = useEditable(path, value, locked);
   const [localValue, setLocalValue] = useState16(value);
-  React18.useEffect(() => {
+  React17.useEffect(() => {
     if (!isEditing) {
       setLocalValue(value);
     }
   }, [value, isEditing]);
   if (isEditing) {
-    return /* @__PURE__ */ jsx29(
+    return /* @__PURE__ */ jsx28(
       "input",
       {
         type: "text",
@@ -8395,7 +8446,7 @@ function EditableText3({
       }
     );
   }
-  return /* @__PURE__ */ jsx29(
+  return /* @__PURE__ */ jsx28(
     Component2,
     {
       className: cn(editableClassName, className),
@@ -8413,13 +8464,13 @@ function EditableNumber({
 }) {
   const { isEditing, onStartEdit, onCommit, onCancel, editableClassName } = useEditable(path, value, locked);
   const [localValue, setLocalValue] = useState16(String(value));
-  React18.useEffect(() => {
+  React17.useEffect(() => {
     if (!isEditing) {
       setLocalValue(String(value));
     }
   }, [value, isEditing]);
   if (isEditing) {
-    return /* @__PURE__ */ jsx29(
+    return /* @__PURE__ */ jsx28(
       "input",
       {
         type: "number",
@@ -8444,7 +8495,7 @@ function EditableNumber({
       }
     );
   }
-  return /* @__PURE__ */ jsx29(
+  return /* @__PURE__ */ jsx28(
     "span",
     {
       className: cn(editableClassName, className),
@@ -8460,7 +8511,7 @@ import { memo as memo4 } from "react";
 import ReactMarkdown2 from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
-import { jsx as jsx30 } from "react/jsx-runtime";
+import { jsx as jsx29 } from "react/jsx-runtime";
 var defaultTheme2 = {
   codeBlockBg: "rgba(0, 0, 0, 0.3)",
   codeBlockBorder: "rgba(255, 255, 255, 0.08)",
@@ -8488,18 +8539,18 @@ var MarkdownText = memo4(function MarkdownText2({
     ...style
   };
   const components = {
-    pre: ({ children }) => /* @__PURE__ */ jsx30("pre", { className: "bg-[var(--markdown-code-bg)] rounded-lg p-3 overflow-x-auto text-[13px] font-mono border border-[var(--markdown-code-border)] my-2", children }),
+    pre: ({ children }) => /* @__PURE__ */ jsx29("pre", { className: "bg-[var(--markdown-code-bg)] rounded-lg p-3 overflow-x-auto text-[13px] font-mono border border-[var(--markdown-code-border)] my-2", children }),
     code: ({
       children,
       className: codeClassName
     }) => {
       const isInline = !codeClassName;
       if (isInline) {
-        return /* @__PURE__ */ jsx30("code", { className: "bg-[var(--markdown-inline-code-bg)] rounded px-1.5 py-0.5 text-[0.9em] font-mono", children });
+        return /* @__PURE__ */ jsx29("code", { className: "bg-[var(--markdown-inline-code-bg)] rounded px-1.5 py-0.5 text-[0.9em] font-mono", children });
       }
-      return /* @__PURE__ */ jsx30("code", { children });
+      return /* @__PURE__ */ jsx29("code", { children });
     },
-    a: ({ href, children }) => /* @__PURE__ */ jsx30(
+    a: ({ href, children }) => /* @__PURE__ */ jsx29(
       "a",
       {
         href,
@@ -8509,25 +8560,25 @@ var MarkdownText = memo4(function MarkdownText2({
         children
       }
     ),
-    ul: ({ children }) => /* @__PURE__ */ jsx30("ul", { className: "my-2 pl-5 list-disc", children }),
-    ol: ({ children }) => /* @__PURE__ */ jsx30("ol", { className: "my-2 pl-5 list-decimal", children }),
-    li: ({ children }) => /* @__PURE__ */ jsx30("li", { className: "mb-1", children }),
-    h1: ({ children }) => /* @__PURE__ */ jsx30("h1", { className: "font-semibold mt-3 mb-2 text-lg", children }),
-    h2: ({ children }) => /* @__PURE__ */ jsx30("h2", { className: "font-semibold mt-3 mb-2 text-base", children }),
-    h3: ({ children }) => /* @__PURE__ */ jsx30("h3", { className: "font-semibold mt-3 mb-2 text-[15px]", children }),
-    h4: ({ children }) => /* @__PURE__ */ jsx30("h4", { className: "font-semibold mt-3 mb-2 text-sm", children }),
-    h5: ({ children }) => /* @__PURE__ */ jsx30("h5", { className: "font-semibold mt-3 mb-2 text-[13px]", children }),
-    h6: ({ children }) => /* @__PURE__ */ jsx30("h6", { className: "font-semibold mt-3 mb-2 text-xs", children }),
-    p: ({ children }) => inline ? /* @__PURE__ */ jsx30("span", { children }) : /* @__PURE__ */ jsx30("p", { className: "my-1.5 leading-relaxed", children }),
-    blockquote: ({ children }) => /* @__PURE__ */ jsx30("blockquote", { className: "border-l-[3px] border-[var(--markdown-quote-border)] pl-3 my-2 opacity-90 italic", children }),
-    hr: () => /* @__PURE__ */ jsx30("hr", { className: "border-none border-t border-[var(--markdown-hr-color)] my-3" }),
-    strong: ({ children }) => /* @__PURE__ */ jsx30("strong", { className: "font-semibold", children }),
-    em: ({ children }) => /* @__PURE__ */ jsx30("em", { className: "italic", children })
+    ul: ({ children }) => /* @__PURE__ */ jsx29("ul", { className: "my-2 pl-5 list-disc", children }),
+    ol: ({ children }) => /* @__PURE__ */ jsx29("ol", { className: "my-2 pl-5 list-decimal", children }),
+    li: ({ children }) => /* @__PURE__ */ jsx29("li", { className: "mb-1", children }),
+    h1: ({ children }) => /* @__PURE__ */ jsx29("h1", { className: "font-semibold mt-3 mb-2 text-lg", children }),
+    h2: ({ children }) => /* @__PURE__ */ jsx29("h2", { className: "font-semibold mt-3 mb-2 text-base", children }),
+    h3: ({ children }) => /* @__PURE__ */ jsx29("h3", { className: "font-semibold mt-3 mb-2 text-[15px]", children }),
+    h4: ({ children }) => /* @__PURE__ */ jsx29("h4", { className: "font-semibold mt-3 mb-2 text-sm", children }),
+    h5: ({ children }) => /* @__PURE__ */ jsx29("h5", { className: "font-semibold mt-3 mb-2 text-[13px]", children }),
+    h6: ({ children }) => /* @__PURE__ */ jsx29("h6", { className: "font-semibold mt-3 mb-2 text-xs", children }),
+    p: ({ children }) => inline ? /* @__PURE__ */ jsx29("span", { children }) : /* @__PURE__ */ jsx29("p", { className: "my-1.5 leading-relaxed", children }),
+    blockquote: ({ children }) => /* @__PURE__ */ jsx29("blockquote", { className: "border-l-[3px] border-[var(--markdown-quote-border)] pl-3 my-2 opacity-90 italic", children }),
+    hr: () => /* @__PURE__ */ jsx29("hr", { className: "border-none border-t border-[var(--markdown-hr-color)] my-3" }),
+    strong: ({ children }) => /* @__PURE__ */ jsx29("strong", { className: "font-semibold", children }),
+    em: ({ children }) => /* @__PURE__ */ jsx29("em", { className: "italic", children })
   };
   const Wrapper = inline ? "span" : "div";
   const remarkPlugins = enableMath ? [remarkMath] : [];
   const rehypePlugins = enableMath ? [rehypeKatex] : [];
-  return /* @__PURE__ */ jsx30(Wrapper, { className: cn("markdown-content", className), style: wrapperStyle, children: /* @__PURE__ */ jsx30(
+  return /* @__PURE__ */ jsx29(Wrapper, { className: cn("markdown-content", className), style: wrapperStyle, children: /* @__PURE__ */ jsx29(
     ReactMarkdown2,
     {
       components,
@@ -8539,7 +8590,7 @@ var MarkdownText = memo4(function MarkdownText2({
 });
 
 // src/components/TextSelectionBadge.tsx
-import { jsx as jsx31, jsxs as jsxs10 } from "react/jsx-runtime";
+import { jsx as jsx30, jsxs as jsxs10 } from "react/jsx-runtime";
 function TextSelectionBadge({
   selection,
   onClear,
@@ -8570,9 +8621,9 @@ function TextSelectionBadge({
             strokeLinejoin: "round",
             className: "shrink-0 text-primary",
             children: [
-              /* @__PURE__ */ jsx31("path", { d: "M17 6.1H3" }),
-              /* @__PURE__ */ jsx31("path", { d: "M21 12.1H3" }),
-              /* @__PURE__ */ jsx31("path", { d: "M15.1 18H3" })
+              /* @__PURE__ */ jsx30("path", { d: "M17 6.1H3" }),
+              /* @__PURE__ */ jsx30("path", { d: "M21 12.1H3" }),
+              /* @__PURE__ */ jsx30("path", { d: "M15.1 18H3" })
             ]
           }
         ),
@@ -8588,9 +8639,9 @@ function TextSelectionBadge({
             ]
           }
         ),
-        selection.copiedToClipboard && /* @__PURE__ */ jsx31("span", { className: "text-[10px] px-1.5 py-0.5 bg-green-500/20 text-green-500 rounded font-medium", children: "Copied" }),
-        selection.elementType && /* @__PURE__ */ jsx31("span", { className: "text-[10px] px-1.5 py-0.5 bg-violet-500/20 text-violet-500 rounded", children: selection.elementType }),
-        onRestore && /* @__PURE__ */ jsx31(
+        selection.copiedToClipboard && /* @__PURE__ */ jsx30("span", { className: "text-[10px] px-1.5 py-0.5 bg-green-500/20 text-green-500 rounded font-medium", children: "Copied" }),
+        selection.elementType && /* @__PURE__ */ jsx30("span", { className: "text-[10px] px-1.5 py-0.5 bg-violet-500/20 text-violet-500 rounded", children: selection.elementType }),
+        onRestore && /* @__PURE__ */ jsx30(
           "button",
           {
             type: "button",
@@ -8613,14 +8664,14 @@ function TextSelectionBadge({
                 strokeLinecap: "round",
                 strokeLinejoin: "round",
                 children: [
-                  /* @__PURE__ */ jsx31("path", { d: "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" }),
-                  /* @__PURE__ */ jsx31("path", { d: "M3 3v5h5" })
+                  /* @__PURE__ */ jsx30("path", { d: "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" }),
+                  /* @__PURE__ */ jsx30("path", { d: "M3 3v5h5" })
                 ]
               }
             )
           }
         ),
-        /* @__PURE__ */ jsx31(
+        /* @__PURE__ */ jsx30(
           "button",
           {
             type: "button",
@@ -8643,8 +8694,8 @@ function TextSelectionBadge({
                 strokeLinecap: "round",
                 strokeLinejoin: "round",
                 children: [
-                  /* @__PURE__ */ jsx31("path", { d: "M18 6 6 18" }),
-                  /* @__PURE__ */ jsx31("path", { d: "m6 6 12 12" })
+                  /* @__PURE__ */ jsx30("path", { d: "M18 6 6 18" }),
+                  /* @__PURE__ */ jsx30("path", { d: "m6 6 12 12" })
                 ]
               }
             )
@@ -8656,7 +8707,7 @@ function TextSelectionBadge({
 }
 
 // src/components/free-grid/canvas.tsx
-import { useMemo as useMemo20 } from "react";
+import { useMemo as useMemo21 } from "react";
 
 // src/components/free-grid/styles.ts
 var gridContainerBaseStyle = {
@@ -8680,22 +8731,22 @@ var gridCellBaseStyle = {
 };
 
 // src/components/free-grid/grid-lines.tsx
-import { useMemo as useMemo19 } from "react";
-import { jsx as jsx32, jsxs as jsxs11 } from "react/jsx-runtime";
+import { useMemo as useMemo20 } from "react";
+import { jsx as jsx31, jsxs as jsxs11 } from "react/jsx-runtime";
 function GridLines({ columns, rows, color }) {
-  const patternId = useMemo19(
+  const patternId = useMemo20(
     () => `grid-pattern-${Math.random().toString(36).substr(2, 9)}`,
     []
   );
   return /* @__PURE__ */ jsxs11("svg", { style: gridLinesOverlayStyle, "aria-hidden": "true", children: [
-    /* @__PURE__ */ jsx32("defs", { children: /* @__PURE__ */ jsx32(
+    /* @__PURE__ */ jsx31("defs", { children: /* @__PURE__ */ jsx31(
       "pattern",
       {
         id: patternId,
         width: `${100 / columns}%`,
         height: `${100 / Math.max(rows, 1)}%`,
         patternUnits: "objectBoundingBox",
-        children: /* @__PURE__ */ jsx32(
+        children: /* @__PURE__ */ jsx31(
           "rect",
           {
             width: "100%",
@@ -8708,12 +8759,12 @@ function GridLines({ columns, rows, color }) {
         )
       }
     ) }),
-    /* @__PURE__ */ jsx32("rect", { width: "100%", height: "100%", fill: `url(#${patternId})` })
+    /* @__PURE__ */ jsx31("rect", { width: "100%", height: "100%", fill: `url(#${patternId})` })
   ] });
 }
 
 // src/components/free-grid/canvas.tsx
-import { jsx as jsx33, jsxs as jsxs12 } from "react/jsx-runtime";
+import { jsx as jsx32, jsxs as jsxs12 } from "react/jsx-runtime";
 function FreeGridCanvas({
   columns = 12,
   rows,
@@ -8728,13 +8779,13 @@ function FreeGridCanvas({
   className,
   style
 }) {
-  const gridTemplateColumns = useMemo20(() => {
+  const gridTemplateColumns = useMemo21(() => {
     if (cellSize) {
       return `repeat(${columns}, ${cellSize}px)`;
     }
     return `repeat(${columns}, 1fr)`;
   }, [columns, cellSize]);
-  const gridTemplateRows = useMemo20(() => {
+  const gridTemplateRows = useMemo21(() => {
     if (rows) {
       if (cellSize) {
         return `repeat(${rows}, ${cellSize}px)`;
@@ -8760,7 +8811,7 @@ function FreeGridCanvas({
       "data-columns": columns,
       "data-rows": rows,
       children: [
-        showGrid && /* @__PURE__ */ jsx33(GridLines, { columns, rows: rows ?? 4, color: gridLineColor }),
+        showGrid && /* @__PURE__ */ jsx32(GridLines, { columns, rows: rows ?? 4, color: gridLineColor }),
         children
       ]
     }
@@ -8768,7 +8819,7 @@ function FreeGridCanvas({
 }
 
 // src/components/free-grid/grid-cell.tsx
-import { jsx as jsx34 } from "react/jsx-runtime";
+import { jsx as jsx33 } from "react/jsx-runtime";
 function GridCell({
   column,
   row,
@@ -8786,7 +8837,7 @@ function GridCell({
     gridRowEnd: rowSpan > 1 ? `span ${rowSpan}` : void 0,
     ...style
   };
-  return /* @__PURE__ */ jsx34("div", { style: cellStyle, className, "data-grid-cell": true, children });
+  return /* @__PURE__ */ jsx33("div", { style: cellStyle, className, "data-grid-cell": true, children });
 }
 
 // src/components/free-grid/layout-utils.ts
@@ -8841,7 +8892,7 @@ function createLayout(options = {}) {
 import { memo as memo6, useEffect as useEffect22, useState as useState17 } from "react";
 
 // src/components/tool-progress/icons.tsx
-import { jsx as jsx35, jsxs as jsxs13 } from "react/jsx-runtime";
+import { jsx as jsx34, jsxs as jsxs13 } from "react/jsx-runtime";
 var toolIcons = {
   "web-search": /* @__PURE__ */ jsxs13(
     "svg",
@@ -8855,8 +8906,8 @@ var toolIcons = {
       strokeLinecap: "round",
       strokeLinejoin: "round",
       children: [
-        /* @__PURE__ */ jsx35("circle", { cx: "11", cy: "11", r: "8" }),
-        /* @__PURE__ */ jsx35("path", { d: "m21 21-4.3-4.3" })
+        /* @__PURE__ */ jsx34("circle", { cx: "11", cy: "11", r: "8" }),
+        /* @__PURE__ */ jsx34("path", { d: "m21 21-4.3-4.3" })
       ]
     }
   ),
@@ -8872,14 +8923,14 @@ var toolIcons = {
       strokeLinecap: "round",
       strokeLinejoin: "round",
       children: [
-        /* @__PURE__ */ jsx35("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
-        /* @__PURE__ */ jsx35("polyline", { points: "14,2 14,8 20,8" }),
-        /* @__PURE__ */ jsx35("line", { x1: "16", y1: "13", x2: "8", y2: "13" }),
-        /* @__PURE__ */ jsx35("line", { x1: "16", y1: "17", x2: "8", y2: "17" })
+        /* @__PURE__ */ jsx34("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
+        /* @__PURE__ */ jsx34("polyline", { points: "14,2 14,8 20,8" }),
+        /* @__PURE__ */ jsx34("line", { x1: "16", y1: "13", x2: "8", y2: "13" }),
+        /* @__PURE__ */ jsx34("line", { x1: "16", y1: "17", x2: "8", y2: "17" })
       ]
     }
   ),
-  "search-flight": /* @__PURE__ */ jsx35(
+  "search-flight": /* @__PURE__ */ jsx34(
     "svg",
     {
       width: "16",
@@ -8890,7 +8941,7 @@ var toolIcons = {
       strokeWidth: "2",
       strokeLinecap: "round",
       strokeLinejoin: "round",
-      children: /* @__PURE__ */ jsx35("path", { d: "M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" })
+      children: /* @__PURE__ */ jsx34("path", { d: "M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" })
     }
   ),
   "search-hotel": /* @__PURE__ */ jsxs13(
@@ -8905,13 +8956,13 @@ var toolIcons = {
       strokeLinecap: "round",
       strokeLinejoin: "round",
       children: [
-        /* @__PURE__ */ jsx35("path", { d: "M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z" }),
-        /* @__PURE__ */ jsx35("path", { d: "M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2" }),
-        /* @__PURE__ */ jsx35("path", { d: "M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2" }),
-        /* @__PURE__ */ jsx35("path", { d: "M10 6h4" }),
-        /* @__PURE__ */ jsx35("path", { d: "M10 10h4" }),
-        /* @__PURE__ */ jsx35("path", { d: "M10 14h4" }),
-        /* @__PURE__ */ jsx35("path", { d: "M10 18h4" })
+        /* @__PURE__ */ jsx34("path", { d: "M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z" }),
+        /* @__PURE__ */ jsx34("path", { d: "M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2" }),
+        /* @__PURE__ */ jsx34("path", { d: "M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2" }),
+        /* @__PURE__ */ jsx34("path", { d: "M10 6h4" }),
+        /* @__PURE__ */ jsx34("path", { d: "M10 10h4" }),
+        /* @__PURE__ */ jsx34("path", { d: "M10 14h4" }),
+        /* @__PURE__ */ jsx34("path", { d: "M10 18h4" })
       ]
     }
   ),
@@ -8927,10 +8978,10 @@ var toolIcons = {
       strokeLinecap: "round",
       strokeLinejoin: "round",
       children: [
-        /* @__PURE__ */ jsx35("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
-        /* @__PURE__ */ jsx35("polyline", { points: "14,2 14,8 20,8" }),
-        /* @__PURE__ */ jsx35("path", { d: "M12 18v-6" }),
-        /* @__PURE__ */ jsx35("path", { d: "M9 15l3 3 3-3" })
+        /* @__PURE__ */ jsx34("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
+        /* @__PURE__ */ jsx34("polyline", { points: "14,2 14,8 20,8" }),
+        /* @__PURE__ */ jsx34("path", { d: "M12 18v-6" }),
+        /* @__PURE__ */ jsx34("path", { d: "M9 15l3 3 3-3" })
       ]
     }
   ),
@@ -8946,9 +8997,9 @@ var toolIcons = {
       strokeLinecap: "round",
       strokeLinejoin: "round",
       children: [
-        /* @__PURE__ */ jsx35("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
-        /* @__PURE__ */ jsx35("polyline", { points: "14,2 14,8 20,8" }),
-        /* @__PURE__ */ jsx35("path", { d: "M9 15l2 2 4-4" })
+        /* @__PURE__ */ jsx34("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
+        /* @__PURE__ */ jsx34("polyline", { points: "14,2 14,8 20,8" }),
+        /* @__PURE__ */ jsx34("path", { d: "M9 15l2 2 4-4" })
       ]
     }
   ),
@@ -8964,14 +9015,14 @@ var toolIcons = {
       strokeLinecap: "round",
       strokeLinejoin: "round",
       children: [
-        /* @__PURE__ */ jsx35("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
-        /* @__PURE__ */ jsx35("polyline", { points: "14,2 14,8 20,8" }),
-        /* @__PURE__ */ jsx35("circle", { cx: "11.5", cy: "14.5", r: "2.5" }),
-        /* @__PURE__ */ jsx35("path", { d: "M13.3 16.3 15 18" })
+        /* @__PURE__ */ jsx34("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
+        /* @__PURE__ */ jsx34("polyline", { points: "14,2 14,8 20,8" }),
+        /* @__PURE__ */ jsx34("circle", { cx: "11.5", cy: "14.5", r: "2.5" }),
+        /* @__PURE__ */ jsx34("path", { d: "M13.3 16.3 15 18" })
       ]
     }
   ),
-  default: /* @__PURE__ */ jsx35(
+  default: /* @__PURE__ */ jsx34(
     "svg",
     {
       width: "16",
@@ -8982,7 +9033,7 @@ var toolIcons = {
       strokeWidth: "2",
       strokeLinecap: "round",
       strokeLinejoin: "round",
-      children: /* @__PURE__ */ jsx35("polygon", { points: "13,2 3,14 12,14 11,22 21,10 12,10 13,2" })
+      children: /* @__PURE__ */ jsx34("polygon", { points: "13,2 3,14 12,14 11,22 21,10 12,10 13,2" })
     }
   )
 };
@@ -9041,7 +9092,7 @@ var progressAnimations = `
 
 // src/components/tool-progress/progress-item.tsx
 import { memo as memo5 } from "react";
-import { jsx as jsx36, jsxs as jsxs14 } from "react/jsx-runtime";
+import { jsx as jsx35, jsxs as jsxs14 } from "react/jsx-runtime";
 var DefaultProgressItem = memo5(function DefaultProgressItem2({
   progress
 }) {
@@ -9066,7 +9117,7 @@ var DefaultProgressItem = memo5(function DefaultProgressItem2({
       },
       children: [
         /* @__PURE__ */ jsxs14("div", { style: { position: "relative" }, children: [
-          /* @__PURE__ */ jsx36(
+          /* @__PURE__ */ jsx35(
             "div",
             {
               style: {
@@ -9082,7 +9133,7 @@ var DefaultProgressItem = memo5(function DefaultProgressItem2({
               children: icon
             }
           ),
-          isActive && /* @__PURE__ */ jsx36(
+          isActive && /* @__PURE__ */ jsx35(
             "span",
             {
               style: {
@@ -9108,7 +9159,7 @@ var DefaultProgressItem = memo5(function DefaultProgressItem2({
                 gap: 6
               },
               children: [
-                /* @__PURE__ */ jsx36(
+                /* @__PURE__ */ jsx35(
                   "span",
                   {
                     style: {
@@ -9119,7 +9170,7 @@ var DefaultProgressItem = memo5(function DefaultProgressItem2({
                     children: label
                   }
                 ),
-                isActive && /* @__PURE__ */ jsx36("span", { style: { display: "flex", gap: 2 }, children: [0, 1, 2].map((i) => /* @__PURE__ */ jsx36(
+                isActive && /* @__PURE__ */ jsx35("span", { style: { display: "flex", gap: 2 }, children: [0, 1, 2].map((i) => /* @__PURE__ */ jsx35(
                   "span",
                   {
                     style: {
@@ -9135,7 +9186,7 @@ var DefaultProgressItem = memo5(function DefaultProgressItem2({
               ]
             }
           ),
-          progress.message && /* @__PURE__ */ jsx36(
+          progress.message && /* @__PURE__ */ jsx35(
             "p",
             {
               style: {
@@ -9157,7 +9208,7 @@ var DefaultProgressItem = memo5(function DefaultProgressItem2({
 });
 
 // src/components/ToolProgressOverlay.tsx
-import { Fragment as Fragment3, jsx as jsx37, jsxs as jsxs15 } from "react/jsx-runtime";
+import { Fragment as Fragment3, jsx as jsx36, jsxs as jsxs15 } from "react/jsx-runtime";
 var ToolProgressOverlay = memo6(function ToolProgressOverlay2({
   position = "top-right",
   className,
@@ -9177,8 +9228,8 @@ var ToolProgressOverlay = memo6(function ToolProgressOverlay2({
   }
   const visibleProgress = activeProgress.slice(0, maxItems);
   return /* @__PURE__ */ jsxs15(Fragment3, { children: [
-    /* @__PURE__ */ jsx37("style", { children: progressAnimations }),
-    /* @__PURE__ */ jsx37(
+    /* @__PURE__ */ jsx36("style", { children: progressAnimations }),
+    /* @__PURE__ */ jsx36(
       "div",
       {
         className,
@@ -9192,7 +9243,7 @@ var ToolProgressOverlay = memo6(function ToolProgressOverlay2({
           ...positionStyles[position]
         },
         children: visibleProgress.map(
-          (progress) => renderItem ? /* @__PURE__ */ jsx37("div", { style: { pointerEvents: "auto" }, children: renderItem(progress) }, progress.toolCallId) : /* @__PURE__ */ jsx37(
+          (progress) => renderItem ? /* @__PURE__ */ jsx36("div", { style: { pointerEvents: "auto" }, children: renderItem(progress) }, progress.toolCallId) : /* @__PURE__ */ jsx36(
             DefaultProgressItem,
             {
               progress
@@ -9206,10 +9257,10 @@ var ToolProgressOverlay = memo6(function ToolProgressOverlay2({
 });
 
 // src/components/Canvas/CanvasBlock.tsx
-import { memo as memo7, useCallback as useCallback33, useState as useState18, useEffect as useEffect23, useMemo as useMemo21 } from "react";
-import { jsx as jsx38, jsxs as jsxs16 } from "react/jsx-runtime";
+import { memo as memo7, useCallback as useCallback33, useState as useState18, useEffect as useEffect23, useMemo as useMemo22 } from "react";
+import { jsx as jsx37, jsxs as jsxs16 } from "react/jsx-runtime";
 function CanvasBlockSkeleton() {
-  return /* @__PURE__ */ jsx38("div", { className: "w-full min-h-[200px] bg-zinc-900/50 rounded-xl border border-white/5 flex items-center justify-center", children: /* @__PURE__ */ jsx38("div", { className: "text-zinc-500 text-sm", children: "Loading editor..." }) });
+  return /* @__PURE__ */ jsx37("div", { className: "w-full min-h-[200px] bg-zinc-900/50 rounded-xl border border-white/5 flex items-center justify-center", children: /* @__PURE__ */ jsx37("div", { className: "text-zinc-500 text-sm", children: "Loading editor..." }) });
 }
 var CanvasBlock = memo7(function CanvasBlock2({
   element,
@@ -9231,7 +9282,7 @@ var CanvasBlock = memo7(function CanvasBlock2({
   } = element.props;
   const [content, setContent] = useState18(initialContent || null);
   const [editorKey, setEditorKey] = useState18(0);
-  const processedContent = useMemo21(() => {
+  const processedContent = useMemo22(() => {
     if (initialContent) return initialContent;
     if (markdown) {
       return { markdown, images };
@@ -9282,7 +9333,7 @@ var CanvasBlock = memo7(function CanvasBlock2({
     });
   }, [documentId, title, initialContent, onAction]);
   if (loading) {
-    return /* @__PURE__ */ jsx38(CanvasBlockSkeleton, {});
+    return /* @__PURE__ */ jsx37(CanvasBlockSkeleton, {});
   }
   if (!EditorComponent) {
     return /* @__PURE__ */ jsxs16(
@@ -9292,14 +9343,14 @@ var CanvasBlock = memo7(function CanvasBlock2({
         style: { minHeight: height },
         "data-document-id": documentId,
         children: [
-          title && /* @__PURE__ */ jsx38("div", { className: "px-4 py-3 border-b border-white/5", children: /* @__PURE__ */ jsx38("h3", { className: "text-lg font-semibold text-white", children: title }) }),
+          title && /* @__PURE__ */ jsx37("div", { className: "px-4 py-3 border-b border-white/5", children: /* @__PURE__ */ jsx37("h3", { className: "text-lg font-semibold text-white", children: title }) }),
           /* @__PURE__ */ jsxs16(
             "div",
             {
               className: "flex flex-col items-center justify-center gap-4 p-8",
               style: { minHeight: "200px" },
               children: [
-                /* @__PURE__ */ jsx38("p", { className: "text-zinc-400 text-sm", children: initialContent ? "Document content available" : "Empty document" }),
+                /* @__PURE__ */ jsx37("p", { className: "text-zinc-400 text-sm", children: initialContent ? "Document content available" : "Empty document" }),
                 /* @__PURE__ */ jsxs16(
                   "button",
                   {
@@ -9318,8 +9369,8 @@ var CanvasBlock = memo7(function CanvasBlock2({
                           strokeLinecap: "round",
                           strokeLinejoin: "round",
                           children: [
-                            /* @__PURE__ */ jsx38("path", { d: "M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" }),
-                            /* @__PURE__ */ jsx38("path", { d: "M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" })
+                            /* @__PURE__ */ jsx37("path", { d: "M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" }),
+                            /* @__PURE__ */ jsx37("path", { d: "M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" })
                           ]
                         }
                       ),
@@ -9341,8 +9392,8 @@ var CanvasBlock = memo7(function CanvasBlock2({
       style: { width, minHeight: height },
       "data-document-id": documentId,
       children: [
-        title && /* @__PURE__ */ jsx38("h3", { className: "text-lg font-semibold text-white mb-3", children: title }),
-        /* @__PURE__ */ jsx38("div", { className: "bg-zinc-900/50 rounded-xl border border-white/5 overflow-hidden", children: /* @__PURE__ */ jsx38(
+        title && /* @__PURE__ */ jsx37("h3", { className: "text-lg font-semibold text-white mb-3", children: title }),
+        /* @__PURE__ */ jsx37("div", { className: "bg-zinc-900/50 rounded-xl border border-white/5 overflow-hidden", children: /* @__PURE__ */ jsx37(
           EditorComponent,
           {
             initialState: content,
@@ -9357,7 +9408,7 @@ var CanvasBlock = memo7(function CanvasBlock2({
           },
           editorKey
         ) }),
-        mode === "edit" && /* @__PURE__ */ jsx38("div", { className: "flex justify-end mt-2", children: /* @__PURE__ */ jsx38(
+        mode === "edit" && /* @__PURE__ */ jsx37("div", { className: "flex justify-end mt-2", children: /* @__PURE__ */ jsx37(
           "button",
           {
             onClick: handleSave,
@@ -10390,8 +10441,8 @@ function createDOMPurify() {
 var purify = createDOMPurify();
 
 // src/components/Document/DocumentBlock.tsx
-import { memo as memo8, useMemo as useMemo22 } from "react";
-import { jsx as jsx39, jsxs as jsxs17 } from "react/jsx-runtime";
+import { memo as memo8, useMemo as useMemo23 } from "react";
+import { jsx as jsx38, jsxs as jsxs17 } from "react/jsx-runtime";
 var DocumentBlock = memo8(function DocumentBlock2({
   element,
   onAction,
@@ -10406,9 +10457,9 @@ var DocumentBlock = memo8(function DocumentBlock2({
     documentId,
     showOpenInCanvas = true
   } = element.props;
-  const renderedContent = useMemo22(() => {
+  const renderedContent = useMemo23(() => {
     if (format === "html") {
-      return /* @__PURE__ */ jsx39(
+      return /* @__PURE__ */ jsx38(
         "div",
         {
           className: "prose prose-invert max-w-none",
@@ -10419,7 +10470,7 @@ var DocumentBlock = memo8(function DocumentBlock2({
     if (format === "markdown" && renderText) {
       return renderText(content, { markdown: true });
     }
-    return /* @__PURE__ */ jsx39("pre", { className: "whitespace-pre-wrap text-sm", children: content });
+    return /* @__PURE__ */ jsx38("pre", { className: "whitespace-pre-wrap text-sm", children: content });
   }, [content, format, renderText]);
   const handleOpenInCanvas = () => {
     onAction?.({
@@ -10434,11 +10485,11 @@ var DocumentBlock = memo8(function DocumentBlock2({
   };
   if (loading) {
     return /* @__PURE__ */ jsxs17("div", { className: "w-full p-6 bg-zinc-900/50 rounded-xl border border-white/5 animate-pulse", children: [
-      /* @__PURE__ */ jsx39("div", { className: "h-6 w-1/3 bg-zinc-800 rounded mb-4" }),
+      /* @__PURE__ */ jsx38("div", { className: "h-6 w-1/3 bg-zinc-800 rounded mb-4" }),
       /* @__PURE__ */ jsxs17("div", { className: "space-y-2", children: [
-        /* @__PURE__ */ jsx39("div", { className: "h-4 bg-zinc-800 rounded w-full" }),
-        /* @__PURE__ */ jsx39("div", { className: "h-4 bg-zinc-800 rounded w-5/6" }),
-        /* @__PURE__ */ jsx39("div", { className: "h-4 bg-zinc-800 rounded w-4/6" })
+        /* @__PURE__ */ jsx38("div", { className: "h-4 bg-zinc-800 rounded w-full" }),
+        /* @__PURE__ */ jsx38("div", { className: "h-4 bg-zinc-800 rounded w-5/6" }),
+        /* @__PURE__ */ jsx38("div", { className: "h-4 bg-zinc-800 rounded w-4/6" })
       ] })
     ] });
   }
@@ -10458,15 +10509,15 @@ var DocumentBlock = memo8(function DocumentBlock2({
             strokeLinejoin: "round",
             className: "text-zinc-400",
             children: [
-              /* @__PURE__ */ jsx39("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
-              /* @__PURE__ */ jsx39("polyline", { points: "14 2 14 8 20 8" }),
-              /* @__PURE__ */ jsx39("line", { x1: "16", x2: "8", y1: "13", y2: "13" }),
-              /* @__PURE__ */ jsx39("line", { x1: "16", x2: "8", y1: "17", y2: "17" }),
-              /* @__PURE__ */ jsx39("line", { x1: "10", x2: "8", y1: "9", y2: "9" })
+              /* @__PURE__ */ jsx38("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
+              /* @__PURE__ */ jsx38("polyline", { points: "14 2 14 8 20 8" }),
+              /* @__PURE__ */ jsx38("line", { x1: "16", x2: "8", y1: "13", y2: "13" }),
+              /* @__PURE__ */ jsx38("line", { x1: "16", x2: "8", y1: "17", y2: "17" }),
+              /* @__PURE__ */ jsx38("line", { x1: "10", x2: "8", y1: "9", y2: "9" })
             ]
           }
         ),
-        /* @__PURE__ */ jsx39("h3", { className: "text-sm font-medium text-white", children: title })
+        /* @__PURE__ */ jsx38("h3", { className: "text-sm font-medium text-white", children: title })
       ] }),
       showOpenInCanvas && /* @__PURE__ */ jsxs17(
         "button",
@@ -10486,8 +10537,8 @@ var DocumentBlock = memo8(function DocumentBlock2({
                 strokeLinecap: "round",
                 strokeLinejoin: "round",
                 children: [
-                  /* @__PURE__ */ jsx39("path", { d: "M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" }),
-                  /* @__PURE__ */ jsx39("path", { d: "M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" })
+                  /* @__PURE__ */ jsx38("path", { d: "M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" }),
+                  /* @__PURE__ */ jsx38("path", { d: "M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" })
                 ]
               }
             ),
@@ -10496,7 +10547,7 @@ var DocumentBlock = memo8(function DocumentBlock2({
         }
       )
     ] }),
-    /* @__PURE__ */ jsx39("div", { className: "p-4", children: renderedContent })
+    /* @__PURE__ */ jsx38("div", { className: "p-4", children: renderedContent })
   ] });
 });
 
@@ -10706,7 +10757,6 @@ export {
   TextSelectionBadge,
   ToolProgressOverlay,
   ToolProgressProvider,
-  TreeSyncProvider,
   UnifiedProgressProvider,
   ValidationProvider,
   VisibilityProvider,
@@ -10752,6 +10802,7 @@ export {
   useActiveStep,
   useActiveToolProgress2 as useActiveToolProgress,
   useActiveToolProgress as useActiveToolProgressStore,
+  useAllComponentState,
   useAreSuggestionsEnabled,
   useAuthenticatedSources,
   useAutoSave,
@@ -10762,6 +10813,8 @@ export {
   useCanvasIsStreaming,
   useCanvasVersion,
   useCitations,
+  useComponentState,
+  useComponentStateActions,
   useData,
   useDataBinding,
   useDataValue,
@@ -10776,6 +10829,7 @@ export {
   useEditableContext,
   useElementActionTracker,
   useElementEdit,
+  useElementState,
   useFieldStates,
   useFieldValidation,
   useFormState,
@@ -10812,9 +10866,6 @@ export {
   useTextSelection,
   useToolProgress,
   useToolProgressOptional,
-  useTreeSync,
-  useTreeSyncCallback,
-  useTreeSyncContext,
   useUIStore,
   useUIStream,
   useUnifiedProgress,

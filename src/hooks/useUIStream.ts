@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useShallow } from "zustand/shallow";
+import { loggers } from "@onegenui/utils";
 import type { UITree, JsonPatch } from "@onegenui/core";
 import { applyPatchesBatch } from "./patch-utils";
 import type {
@@ -50,6 +51,8 @@ import {
   PATCH_FLUSH_INTERVAL_MS,
 } from "./ui-stream/patch-processor";
 
+const log = loggers.react;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // useUIStream Hook
 // ─────────────────────────────────────────────────────────────────────────────
@@ -93,11 +96,20 @@ export function useUIStream({
   
   // Update store (treeRef syncs automatically via effect)
   const setTree = useCallback((newTree: UITree | null | ((prev: UITree | null) => UITree | null)) => {
+    log.debug("[useUIStream] setTree called", { isFunction: typeof newTree === "function" });
     if (typeof newTree === "function") {
       const updatedTree = newTree(treeRef.current);
+      log.debug("[useUIStream] setTree functional update", { 
+        hasResult: !!updatedTree,
+        elementsCount: updatedTree?.elements ? Object.keys(updatedTree.elements).length : 0
+      });
       treeRef.current = updatedTree;
       storeSetUITreeRef.current(updatedTree);
     } else {
+      log.debug("[useUIStream] setTree direct value", { 
+        hasTree: !!newTree,
+        elementsCount: newTree?.elements ? Object.keys(newTree.elements).length : 0
+      });
       treeRef.current = newTree;
       storeSetUITreeRef.current(newTree);
     }
@@ -136,11 +148,20 @@ export function useUIStream({
 
   const loadSession = useCallback(
     (session: { tree: UITree; conversation: ConversationTurn[] }) => {
+      const rootElement = session.tree?.elements?.[session.tree?.root];
+      log.debug("[useUIStream] loadSession called", {
+        hasTree: !!session.tree,
+        rootKey: session.tree?.root,
+        rootChildrenCount: rootElement?.children?.length,
+        elementsCount: session.tree?.elements ? Object.keys(session.tree.elements).length : 0,
+        conversationLength: session.conversation?.length,
+      });
       setTree(session.tree);
       treeRef.current = session.tree;
       setConversation(session.conversation);
       setHistory([]);
       setHistoryIndex(-1);
+      log.debug("[useUIStream] loadSession complete, tree set");
     },
     [setTree, setHistory, setHistoryIndex],
   );
@@ -189,7 +210,7 @@ export function useUIStream({
     async (
       prompt: string,
       context?: Record<string, unknown>,
-      attachments?: any[],
+      attachments?: Attachment[],
     ) => {
       // Get chatId from context (set by handleChatSend)
       const chatId = (context?.chatId as string | undefined) ?? getChatId?.();
@@ -282,6 +303,7 @@ export function useUIStream({
           currentTree,
           conversation,
           attachments,
+          componentState: useStore.getState().componentState,
         });
 
         // Add dynamic headers (e.g. auth)

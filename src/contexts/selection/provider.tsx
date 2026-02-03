@@ -136,6 +136,14 @@ export function SelectionProvider({ children }: SelectionProviderProps) {
       return;
     }
 
+    // Skip selection for interactive elements (buttons, inputs, accordions, etc.)
+    const interactiveElement = target.closest(
+      'button, input, textarea, select, a[href], [role="button"], [data-radix-collection-item], [data-state], [contenteditable="true"]'
+    );
+    if (interactiveElement) {
+      return;
+    }
+
     // Check for selectable-item click
     const selectableItem = target.closest(
       "[data-selectable-item]",

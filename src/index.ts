@@ -101,16 +101,11 @@ export {
   type DomainType,
 } from "./contexts/autosave";
 
-// Tree Sync Context (sync component state back to tree for AI context)
+// Element State Hook (component state management via Zustand)
 export {
-  TreeSyncProvider,
-  useTreeSync,
-  useTreeSyncCallback,
-  useTreeSyncContext,
-  type TreeSyncContextValue,
-  type TreeSyncProviderProps,
-  type UpdateElementFn,
-} from "./contexts/tree-sync";
+  useElementState,
+  type UseElementStateOptions,
+} from "./hooks/useElementState";
 
 // Tool Progress Context (real-time tool execution tracking)
 export {
@@ -318,6 +313,10 @@ export {
   useCanvasVersion,
   useCanvasIsStreaming,
   useCanvasActions,
+  // Component State selectors
+  useComponentState,
+  useAllComponentState,
+  useComponentStateActions,
   // Types
   type PlanExecutionState,
   type PlanStep,

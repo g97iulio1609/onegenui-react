@@ -6,7 +6,10 @@
  * from async stream handlers.
  */
 import type { UITree, UIElement, JsonPatch } from "@onegenui/core";
+import { loggers } from "@onegenui/utils";
 import type { SliceCreator } from "../types";
+
+const log = loggers.react;
 
 export interface UITreeSlice {
   // State
@@ -36,6 +39,12 @@ export const createUITreeSlice: SliceCreator<UITreeSlice> = (set, get) => ({
   // Actions
   setUITree: (tree) =>
     set((state) => {
+      log.debug("[UITreeSlice] setUITree called", {
+        hasTree: !!tree,
+        elementsCount: tree?.elements ? Object.keys(tree.elements).length : 0,
+        rootKey: tree?.root,
+        prevVersion: state.treeVersion,
+      });
       state.uiTree = tree;
       state.treeVersion += 1;
     }),
