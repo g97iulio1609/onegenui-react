@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useState, useRef, useEffect, useCallback } from "react";
+import { isSafeUrl, sanitizeUrl } from "@onegenui/utils";
 import type { Citation } from "./index";
 
 interface InlineCitationProps {
@@ -77,7 +78,7 @@ export const InlineCitation = memo(function InlineCitation({
   const handleClick = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (isWebSource && !hasExcerpt) {
+    if (isWebSource && !hasExcerpt && isSafeUrl(citation.url)) {
       // Web source without excerpt - open URL
       window.open(citation.url!, "_blank", "noopener,noreferrer");
     } else {
@@ -196,7 +197,7 @@ export const InlineCitation = memo(function InlineCitation({
           {/* Footer for web sources */}
           {isWebSource && (
             <a
-              href={citation.url!}
+              href={sanitizeUrl(citation.url)}
               target="_blank"
               rel="noopener noreferrer"
               style={{

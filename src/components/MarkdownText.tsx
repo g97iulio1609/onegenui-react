@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { cn } from "../utils";
+import { sanitizeUrl } from "@onegenui/utils";
 
 export interface MarkdownTextProps {
   content: string;
@@ -78,7 +79,7 @@ export const MarkdownText = memo(function MarkdownText({
     },
     a: ({ href, children }: { href?: string; children?: ReactNode }) => (
       <a
-        href={href}
+        href={sanitizeUrl(href)}
         target="_blank"
         rel="noopener noreferrer"
         className="text-[var(--markdown-link-color)] underline underline-offset-2 hover:opacity-80 transition-opacity"

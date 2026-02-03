@@ -3245,6 +3245,7 @@ var createStyles = (theme) => ({
 // src/contexts/markdown/internal-markdown.tsx
 import React7, { useMemo as useMemo10 } from "react";
 import ReactMarkdown from "react-markdown";
+import { sanitizeUrl as sanitizeUrl2 } from "@onegenui/utils";
 
 // src/contexts/citation/index.ts
 import {
@@ -3325,6 +3326,7 @@ function useCitations() {
 
 // src/contexts/citation/inline-citation.tsx
 import { memo, useState as useState3, useRef as useRef4, useEffect as useEffect6, useCallback as useCallback11 } from "react";
+import { isSafeUrl, sanitizeUrl } from "@onegenui/utils";
 import { jsx as jsx8, jsxs as jsxs2 } from "react/jsx-runtime";
 var InlineCitation = memo(function InlineCitation2({
   id,
@@ -3379,7 +3381,7 @@ var InlineCitation = memo(function InlineCitation2({
   const handleClick = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    if (isWebSource && !hasExcerpt) {
+    if (isWebSource && !hasExcerpt && isSafeUrl(citation.url)) {
       window.open(citation.url, "_blank", "noopener,noreferrer");
     } else {
       updatePosition();
@@ -3505,7 +3507,7 @@ var InlineCitation = memo(function InlineCitation2({
           isWebSource && /* @__PURE__ */ jsxs2(
             "a",
             {
-              href: citation.url,
+              href: sanitizeUrl(citation.url),
               target: "_blank",
               rel: "noopener noreferrer",
               style: {
@@ -3607,7 +3609,7 @@ function InternalMarkdown({
       a: ({ href, children }) => /* @__PURE__ */ jsx9(
         "a",
         {
-          href,
+          href: sanitizeUrl2(href),
           target: "_blank",
           rel: "noopener noreferrer",
           style: styles.link,
@@ -4986,7 +4988,7 @@ var ErrorBoundary = class extends Component {
 };
 
 // src/renderer/element-renderer.tsx
-import React16, { useMemo as useMemo19 } from "react";
+import React17, { useMemo as useMemo19 } from "react";
 
 // src/components/ResizableWrapper.tsx
 import React12, { useRef as useRef11, useCallback as useCallback20, useMemo as useMemo16 } from "react";
@@ -5712,13 +5714,12 @@ function SelectionWrapper({
   );
 }
 
-// src/components/EditableWrapper.tsx
-import React15, {
-  memo as memo3,
-  useCallback as useCallback31,
-  useRef as useRef20,
-  useState as useState15,
-  useEffect as useEffect21
+// src/components/editable-wrapper/component.tsx
+import React16, {
+  memo as memo4,
+  useCallback as useCallback32,
+  useRef as useRef21,
+  useState as useState16
 } from "react";
 
 // src/hooks/useUIStream.ts
@@ -7764,8 +7765,15 @@ function flatToTree(elements) {
   return { root, elements: elementMap };
 }
 
-// src/components/EditableWrapper.tsx
-import { Fragment as Fragment2, jsx as jsx23, jsxs as jsxs7 } from "react/jsx-runtime";
+// src/components/editable-wrapper/EditableTextNode.tsx
+import {
+  memo as memo3,
+  useCallback as useCallback31,
+  useRef as useRef20,
+  useState as useState15,
+  useEffect as useEffect21
+} from "react";
+import { jsx as jsx23 } from "react/jsx-runtime";
 var EditableTextNode = memo3(function EditableTextNode2({
   elementKey,
   propName,
@@ -7881,7 +7889,10 @@ var EditableTextNode = memo3(function EditableTextNode2({
     }
   );
 });
-var EditableWrapper = memo3(function EditableWrapper2({
+
+// src/components/editable-wrapper/component.tsx
+import { Fragment as Fragment2, jsx as jsx24, jsxs as jsxs7 } from "react/jsx-runtime";
+var EditableWrapper = memo4(function EditableWrapper2({
   element,
   children,
   onTextChange,
@@ -7890,14 +7901,14 @@ var EditableWrapper = memo3(function EditableWrapper2({
 }) {
   const isMobile = useIsMobile();
   const { isEditing, focusedKey, setFocusedKey, recordChange } = useEditMode();
-  const containerRef = useRef20(null);
-  const [isActiveEditing, setIsActiveEditing] = useState15(false);
+  const containerRef = useRef21(null);
+  const [isActiveEditing, setIsActiveEditing] = useState16(false);
   const isElementEditable = forceEditable !== void 0 ? forceEditable : element.editable !== false;
   if (!isEditing || !isElementEditable || element.locked) {
-    return /* @__PURE__ */ jsx23(Fragment2, { children });
+    return /* @__PURE__ */ jsx24(Fragment2, { children });
   }
   const isFocused = focusedKey === element.key;
-  const handleContainerClick = useCallback31(
+  const handleContainerClick = useCallback32(
     (e) => {
       e.stopPropagation();
       setFocusedKey(element.key);
@@ -7907,7 +7918,7 @@ var EditableWrapper = memo3(function EditableWrapper2({
     },
     [isMobile, element.key, setFocusedKey]
   );
-  const handleDoubleClick = useCallback31(
+  const handleDoubleClick = useCallback32(
     (e) => {
       e.stopPropagation();
       if (isMobile) {
@@ -7916,7 +7927,7 @@ var EditableWrapper = memo3(function EditableWrapper2({
     },
     [isMobile]
   );
-  const handleBlur = useCallback31(() => {
+  const handleBlur = useCallback32(() => {
     setIsActiveEditing(false);
     if (containerRef.current) {
       const textContent = containerRef.current.textContent || "";
@@ -7925,16 +7936,13 @@ var EditableWrapper = memo3(function EditableWrapper2({
       onTextChange?.(propName, textContent);
     }
   }, [element.key, element.props, recordChange, onTextChange]);
-  const handleKeyDown = useCallback31(
-    (e) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setIsActiveEditing(false);
-        containerRef.current?.blur();
-      }
-    },
-    []
-  );
+  const handleKeyDown = useCallback32((e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      setIsActiveEditing(false);
+      containerRef.current?.blur();
+    }
+  }, []);
   return /* @__PURE__ */ jsxs7(
     "div",
     {
@@ -7954,7 +7962,7 @@ var EditableWrapper = memo3(function EditableWrapper2({
         cursor: isEditing ? "text" : void 0
       },
       children: [
-        isMobile && isFocused && !isActiveEditing && /* @__PURE__ */ jsx23(
+        isMobile && isFocused && !isActiveEditing && /* @__PURE__ */ jsx24(
           "div",
           {
             className: "editable-indicator",
@@ -7972,7 +7980,7 @@ var EditableWrapper = memo3(function EditableWrapper2({
               zIndex: 10,
               boxShadow: "0 2px 8px rgba(14, 165, 233, 0.3)"
             },
-            children: /* @__PURE__ */ jsx23(
+            children: /* @__PURE__ */ jsx24(
               "svg",
               {
                 width: "12",
@@ -7981,7 +7989,7 @@ var EditableWrapper = memo3(function EditableWrapper2({
                 fill: "none",
                 stroke: "white",
                 strokeWidth: "2",
-                children: /* @__PURE__ */ jsx23("path", { d: "M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" })
+                children: /* @__PURE__ */ jsx24("path", { d: "M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" })
               }
             )
           }
@@ -7993,7 +8001,7 @@ var EditableWrapper = memo3(function EditableWrapper2({
 });
 
 // src/renderer/element-renderer.tsx
-import { jsx as jsx24 } from "react/jsx-runtime";
+import { jsx as jsx25 } from "react/jsx-runtime";
 function hasDescendantChanged(elementKey, prevTree, nextTree, visited = /* @__PURE__ */ new Set()) {
   if (visited.has(elementKey)) return false;
   visited.add(elementKey);
@@ -8035,7 +8043,7 @@ function elementRendererPropsAreEqual(prevProps, nextProps) {
   }
   return true;
 }
-var ElementRenderer = React16.memo(function ElementRenderer2({
+var ElementRenderer = React17.memo(function ElementRenderer2({
   element,
   tree,
   registry,
@@ -8059,7 +8067,7 @@ var ElementRenderer = React16.memo(function ElementRenderer2({
     return null;
   }
   if (element.type === "__placeholder__" || element._meta?.isPlaceholder) {
-    return /* @__PURE__ */ jsx24(
+    return /* @__PURE__ */ jsx25(
       "div",
       {
         className: "w-full h-16 bg-muted/10 animate-pulse rounded-lg my-2 border border-border/20",
@@ -8077,7 +8085,7 @@ var ElementRenderer = React16.memo(function ElementRenderer2({
     const childElement = tree.elements[childKey];
     if (!childElement) {
       if (loading) {
-        return /* @__PURE__ */ jsx24(
+        return /* @__PURE__ */ jsx25(
           "div",
           {
             className: "w-full h-12 bg-muted/10 animate-pulse rounded-md my-1"
@@ -8087,7 +8095,7 @@ var ElementRenderer = React16.memo(function ElementRenderer2({
       }
       return null;
     }
-    return /* @__PURE__ */ jsx24(
+    return /* @__PURE__ */ jsx25(
       ElementRenderer2,
       {
         element: childElement,
@@ -8106,7 +8114,7 @@ var ElementRenderer = React16.memo(function ElementRenderer2({
   });
   const isResizable = element.layout?.resizable !== false;
   const isEditable = isEditing && element.editable !== false && !element.locked;
-  const content = /* @__PURE__ */ jsx24(
+  const content = /* @__PURE__ */ jsx25(
     Component2,
     {
       element,
@@ -8117,9 +8125,9 @@ var ElementRenderer = React16.memo(function ElementRenderer2({
       children
     }
   );
-  const editableContent = isEditable ? /* @__PURE__ */ jsx24(EditableWrapper, { element, children: content }) : content;
+  const editableContent = isEditable ? /* @__PURE__ */ jsx25(EditableWrapper, { element, children: content }) : content;
   if (selectable && onElementSelect) {
-    const selectionContent = /* @__PURE__ */ jsx24(
+    const selectionContent = /* @__PURE__ */ jsx25(
       SelectionWrapper,
       {
         element,
@@ -8131,7 +8139,7 @@ var ElementRenderer = React16.memo(function ElementRenderer2({
       }
     );
     if (isResizable) {
-      return /* @__PURE__ */ jsx24(
+      return /* @__PURE__ */ jsx25(
         ResizableWrapper,
         {
           element,
@@ -8144,19 +8152,19 @@ var ElementRenderer = React16.memo(function ElementRenderer2({
     return selectionContent;
   }
   if (isResizable) {
-    return /* @__PURE__ */ jsx24(ResizableWrapper, { element, onResize, children: editableContent });
+    return /* @__PURE__ */ jsx25(ResizableWrapper, { element, onResize, children: editableContent });
   }
   return editableContent;
 }, elementRendererPropsAreEqual);
 
 // src/renderer/provider.tsx
-import { jsx as jsx25, jsxs as jsxs8 } from "react/jsx-runtime";
+import { jsx as jsx26, jsxs as jsxs8 } from "react/jsx-runtime";
 function ConfirmationDialogManager() {
   const { pendingConfirmation, confirm, cancel } = useActions();
   if (!pendingConfirmation?.action.confirm) {
     return null;
   }
-  return /* @__PURE__ */ jsx25(
+  return /* @__PURE__ */ jsx26(
     ConfirmDialog,
     {
       confirm: pendingConfirmation.action.confirm,
@@ -8175,22 +8183,22 @@ function JSONUIProvider({
   onDataChange,
   children
 }) {
-  return /* @__PURE__ */ jsx25(MarkdownProvider, { children: /* @__PURE__ */ jsx25(
+  return /* @__PURE__ */ jsx26(MarkdownProvider, { children: /* @__PURE__ */ jsx26(
     DataProvider,
     {
       initialData,
       authState,
       onDataChange,
-      children: /* @__PURE__ */ jsx25(VisibilityProvider, { children: /* @__PURE__ */ jsx25(ActionProvider, { handlers: actionHandlers, navigate, children: /* @__PURE__ */ jsxs8(ValidationProvider, { customFunctions: validationFunctions, children: [
+      children: /* @__PURE__ */ jsx26(VisibilityProvider, { children: /* @__PURE__ */ jsx26(ActionProvider, { handlers: actionHandlers, navigate, children: /* @__PURE__ */ jsxs8(ValidationProvider, { customFunctions: validationFunctions, children: [
         children,
-        /* @__PURE__ */ jsx25(ConfirmationDialogManager, {})
+        /* @__PURE__ */ jsx26(ConfirmationDialogManager, {})
       ] }) }) })
     }
   ) });
 }
 
 // src/renderer.tsx
-import { jsx as jsx26, jsxs as jsxs9 } from "react/jsx-runtime";
+import { jsx as jsx27, jsxs as jsxs9 } from "react/jsx-runtime";
 function RendererErrorFallback(error, reset) {
   return /* @__PURE__ */ jsxs9(
     "div",
@@ -8198,9 +8206,9 @@ function RendererErrorFallback(error, reset) {
       role: "alert",
       className: "p-4 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive",
       children: [
-        /* @__PURE__ */ jsx26("h3", { className: "font-semibold mb-2", children: "Render Error" }),
-        /* @__PURE__ */ jsx26("p", { className: "text-sm text-muted-foreground mb-3", children: error.message }),
-        /* @__PURE__ */ jsx26(
+        /* @__PURE__ */ jsx27("h3", { className: "font-semibold mb-2", children: "Render Error" }),
+        /* @__PURE__ */ jsx27("p", { className: "text-sm text-muted-foreground mb-3", children: error.message }),
+        /* @__PURE__ */ jsx27(
           "button",
           {
             onClick: reset,
@@ -8230,13 +8238,13 @@ function Renderer({
   if (!tree || !tree.root) return null;
   const rootElement = tree.elements[tree.root];
   if (!rootElement) return null;
-  const content = /* @__PURE__ */ jsx26(
+  const content = /* @__PURE__ */ jsx27(
     ErrorBoundary,
     {
       name: "ElementRenderer",
       fallback: RendererErrorFallback,
       onError: (error) => onError?.(error),
-      children: /* @__PURE__ */ jsx26(
+      children: /* @__PURE__ */ jsx27(
         ElementRenderer,
         {
           element: rootElement,
@@ -8253,7 +8261,7 @@ function Renderer({
       )
     }
   );
-  const gridContent = autoGrid ? /* @__PURE__ */ jsx26(
+  const gridContent = autoGrid ? /* @__PURE__ */ jsx27(
     "div",
     {
       style: {
@@ -8268,13 +8276,13 @@ function Renderer({
     }
   ) : content;
   if (trackInteractions && onInteraction) {
-    return /* @__PURE__ */ jsx26(InteractionTrackingWrapper, { tree, onInteraction, children: gridContent });
+    return /* @__PURE__ */ jsx27(InteractionTrackingWrapper, { tree, onInteraction, children: gridContent });
   }
   return gridContent;
 }
 function createRendererFromCatalog(_catalog, registry) {
   return function CatalogRenderer(props) {
-    return /* @__PURE__ */ jsx26(Renderer, { ...props, registry });
+    return /* @__PURE__ */ jsx27(Renderer, { ...props, registry });
   };
 }
 
@@ -8305,9 +8313,9 @@ function elementRendererPropsAreEqual2(prevProps, nextProps) {
 }
 
 // src/renderer/skeleton-loader.tsx
-import { jsx as jsx27 } from "react/jsx-runtime";
+import { jsx as jsx28 } from "react/jsx-runtime";
 function PlaceholderSkeleton({ elementKey }) {
-  return /* @__PURE__ */ jsx27(
+  return /* @__PURE__ */ jsx28(
     "div",
     {
       className: "w-full h-16 bg-muted/10 animate-pulse rounded-lg my-2 border border-border/20",
@@ -8317,7 +8325,7 @@ function PlaceholderSkeleton({ elementKey }) {
   );
 }
 function ChildSkeleton({ elementKey }) {
-  return /* @__PURE__ */ jsx27(
+  return /* @__PURE__ */ jsx28(
     "div",
     {
       className: "w-full h-12 bg-muted/10 animate-pulse rounded-md my-1"
@@ -8330,25 +8338,25 @@ function isPlaceholderElement(element) {
 }
 
 // src/editable.tsx
-import React17, {
+import React18, {
   createContext as createContext15,
   useContext as useContext15,
-  useState as useState16,
-  useCallback as useCallback32
+  useState as useState17,
+  useCallback as useCallback33
 } from "react";
-import { jsx as jsx28 } from "react/jsx-runtime";
+import { jsx as jsx29 } from "react/jsx-runtime";
 var EditableContext = createContext15(null);
 function EditableProvider({
   children,
   onValueChange
 }) {
-  const [editingPath, setEditingPath] = useState16(null);
-  const [editingValue, setEditingValue] = useState16(null);
-  const startEdit = useCallback32((path, currentValue) => {
+  const [editingPath, setEditingPath] = useState17(null);
+  const [editingValue, setEditingValue] = useState17(null);
+  const startEdit = useCallback33((path, currentValue) => {
     setEditingPath(path);
     setEditingValue(currentValue);
   }, []);
-  const commitEdit = useCallback32(
+  const commitEdit = useCallback33(
     (path, newValue) => {
       onValueChange?.(path, newValue);
       setEditingPath(null);
@@ -8356,11 +8364,11 @@ function EditableProvider({
     },
     [onValueChange]
   );
-  const cancelEdit = useCallback32(() => {
+  const cancelEdit = useCallback33(() => {
     setEditingPath(null);
     setEditingValue(null);
   }, []);
-  return /* @__PURE__ */ jsx28(
+  return /* @__PURE__ */ jsx29(
     EditableContext.Provider,
     {
       value: {
@@ -8382,18 +8390,18 @@ function useEditable(path, currentValue, locked = false) {
   const ctx = useEditableContext();
   const isEditing = ctx?.editingPath === path;
   const value = isEditing ? ctx?.editingValue : currentValue;
-  const onStartEdit = useCallback32(() => {
+  const onStartEdit = useCallback33(() => {
     if (locked || !ctx) return;
     ctx.startEdit(path, currentValue);
   }, [ctx, path, currentValue, locked]);
-  const onCommit = useCallback32(
+  const onCommit = useCallback33(
     (newValue) => {
       if (!ctx) return;
       ctx.commitEdit(path, newValue);
     },
     [ctx, path]
   );
-  const onCancel = useCallback32(() => {
+  const onCancel = useCallback33(() => {
     ctx?.cancelEdit();
   }, [ctx]);
   const editableClassName = locked ? "" : "cursor-text rounded transition-[background-color,box-shadow] duration-150 hover:bg-black/5";
@@ -8414,14 +8422,14 @@ function EditableText3({
   className
 }) {
   const { isEditing, onStartEdit, onCommit, onCancel, editableClassName } = useEditable(path, value, locked);
-  const [localValue, setLocalValue] = useState16(value);
-  React17.useEffect(() => {
+  const [localValue, setLocalValue] = useState17(value);
+  React18.useEffect(() => {
     if (!isEditing) {
       setLocalValue(value);
     }
   }, [value, isEditing]);
   if (isEditing) {
-    return /* @__PURE__ */ jsx28(
+    return /* @__PURE__ */ jsx29(
       "input",
       {
         type: "text",
@@ -8446,7 +8454,7 @@ function EditableText3({
       }
     );
   }
-  return /* @__PURE__ */ jsx28(
+  return /* @__PURE__ */ jsx29(
     Component2,
     {
       className: cn(editableClassName, className),
@@ -8463,14 +8471,14 @@ function EditableNumber({
   className
 }) {
   const { isEditing, onStartEdit, onCommit, onCancel, editableClassName } = useEditable(path, value, locked);
-  const [localValue, setLocalValue] = useState16(String(value));
-  React17.useEffect(() => {
+  const [localValue, setLocalValue] = useState17(String(value));
+  React18.useEffect(() => {
     if (!isEditing) {
       setLocalValue(String(value));
     }
   }, [value, isEditing]);
   if (isEditing) {
-    return /* @__PURE__ */ jsx28(
+    return /* @__PURE__ */ jsx29(
       "input",
       {
         type: "number",
@@ -8495,7 +8503,7 @@ function EditableNumber({
       }
     );
   }
-  return /* @__PURE__ */ jsx28(
+  return /* @__PURE__ */ jsx29(
     "span",
     {
       className: cn(editableClassName, className),
@@ -8507,11 +8515,12 @@ function EditableNumber({
 }
 
 // src/components/MarkdownText.tsx
-import { memo as memo4 } from "react";
+import { memo as memo5 } from "react";
 import ReactMarkdown2 from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
-import { jsx as jsx29 } from "react/jsx-runtime";
+import { sanitizeUrl as sanitizeUrl3 } from "@onegenui/utils";
+import { jsx as jsx30 } from "react/jsx-runtime";
 var defaultTheme2 = {
   codeBlockBg: "rgba(0, 0, 0, 0.3)",
   codeBlockBorder: "rgba(255, 255, 255, 0.08)",
@@ -8520,7 +8529,7 @@ var defaultTheme2 = {
   blockquoteBorder: "var(--primary, #3b82f6)",
   hrColor: "rgba(255, 255, 255, 0.1)"
 };
-var MarkdownText = memo4(function MarkdownText2({
+var MarkdownText = memo5(function MarkdownText2({
   content,
   className,
   style,
@@ -8539,46 +8548,46 @@ var MarkdownText = memo4(function MarkdownText2({
     ...style
   };
   const components = {
-    pre: ({ children }) => /* @__PURE__ */ jsx29("pre", { className: "bg-[var(--markdown-code-bg)] rounded-lg p-3 overflow-x-auto text-[13px] font-mono border border-[var(--markdown-code-border)] my-2", children }),
+    pre: ({ children }) => /* @__PURE__ */ jsx30("pre", { className: "bg-[var(--markdown-code-bg)] rounded-lg p-3 overflow-x-auto text-[13px] font-mono border border-[var(--markdown-code-border)] my-2", children }),
     code: ({
       children,
       className: codeClassName
     }) => {
       const isInline = !codeClassName;
       if (isInline) {
-        return /* @__PURE__ */ jsx29("code", { className: "bg-[var(--markdown-inline-code-bg)] rounded px-1.5 py-0.5 text-[0.9em] font-mono", children });
+        return /* @__PURE__ */ jsx30("code", { className: "bg-[var(--markdown-inline-code-bg)] rounded px-1.5 py-0.5 text-[0.9em] font-mono", children });
       }
-      return /* @__PURE__ */ jsx29("code", { children });
+      return /* @__PURE__ */ jsx30("code", { children });
     },
-    a: ({ href, children }) => /* @__PURE__ */ jsx29(
+    a: ({ href, children }) => /* @__PURE__ */ jsx30(
       "a",
       {
-        href,
+        href: sanitizeUrl3(href),
         target: "_blank",
         rel: "noopener noreferrer",
         className: "text-[var(--markdown-link-color)] underline underline-offset-2 hover:opacity-80 transition-opacity",
         children
       }
     ),
-    ul: ({ children }) => /* @__PURE__ */ jsx29("ul", { className: "my-2 pl-5 list-disc", children }),
-    ol: ({ children }) => /* @__PURE__ */ jsx29("ol", { className: "my-2 pl-5 list-decimal", children }),
-    li: ({ children }) => /* @__PURE__ */ jsx29("li", { className: "mb-1", children }),
-    h1: ({ children }) => /* @__PURE__ */ jsx29("h1", { className: "font-semibold mt-3 mb-2 text-lg", children }),
-    h2: ({ children }) => /* @__PURE__ */ jsx29("h2", { className: "font-semibold mt-3 mb-2 text-base", children }),
-    h3: ({ children }) => /* @__PURE__ */ jsx29("h3", { className: "font-semibold mt-3 mb-2 text-[15px]", children }),
-    h4: ({ children }) => /* @__PURE__ */ jsx29("h4", { className: "font-semibold mt-3 mb-2 text-sm", children }),
-    h5: ({ children }) => /* @__PURE__ */ jsx29("h5", { className: "font-semibold mt-3 mb-2 text-[13px]", children }),
-    h6: ({ children }) => /* @__PURE__ */ jsx29("h6", { className: "font-semibold mt-3 mb-2 text-xs", children }),
-    p: ({ children }) => inline ? /* @__PURE__ */ jsx29("span", { children }) : /* @__PURE__ */ jsx29("p", { className: "my-1.5 leading-relaxed", children }),
-    blockquote: ({ children }) => /* @__PURE__ */ jsx29("blockquote", { className: "border-l-[3px] border-[var(--markdown-quote-border)] pl-3 my-2 opacity-90 italic", children }),
-    hr: () => /* @__PURE__ */ jsx29("hr", { className: "border-none border-t border-[var(--markdown-hr-color)] my-3" }),
-    strong: ({ children }) => /* @__PURE__ */ jsx29("strong", { className: "font-semibold", children }),
-    em: ({ children }) => /* @__PURE__ */ jsx29("em", { className: "italic", children })
+    ul: ({ children }) => /* @__PURE__ */ jsx30("ul", { className: "my-2 pl-5 list-disc", children }),
+    ol: ({ children }) => /* @__PURE__ */ jsx30("ol", { className: "my-2 pl-5 list-decimal", children }),
+    li: ({ children }) => /* @__PURE__ */ jsx30("li", { className: "mb-1", children }),
+    h1: ({ children }) => /* @__PURE__ */ jsx30("h1", { className: "font-semibold mt-3 mb-2 text-lg", children }),
+    h2: ({ children }) => /* @__PURE__ */ jsx30("h2", { className: "font-semibold mt-3 mb-2 text-base", children }),
+    h3: ({ children }) => /* @__PURE__ */ jsx30("h3", { className: "font-semibold mt-3 mb-2 text-[15px]", children }),
+    h4: ({ children }) => /* @__PURE__ */ jsx30("h4", { className: "font-semibold mt-3 mb-2 text-sm", children }),
+    h5: ({ children }) => /* @__PURE__ */ jsx30("h5", { className: "font-semibold mt-3 mb-2 text-[13px]", children }),
+    h6: ({ children }) => /* @__PURE__ */ jsx30("h6", { className: "font-semibold mt-3 mb-2 text-xs", children }),
+    p: ({ children }) => inline ? /* @__PURE__ */ jsx30("span", { children }) : /* @__PURE__ */ jsx30("p", { className: "my-1.5 leading-relaxed", children }),
+    blockquote: ({ children }) => /* @__PURE__ */ jsx30("blockquote", { className: "border-l-[3px] border-[var(--markdown-quote-border)] pl-3 my-2 opacity-90 italic", children }),
+    hr: () => /* @__PURE__ */ jsx30("hr", { className: "border-none border-t border-[var(--markdown-hr-color)] my-3" }),
+    strong: ({ children }) => /* @__PURE__ */ jsx30("strong", { className: "font-semibold", children }),
+    em: ({ children }) => /* @__PURE__ */ jsx30("em", { className: "italic", children })
   };
   const Wrapper = inline ? "span" : "div";
   const remarkPlugins = enableMath ? [remarkMath] : [];
   const rehypePlugins = enableMath ? [rehypeKatex] : [];
-  return /* @__PURE__ */ jsx29(Wrapper, { className: cn("markdown-content", className), style: wrapperStyle, children: /* @__PURE__ */ jsx29(
+  return /* @__PURE__ */ jsx30(Wrapper, { className: cn("markdown-content", className), style: wrapperStyle, children: /* @__PURE__ */ jsx30(
     ReactMarkdown2,
     {
       components,
@@ -8590,7 +8599,7 @@ var MarkdownText = memo4(function MarkdownText2({
 });
 
 // src/components/TextSelectionBadge.tsx
-import { jsx as jsx30, jsxs as jsxs10 } from "react/jsx-runtime";
+import { jsx as jsx31, jsxs as jsxs10 } from "react/jsx-runtime";
 function TextSelectionBadge({
   selection,
   onClear,
@@ -8621,9 +8630,9 @@ function TextSelectionBadge({
             strokeLinejoin: "round",
             className: "shrink-0 text-primary",
             children: [
-              /* @__PURE__ */ jsx30("path", { d: "M17 6.1H3" }),
-              /* @__PURE__ */ jsx30("path", { d: "M21 12.1H3" }),
-              /* @__PURE__ */ jsx30("path", { d: "M15.1 18H3" })
+              /* @__PURE__ */ jsx31("path", { d: "M17 6.1H3" }),
+              /* @__PURE__ */ jsx31("path", { d: "M21 12.1H3" }),
+              /* @__PURE__ */ jsx31("path", { d: "M15.1 18H3" })
             ]
           }
         ),
@@ -8639,9 +8648,9 @@ function TextSelectionBadge({
             ]
           }
         ),
-        selection.copiedToClipboard && /* @__PURE__ */ jsx30("span", { className: "text-[10px] px-1.5 py-0.5 bg-green-500/20 text-green-500 rounded font-medium", children: "Copied" }),
-        selection.elementType && /* @__PURE__ */ jsx30("span", { className: "text-[10px] px-1.5 py-0.5 bg-violet-500/20 text-violet-500 rounded", children: selection.elementType }),
-        onRestore && /* @__PURE__ */ jsx30(
+        selection.copiedToClipboard && /* @__PURE__ */ jsx31("span", { className: "text-[10px] px-1.5 py-0.5 bg-green-500/20 text-green-500 rounded font-medium", children: "Copied" }),
+        selection.elementType && /* @__PURE__ */ jsx31("span", { className: "text-[10px] px-1.5 py-0.5 bg-violet-500/20 text-violet-500 rounded", children: selection.elementType }),
+        onRestore && /* @__PURE__ */ jsx31(
           "button",
           {
             type: "button",
@@ -8664,14 +8673,14 @@ function TextSelectionBadge({
                 strokeLinecap: "round",
                 strokeLinejoin: "round",
                 children: [
-                  /* @__PURE__ */ jsx30("path", { d: "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" }),
-                  /* @__PURE__ */ jsx30("path", { d: "M3 3v5h5" })
+                  /* @__PURE__ */ jsx31("path", { d: "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" }),
+                  /* @__PURE__ */ jsx31("path", { d: "M3 3v5h5" })
                 ]
               }
             )
           }
         ),
-        /* @__PURE__ */ jsx30(
+        /* @__PURE__ */ jsx31(
           "button",
           {
             type: "button",
@@ -8694,8 +8703,8 @@ function TextSelectionBadge({
                 strokeLinecap: "round",
                 strokeLinejoin: "round",
                 children: [
-                  /* @__PURE__ */ jsx30("path", { d: "M18 6 6 18" }),
-                  /* @__PURE__ */ jsx30("path", { d: "m6 6 12 12" })
+                  /* @__PURE__ */ jsx31("path", { d: "M18 6 6 18" }),
+                  /* @__PURE__ */ jsx31("path", { d: "m6 6 12 12" })
                 ]
               }
             )
@@ -8732,21 +8741,21 @@ var gridCellBaseStyle = {
 
 // src/components/free-grid/grid-lines.tsx
 import { useMemo as useMemo20 } from "react";
-import { jsx as jsx31, jsxs as jsxs11 } from "react/jsx-runtime";
+import { jsx as jsx32, jsxs as jsxs11 } from "react/jsx-runtime";
 function GridLines({ columns, rows, color }) {
   const patternId = useMemo20(
     () => `grid-pattern-${Math.random().toString(36).substr(2, 9)}`,
     []
   );
   return /* @__PURE__ */ jsxs11("svg", { style: gridLinesOverlayStyle, "aria-hidden": "true", children: [
-    /* @__PURE__ */ jsx31("defs", { children: /* @__PURE__ */ jsx31(
+    /* @__PURE__ */ jsx32("defs", { children: /* @__PURE__ */ jsx32(
       "pattern",
       {
         id: patternId,
         width: `${100 / columns}%`,
         height: `${100 / Math.max(rows, 1)}%`,
         patternUnits: "objectBoundingBox",
-        children: /* @__PURE__ */ jsx31(
+        children: /* @__PURE__ */ jsx32(
           "rect",
           {
             width: "100%",
@@ -8759,12 +8768,12 @@ function GridLines({ columns, rows, color }) {
         )
       }
     ) }),
-    /* @__PURE__ */ jsx31("rect", { width: "100%", height: "100%", fill: `url(#${patternId})` })
+    /* @__PURE__ */ jsx32("rect", { width: "100%", height: "100%", fill: `url(#${patternId})` })
   ] });
 }
 
 // src/components/free-grid/canvas.tsx
-import { jsx as jsx32, jsxs as jsxs12 } from "react/jsx-runtime";
+import { jsx as jsx33, jsxs as jsxs12 } from "react/jsx-runtime";
 function FreeGridCanvas({
   columns = 12,
   rows,
@@ -8811,7 +8820,7 @@ function FreeGridCanvas({
       "data-columns": columns,
       "data-rows": rows,
       children: [
-        showGrid && /* @__PURE__ */ jsx32(GridLines, { columns, rows: rows ?? 4, color: gridLineColor }),
+        showGrid && /* @__PURE__ */ jsx33(GridLines, { columns, rows: rows ?? 4, color: gridLineColor }),
         children
       ]
     }
@@ -8819,7 +8828,7 @@ function FreeGridCanvas({
 }
 
 // src/components/free-grid/grid-cell.tsx
-import { jsx as jsx33 } from "react/jsx-runtime";
+import { jsx as jsx34 } from "react/jsx-runtime";
 function GridCell({
   column,
   row,
@@ -8837,7 +8846,7 @@ function GridCell({
     gridRowEnd: rowSpan > 1 ? `span ${rowSpan}` : void 0,
     ...style
   };
-  return /* @__PURE__ */ jsx33("div", { style: cellStyle, className, "data-grid-cell": true, children });
+  return /* @__PURE__ */ jsx34("div", { style: cellStyle, className, "data-grid-cell": true, children });
 }
 
 // src/components/free-grid/layout-utils.ts
@@ -8889,10 +8898,10 @@ function createLayout(options = {}) {
 }
 
 // src/components/ToolProgressOverlay.tsx
-import { memo as memo6, useEffect as useEffect22, useState as useState17 } from "react";
+import { memo as memo7, useEffect as useEffect22, useState as useState18 } from "react";
 
 // src/components/tool-progress/icons.tsx
-import { jsx as jsx34, jsxs as jsxs13 } from "react/jsx-runtime";
+import { jsx as jsx35, jsxs as jsxs13 } from "react/jsx-runtime";
 var toolIcons = {
   "web-search": /* @__PURE__ */ jsxs13(
     "svg",
@@ -8906,8 +8915,8 @@ var toolIcons = {
       strokeLinecap: "round",
       strokeLinejoin: "round",
       children: [
-        /* @__PURE__ */ jsx34("circle", { cx: "11", cy: "11", r: "8" }),
-        /* @__PURE__ */ jsx34("path", { d: "m21 21-4.3-4.3" })
+        /* @__PURE__ */ jsx35("circle", { cx: "11", cy: "11", r: "8" }),
+        /* @__PURE__ */ jsx35("path", { d: "m21 21-4.3-4.3" })
       ]
     }
   ),
@@ -8923,14 +8932,14 @@ var toolIcons = {
       strokeLinecap: "round",
       strokeLinejoin: "round",
       children: [
-        /* @__PURE__ */ jsx34("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
-        /* @__PURE__ */ jsx34("polyline", { points: "14,2 14,8 20,8" }),
-        /* @__PURE__ */ jsx34("line", { x1: "16", y1: "13", x2: "8", y2: "13" }),
-        /* @__PURE__ */ jsx34("line", { x1: "16", y1: "17", x2: "8", y2: "17" })
+        /* @__PURE__ */ jsx35("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
+        /* @__PURE__ */ jsx35("polyline", { points: "14,2 14,8 20,8" }),
+        /* @__PURE__ */ jsx35("line", { x1: "16", y1: "13", x2: "8", y2: "13" }),
+        /* @__PURE__ */ jsx35("line", { x1: "16", y1: "17", x2: "8", y2: "17" })
       ]
     }
   ),
-  "search-flight": /* @__PURE__ */ jsx34(
+  "search-flight": /* @__PURE__ */ jsx35(
     "svg",
     {
       width: "16",
@@ -8941,7 +8950,7 @@ var toolIcons = {
       strokeWidth: "2",
       strokeLinecap: "round",
       strokeLinejoin: "round",
-      children: /* @__PURE__ */ jsx34("path", { d: "M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" })
+      children: /* @__PURE__ */ jsx35("path", { d: "M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" })
     }
   ),
   "search-hotel": /* @__PURE__ */ jsxs13(
@@ -8956,13 +8965,13 @@ var toolIcons = {
       strokeLinecap: "round",
       strokeLinejoin: "round",
       children: [
-        /* @__PURE__ */ jsx34("path", { d: "M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z" }),
-        /* @__PURE__ */ jsx34("path", { d: "M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2" }),
-        /* @__PURE__ */ jsx34("path", { d: "M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2" }),
-        /* @__PURE__ */ jsx34("path", { d: "M10 6h4" }),
-        /* @__PURE__ */ jsx34("path", { d: "M10 10h4" }),
-        /* @__PURE__ */ jsx34("path", { d: "M10 14h4" }),
-        /* @__PURE__ */ jsx34("path", { d: "M10 18h4" })
+        /* @__PURE__ */ jsx35("path", { d: "M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z" }),
+        /* @__PURE__ */ jsx35("path", { d: "M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2" }),
+        /* @__PURE__ */ jsx35("path", { d: "M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2" }),
+        /* @__PURE__ */ jsx35("path", { d: "M10 6h4" }),
+        /* @__PURE__ */ jsx35("path", { d: "M10 10h4" }),
+        /* @__PURE__ */ jsx35("path", { d: "M10 14h4" }),
+        /* @__PURE__ */ jsx35("path", { d: "M10 18h4" })
       ]
     }
   ),
@@ -8978,10 +8987,10 @@ var toolIcons = {
       strokeLinecap: "round",
       strokeLinejoin: "round",
       children: [
-        /* @__PURE__ */ jsx34("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
-        /* @__PURE__ */ jsx34("polyline", { points: "14,2 14,8 20,8" }),
-        /* @__PURE__ */ jsx34("path", { d: "M12 18v-6" }),
-        /* @__PURE__ */ jsx34("path", { d: "M9 15l3 3 3-3" })
+        /* @__PURE__ */ jsx35("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
+        /* @__PURE__ */ jsx35("polyline", { points: "14,2 14,8 20,8" }),
+        /* @__PURE__ */ jsx35("path", { d: "M12 18v-6" }),
+        /* @__PURE__ */ jsx35("path", { d: "M9 15l3 3 3-3" })
       ]
     }
   ),
@@ -8997,9 +9006,9 @@ var toolIcons = {
       strokeLinecap: "round",
       strokeLinejoin: "round",
       children: [
-        /* @__PURE__ */ jsx34("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
-        /* @__PURE__ */ jsx34("polyline", { points: "14,2 14,8 20,8" }),
-        /* @__PURE__ */ jsx34("path", { d: "M9 15l2 2 4-4" })
+        /* @__PURE__ */ jsx35("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
+        /* @__PURE__ */ jsx35("polyline", { points: "14,2 14,8 20,8" }),
+        /* @__PURE__ */ jsx35("path", { d: "M9 15l2 2 4-4" })
       ]
     }
   ),
@@ -9015,14 +9024,14 @@ var toolIcons = {
       strokeLinecap: "round",
       strokeLinejoin: "round",
       children: [
-        /* @__PURE__ */ jsx34("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
-        /* @__PURE__ */ jsx34("polyline", { points: "14,2 14,8 20,8" }),
-        /* @__PURE__ */ jsx34("circle", { cx: "11.5", cy: "14.5", r: "2.5" }),
-        /* @__PURE__ */ jsx34("path", { d: "M13.3 16.3 15 18" })
+        /* @__PURE__ */ jsx35("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
+        /* @__PURE__ */ jsx35("polyline", { points: "14,2 14,8 20,8" }),
+        /* @__PURE__ */ jsx35("circle", { cx: "11.5", cy: "14.5", r: "2.5" }),
+        /* @__PURE__ */ jsx35("path", { d: "M13.3 16.3 15 18" })
       ]
     }
   ),
-  default: /* @__PURE__ */ jsx34(
+  default: /* @__PURE__ */ jsx35(
     "svg",
     {
       width: "16",
@@ -9033,7 +9042,7 @@ var toolIcons = {
       strokeWidth: "2",
       strokeLinecap: "round",
       strokeLinejoin: "round",
-      children: /* @__PURE__ */ jsx34("polygon", { points: "13,2 3,14 12,14 11,22 21,10 12,10 13,2" })
+      children: /* @__PURE__ */ jsx35("polygon", { points: "13,2 3,14 12,14 11,22 21,10 12,10 13,2" })
     }
   )
 };
@@ -9091,9 +9100,9 @@ var progressAnimations = `
 `;
 
 // src/components/tool-progress/progress-item.tsx
-import { memo as memo5 } from "react";
-import { jsx as jsx35, jsxs as jsxs14 } from "react/jsx-runtime";
-var DefaultProgressItem = memo5(function DefaultProgressItem2({
+import { memo as memo6 } from "react";
+import { jsx as jsx36, jsxs as jsxs14 } from "react/jsx-runtime";
+var DefaultProgressItem = memo6(function DefaultProgressItem2({
   progress
 }) {
   const label = toolLabels[progress.toolName] || progress.toolName;
@@ -9117,7 +9126,7 @@ var DefaultProgressItem = memo5(function DefaultProgressItem2({
       },
       children: [
         /* @__PURE__ */ jsxs14("div", { style: { position: "relative" }, children: [
-          /* @__PURE__ */ jsx35(
+          /* @__PURE__ */ jsx36(
             "div",
             {
               style: {
@@ -9133,7 +9142,7 @@ var DefaultProgressItem = memo5(function DefaultProgressItem2({
               children: icon
             }
           ),
-          isActive && /* @__PURE__ */ jsx35(
+          isActive && /* @__PURE__ */ jsx36(
             "span",
             {
               style: {
@@ -9159,7 +9168,7 @@ var DefaultProgressItem = memo5(function DefaultProgressItem2({
                 gap: 6
               },
               children: [
-                /* @__PURE__ */ jsx35(
+                /* @__PURE__ */ jsx36(
                   "span",
                   {
                     style: {
@@ -9170,7 +9179,7 @@ var DefaultProgressItem = memo5(function DefaultProgressItem2({
                     children: label
                   }
                 ),
-                isActive && /* @__PURE__ */ jsx35("span", { style: { display: "flex", gap: 2 }, children: [0, 1, 2].map((i) => /* @__PURE__ */ jsx35(
+                isActive && /* @__PURE__ */ jsx36("span", { style: { display: "flex", gap: 2 }, children: [0, 1, 2].map((i) => /* @__PURE__ */ jsx36(
                   "span",
                   {
                     style: {
@@ -9186,7 +9195,7 @@ var DefaultProgressItem = memo5(function DefaultProgressItem2({
               ]
             }
           ),
-          progress.message && /* @__PURE__ */ jsx35(
+          progress.message && /* @__PURE__ */ jsx36(
             "p",
             {
               style: {
@@ -9208,8 +9217,8 @@ var DefaultProgressItem = memo5(function DefaultProgressItem2({
 });
 
 // src/components/ToolProgressOverlay.tsx
-import { Fragment as Fragment3, jsx as jsx36, jsxs as jsxs15 } from "react/jsx-runtime";
-var ToolProgressOverlay = memo6(function ToolProgressOverlay2({
+import { Fragment as Fragment3, jsx as jsx37, jsxs as jsxs15 } from "react/jsx-runtime";
+var ToolProgressOverlay = memo7(function ToolProgressOverlay2({
   position = "top-right",
   className,
   show,
@@ -9218,7 +9227,7 @@ var ToolProgressOverlay = memo6(function ToolProgressOverlay2({
 }) {
   const activeProgress = useActiveToolProgress2();
   const isRunning = useIsToolRunning();
-  const [mounted, setMounted] = useState17(false);
+  const [mounted, setMounted] = useState18(false);
   useEffect22(() => {
     setMounted(true);
   }, []);
@@ -9228,8 +9237,8 @@ var ToolProgressOverlay = memo6(function ToolProgressOverlay2({
   }
   const visibleProgress = activeProgress.slice(0, maxItems);
   return /* @__PURE__ */ jsxs15(Fragment3, { children: [
-    /* @__PURE__ */ jsx36("style", { children: progressAnimations }),
-    /* @__PURE__ */ jsx36(
+    /* @__PURE__ */ jsx37("style", { children: progressAnimations }),
+    /* @__PURE__ */ jsx37(
       "div",
       {
         className,
@@ -9243,7 +9252,7 @@ var ToolProgressOverlay = memo6(function ToolProgressOverlay2({
           ...positionStyles[position]
         },
         children: visibleProgress.map(
-          (progress) => renderItem ? /* @__PURE__ */ jsx36("div", { style: { pointerEvents: "auto" }, children: renderItem(progress) }, progress.toolCallId) : /* @__PURE__ */ jsx36(
+          (progress) => renderItem ? /* @__PURE__ */ jsx37("div", { style: { pointerEvents: "auto" }, children: renderItem(progress) }, progress.toolCallId) : /* @__PURE__ */ jsx37(
             DefaultProgressItem,
             {
               progress
@@ -9257,12 +9266,12 @@ var ToolProgressOverlay = memo6(function ToolProgressOverlay2({
 });
 
 // src/components/Canvas/CanvasBlock.tsx
-import { memo as memo7, useCallback as useCallback33, useState as useState18, useEffect as useEffect23, useMemo as useMemo22 } from "react";
-import { jsx as jsx37, jsxs as jsxs16 } from "react/jsx-runtime";
+import { memo as memo8, useCallback as useCallback34, useState as useState19, useEffect as useEffect23, useMemo as useMemo22 } from "react";
+import { jsx as jsx38, jsxs as jsxs16 } from "react/jsx-runtime";
 function CanvasBlockSkeleton() {
-  return /* @__PURE__ */ jsx37("div", { className: "w-full min-h-[200px] bg-zinc-900/50 rounded-xl border border-white/5 flex items-center justify-center", children: /* @__PURE__ */ jsx37("div", { className: "text-zinc-500 text-sm", children: "Loading editor..." }) });
+  return /* @__PURE__ */ jsx38("div", { className: "w-full min-h-[200px] bg-zinc-900/50 rounded-xl border border-white/5 flex items-center justify-center", children: /* @__PURE__ */ jsx38("div", { className: "text-zinc-500 text-sm", children: "Loading editor..." }) });
 }
-var CanvasBlock = memo7(function CanvasBlock2({
+var CanvasBlock = memo8(function CanvasBlock2({
   element,
   onAction,
   loading,
@@ -9280,8 +9289,8 @@ var CanvasBlock = memo7(function CanvasBlock2({
     placeholder = "Start typing... Use '/' for commands",
     title
   } = element.props;
-  const [content, setContent] = useState18(initialContent || null);
-  const [editorKey, setEditorKey] = useState18(0);
+  const [content, setContent] = useState19(initialContent || null);
+  const [editorKey, setEditorKey] = useState19(0);
   const processedContent = useMemo22(() => {
     if (initialContent) return initialContent;
     if (markdown) {
@@ -9298,7 +9307,7 @@ var CanvasBlock = memo7(function CanvasBlock2({
       setEditorKey((k) => k + 1);
     }
   }, [processedContent]);
-  const handleChange = useCallback33(
+  const handleChange = useCallback34(
     (_state, serialized) => {
       setContent(serialized);
       onAction?.({
@@ -9311,7 +9320,7 @@ var CanvasBlock = memo7(function CanvasBlock2({
     },
     [documentId, onAction]
   );
-  const handleSave = useCallback33(() => {
+  const handleSave = useCallback34(() => {
     if (content) {
       onAction?.({
         type: "canvas:save",
@@ -9322,7 +9331,7 @@ var CanvasBlock = memo7(function CanvasBlock2({
       });
     }
   }, [documentId, content, onAction]);
-  const handleOpenInCanvas = useCallback33(() => {
+  const handleOpenInCanvas = useCallback34(() => {
     onAction?.({
       type: "canvas:open",
       payload: {
@@ -9333,7 +9342,7 @@ var CanvasBlock = memo7(function CanvasBlock2({
     });
   }, [documentId, title, initialContent, onAction]);
   if (loading) {
-    return /* @__PURE__ */ jsx37(CanvasBlockSkeleton, {});
+    return /* @__PURE__ */ jsx38(CanvasBlockSkeleton, {});
   }
   if (!EditorComponent) {
     return /* @__PURE__ */ jsxs16(
@@ -9343,14 +9352,14 @@ var CanvasBlock = memo7(function CanvasBlock2({
         style: { minHeight: height },
         "data-document-id": documentId,
         children: [
-          title && /* @__PURE__ */ jsx37("div", { className: "px-4 py-3 border-b border-white/5", children: /* @__PURE__ */ jsx37("h3", { className: "text-lg font-semibold text-white", children: title }) }),
+          title && /* @__PURE__ */ jsx38("div", { className: "px-4 py-3 border-b border-white/5", children: /* @__PURE__ */ jsx38("h3", { className: "text-lg font-semibold text-white", children: title }) }),
           /* @__PURE__ */ jsxs16(
             "div",
             {
               className: "flex flex-col items-center justify-center gap-4 p-8",
               style: { minHeight: "200px" },
               children: [
-                /* @__PURE__ */ jsx37("p", { className: "text-zinc-400 text-sm", children: initialContent ? "Document content available" : "Empty document" }),
+                /* @__PURE__ */ jsx38("p", { className: "text-zinc-400 text-sm", children: initialContent ? "Document content available" : "Empty document" }),
                 /* @__PURE__ */ jsxs16(
                   "button",
                   {
@@ -9369,8 +9378,8 @@ var CanvasBlock = memo7(function CanvasBlock2({
                           strokeLinecap: "round",
                           strokeLinejoin: "round",
                           children: [
-                            /* @__PURE__ */ jsx37("path", { d: "M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" }),
-                            /* @__PURE__ */ jsx37("path", { d: "M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" })
+                            /* @__PURE__ */ jsx38("path", { d: "M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" }),
+                            /* @__PURE__ */ jsx38("path", { d: "M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" })
                           ]
                         }
                       ),
@@ -9392,8 +9401,8 @@ var CanvasBlock = memo7(function CanvasBlock2({
       style: { width, minHeight: height },
       "data-document-id": documentId,
       children: [
-        title && /* @__PURE__ */ jsx37("h3", { className: "text-lg font-semibold text-white mb-3", children: title }),
-        /* @__PURE__ */ jsx37("div", { className: "bg-zinc-900/50 rounded-xl border border-white/5 overflow-hidden", children: /* @__PURE__ */ jsx37(
+        title && /* @__PURE__ */ jsx38("h3", { className: "text-lg font-semibold text-white mb-3", children: title }),
+        /* @__PURE__ */ jsx38("div", { className: "bg-zinc-900/50 rounded-xl border border-white/5 overflow-hidden", children: /* @__PURE__ */ jsx38(
           EditorComponent,
           {
             initialState: content,
@@ -9408,7 +9417,7 @@ var CanvasBlock = memo7(function CanvasBlock2({
           },
           editorKey
         ) }),
-        mode === "edit" && /* @__PURE__ */ jsx37("div", { className: "flex justify-end mt-2", children: /* @__PURE__ */ jsx37(
+        mode === "edit" && /* @__PURE__ */ jsx38("div", { className: "flex justify-end mt-2", children: /* @__PURE__ */ jsx38(
           "button",
           {
             onClick: handleSave,
@@ -10441,9 +10450,9 @@ function createDOMPurify() {
 var purify = createDOMPurify();
 
 // src/components/Document/DocumentBlock.tsx
-import { memo as memo8, useMemo as useMemo23 } from "react";
-import { jsx as jsx38, jsxs as jsxs17 } from "react/jsx-runtime";
-var DocumentBlock = memo8(function DocumentBlock2({
+import { memo as memo9, useMemo as useMemo23 } from "react";
+import { jsx as jsx39, jsxs as jsxs17 } from "react/jsx-runtime";
+var DocumentBlock = memo9(function DocumentBlock2({
   element,
   onAction,
   renderText,
@@ -10459,7 +10468,7 @@ var DocumentBlock = memo8(function DocumentBlock2({
   } = element.props;
   const renderedContent = useMemo23(() => {
     if (format === "html") {
-      return /* @__PURE__ */ jsx38(
+      return /* @__PURE__ */ jsx39(
         "div",
         {
           className: "prose prose-invert max-w-none",
@@ -10470,7 +10479,7 @@ var DocumentBlock = memo8(function DocumentBlock2({
     if (format === "markdown" && renderText) {
       return renderText(content, { markdown: true });
     }
-    return /* @__PURE__ */ jsx38("pre", { className: "whitespace-pre-wrap text-sm", children: content });
+    return /* @__PURE__ */ jsx39("pre", { className: "whitespace-pre-wrap text-sm", children: content });
   }, [content, format, renderText]);
   const handleOpenInCanvas = () => {
     onAction?.({
@@ -10485,11 +10494,11 @@ var DocumentBlock = memo8(function DocumentBlock2({
   };
   if (loading) {
     return /* @__PURE__ */ jsxs17("div", { className: "w-full p-6 bg-zinc-900/50 rounded-xl border border-white/5 animate-pulse", children: [
-      /* @__PURE__ */ jsx38("div", { className: "h-6 w-1/3 bg-zinc-800 rounded mb-4" }),
+      /* @__PURE__ */ jsx39("div", { className: "h-6 w-1/3 bg-zinc-800 rounded mb-4" }),
       /* @__PURE__ */ jsxs17("div", { className: "space-y-2", children: [
-        /* @__PURE__ */ jsx38("div", { className: "h-4 bg-zinc-800 rounded w-full" }),
-        /* @__PURE__ */ jsx38("div", { className: "h-4 bg-zinc-800 rounded w-5/6" }),
-        /* @__PURE__ */ jsx38("div", { className: "h-4 bg-zinc-800 rounded w-4/6" })
+        /* @__PURE__ */ jsx39("div", { className: "h-4 bg-zinc-800 rounded w-full" }),
+        /* @__PURE__ */ jsx39("div", { className: "h-4 bg-zinc-800 rounded w-5/6" }),
+        /* @__PURE__ */ jsx39("div", { className: "h-4 bg-zinc-800 rounded w-4/6" })
       ] })
     ] });
   }
@@ -10509,15 +10518,15 @@ var DocumentBlock = memo8(function DocumentBlock2({
             strokeLinejoin: "round",
             className: "text-zinc-400",
             children: [
-              /* @__PURE__ */ jsx38("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
-              /* @__PURE__ */ jsx38("polyline", { points: "14 2 14 8 20 8" }),
-              /* @__PURE__ */ jsx38("line", { x1: "16", x2: "8", y1: "13", y2: "13" }),
-              /* @__PURE__ */ jsx38("line", { x1: "16", x2: "8", y1: "17", y2: "17" }),
-              /* @__PURE__ */ jsx38("line", { x1: "10", x2: "8", y1: "9", y2: "9" })
+              /* @__PURE__ */ jsx39("path", { d: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" }),
+              /* @__PURE__ */ jsx39("polyline", { points: "14 2 14 8 20 8" }),
+              /* @__PURE__ */ jsx39("line", { x1: "16", x2: "8", y1: "13", y2: "13" }),
+              /* @__PURE__ */ jsx39("line", { x1: "16", x2: "8", y1: "17", y2: "17" }),
+              /* @__PURE__ */ jsx39("line", { x1: "10", x2: "8", y1: "9", y2: "9" })
             ]
           }
         ),
-        /* @__PURE__ */ jsx38("h3", { className: "text-sm font-medium text-white", children: title })
+        /* @__PURE__ */ jsx39("h3", { className: "text-sm font-medium text-white", children: title })
       ] }),
       showOpenInCanvas && /* @__PURE__ */ jsxs17(
         "button",
@@ -10537,8 +10546,8 @@ var DocumentBlock = memo8(function DocumentBlock2({
                 strokeLinecap: "round",
                 strokeLinejoin: "round",
                 children: [
-                  /* @__PURE__ */ jsx38("path", { d: "M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" }),
-                  /* @__PURE__ */ jsx38("path", { d: "M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" })
+                  /* @__PURE__ */ jsx39("path", { d: "M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" }),
+                  /* @__PURE__ */ jsx39("path", { d: "M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" })
                 ]
               }
             ),
@@ -10547,7 +10556,7 @@ var DocumentBlock = memo8(function DocumentBlock2({
         }
       )
     ] }),
-    /* @__PURE__ */ jsx38("div", { className: "p-4", children: renderedContent })
+    /* @__PURE__ */ jsx39("div", { className: "p-4", children: renderedContent })
   ] });
 });
 

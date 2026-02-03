@@ -2,6 +2,7 @@
 
 import React, { useMemo, type ReactNode, type CSSProperties } from "react";
 import ReactMarkdown from "react-markdown";
+import { sanitizeUrl } from "@onegenui/utils";
 import type { MarkdownTheme } from "./types";
 import { createStyles } from "./types";
 import { useCitations } from "../citation";
@@ -103,7 +104,7 @@ export function InternalMarkdown({
       // Links
       a: ({ href, children }: { href?: string; children?: ReactNode }) => (
         <a
-          href={href}
+          href={sanitizeUrl(href)}
           target="_blank"
           rel="noopener noreferrer"
           style={styles.link}
