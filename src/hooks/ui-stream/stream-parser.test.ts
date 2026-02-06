@@ -38,6 +38,39 @@ describe("stream-parser", () => {
 
     const parsed = parseSSELine(line);
     expect(parsed?.type).toBe("patch");
+    if (parsed?.type === "patch") {
+      expect(parsed.patches).toHaveLength(1);
+    }
+  });
+
+  it("parses batched patch events without dropping operations", () => {
+    const line = toLine(
+      createWireFrame({
+        correlationId: "corr-2b",
+        sequence: 2,
+        event: {
+          kind: "patch",
+          patches: [
+            {
+              op: "add",
+              path: "/elements/root",
+              value: { key: "root", type: "Stack", props: {}, children: [] },
+            },
+            {
+              op: "add",
+              path: "/elements/root/children/-",
+              value: "child-1",
+            },
+          ],
+        },
+      }),
+    );
+
+    const parsed = parseSSELine(line);
+    expect(parsed?.type).toBe("patch");
+    if (parsed?.type === "patch") {
+      expect(parsed.patches).toHaveLength(2);
+    }
   });
 
   it("parses protocol error events", () => {
@@ -61,4 +94,3 @@ describe("stream-parser", () => {
     }
   });
 });
-

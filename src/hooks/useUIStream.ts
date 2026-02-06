@@ -613,8 +613,8 @@ export function useUIStream({
                 }
               }
             } else if (event.type === "patch") {
-              patchCount++;
-              patchBuffer.push(event.patch);
+              patchCount += event.patches.length;
+              patchBuffer.push(...event.patches);
 
               // Schedule batch application with short delay
               if (!patchFlushTimerRef.current) {

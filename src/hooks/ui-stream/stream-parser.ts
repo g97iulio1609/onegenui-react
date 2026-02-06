@@ -22,7 +22,7 @@ export type StreamEvent =
   | { type: "question"; question: QuestionPayload }
   | { type: "suggestion"; suggestions: SuggestionChip[] }
   | { type: "tool-progress"; progress: ToolProgress }
-  | { type: "patch"; patch: JsonPatch }
+  | { type: "patch"; patches: JsonPatch[] }
   | { type: "plan-created"; plan: unknown }
   | { type: "persisted-attachments"; attachments: unknown[] }
   | { type: "document-index-ui"; uiComponent: unknown }
@@ -36,7 +36,7 @@ export type StreamEvent =
   | { type: "citations"; citations: unknown[] }
   | { type: "unknown"; payload: unknown };
 
-function parsePatch(patch: JsonPatch): StreamEvent | null {
+function parsePatchOperation(patch: JsonPatch): StreamEvent | null {
   if (patch.op === "message") {
     const content = (patch as { content?: unknown }).content ?? patch.value;
     if (!content) return null;
@@ -69,7 +69,51 @@ function parsePatch(patch: JsonPatch): StreamEvent | null {
   }
 
   if (patch.path) {
-    return { type: "patch", patch };
+    return { type: "patch", patches: [patch] };
+  }
+
+  return null;
+}
+
+function parsePatchEvent(event: {
+  patch?: JsonPatch;
+  patches?: JsonPatch[];
+}): StreamEvent | null {
+  const rawPatches = event.patch
+    ? [event.patch]
+    : Array.isArray(event.patches)
+      ? event.patches
+      : [];
+
+  if (rawPatches.length === 0) {
+    return null;
+  }
+
+  const parsedEvents = rawPatches
+    .map((patch) => parsePatchOperation(patch))
+    .filter((candidate): candidate is StreamEvent => candidate !== null);
+
+  if (parsedEvents.length === 0) {
+    return null;
+  }
+
+  if (parsedEvents.length === 1) {
+    return parsedEvents[0] ?? null;
+  }
+
+  const patchEvents = parsedEvents.filter((candidate) => candidate.type === "patch");
+  if (patchEvents.length === parsedEvents.length) {
+    const mergedPatches = patchEvents.flatMap((candidate) => candidate.patches);
+    return { type: "patch", patches: mergedPatches };
+  }
+
+  const firstNonPatch = parsedEvents.find((candidate) => candidate.type !== "patch");
+  if (firstNonPatch) {
+    streamLog.warn(
+      "Mixed patch payload: non-patch operations cannot be split per frame",
+      { operations: rawPatches.length },
+    );
+    return firstNonPatch;
   }
 
   return null;
@@ -179,13 +223,7 @@ export function parseSSELine(line: string): StreamEvent | null {
           },
         };
       case "patch":
-        if (event.patch) {
-          return parsePatch(event.patch);
-        }
-        if (event.patches && event.patches.length > 0) {
-          return parsePatch(event.patches[0] as JsonPatch);
-        }
-        return null;
+        return parsePatchEvent(event);
       case "error":
         return {
           type: "error",

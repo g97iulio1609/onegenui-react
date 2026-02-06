@@ -30,6 +30,8 @@ export function createPlaceholder(key: string, turnId?: string): UIElement {
     children: [],
     _meta: {
       turnId,
+      createdTurnId: turnId,
+      lastModifiedTurnId: turnId,
       createdAt: Date.now(),
       isPlaceholder: true,
     },

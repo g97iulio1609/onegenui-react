@@ -43,6 +43,47 @@ export interface ApplyPatchOptions {
   protectedTypes?: string[];
 }
 
+type ElementMeta = UIElement["_meta"];
+
+function buildCreatedMeta(existingMeta: ElementMeta, turnId?: string): ElementMeta {
+  if (!turnId && !existingMeta) return undefined;
+
+  const now = Date.now();
+  const createdTurnId = existingMeta?.createdTurnId ?? existingMeta?.turnId ?? turnId;
+  const lastModifiedTurnId =
+    turnId ?? existingMeta?.lastModifiedTurnId ?? existingMeta?.turnId;
+
+  return {
+    ...existingMeta,
+    turnId: createdTurnId,
+    createdTurnId,
+    lastModifiedTurnId,
+    createdAt: existingMeta?.createdAt ?? now,
+    lastModifiedAt: existingMeta?.lastModifiedAt ?? now,
+  };
+}
+
+function buildUpdatedMeta(existingMeta: ElementMeta, turnId?: string): ElementMeta {
+  if (!turnId && !existingMeta) return undefined;
+
+  const now = Date.now();
+  const createdTurnId = existingMeta?.createdTurnId ?? existingMeta?.turnId ?? turnId;
+  const resolvedLastModifiedAt = turnId
+    ? now
+    : existingMeta?.lastModifiedAt ?? now;
+  const lastModifiedTurnId =
+    turnId ?? existingMeta?.lastModifiedTurnId ?? existingMeta?.turnId;
+
+  return {
+    ...existingMeta,
+    turnId: createdTurnId,
+    createdTurnId,
+    lastModifiedTurnId,
+    createdAt: existingMeta?.createdAt ?? now,
+    lastModifiedAt: resolvedLastModifiedAt,
+  };
+}
+
 /**
  * Apply a JSON patch to the current tree
  */
@@ -72,12 +113,11 @@ export function applyPatch(
 
         if (pathParts.length === 1) {
           const element = patch.value as UIElement;
-          const newElement = turnId
-            ? {
-                ...element,
-                _meta: { ...element._meta, turnId, createdAt: Date.now() },
-              }
-            : element;
+          const existingElement = newTree.elements[elementKey];
+          const meta = existingElement
+            ? buildUpdatedMeta(existingElement._meta ?? element._meta, turnId)
+            : buildCreatedMeta(element._meta, turnId);
+          const newElement = meta ? { ...element, _meta: meta } : element;
 
           ensureChildrenExist(
             newTree.elements,
@@ -97,7 +137,7 @@ export function applyPatch(
                 type: "Stack",
                 props: { gap: "md" },
                 children: [],
-                _meta: { turnId, createdAt: Date.now(), autoCreated: true },
+                _meta: buildCreatedMeta({ autoCreated: true }, turnId),
               } as UIElement;
             } else {
               element = createPlaceholder(elementKey, turnId);
@@ -129,17 +169,12 @@ export function applyPatch(
             }
           }
 
-          // Update _meta.turnId when element is modified (not just created)
-          // This enables tracking which turn last modified each element
-          const updatedElement = turnId
-            ? {
-                ...newElement,
-                _meta: {
-                  ...newElement._meta,
-                  turnId,
-                  lastModifiedAt: Date.now(),
-                },
-              }
+          const updatedMeta = buildUpdatedMeta(
+            newElement._meta ?? element._meta,
+            turnId,
+          );
+          const updatedElement = updatedMeta
+            ? { ...newElement, _meta: updatedMeta }
             : newElement;
 
           newTree.elements[elementKey] = updatedElement;
@@ -195,18 +230,15 @@ export function applyPatch(
 
         if (pathParts.length === 1 && !newTree.elements[elementKey]) {
           const newElement = patch.value as UIElement;
-          if (turnId && newElement._meta) {
-            newElement._meta.turnId = turnId;
-          } else if (turnId) {
-            (newElement as any)._meta = { turnId };
-          }
+          const meta = buildCreatedMeta(newElement._meta, turnId);
+          const ensuredElement = meta ? { ...newElement, _meta: meta } : newElement;
           ensureChildrenExist(
             newTree.elements,
-            newElement.children,
+            ensuredElement.children,
             createPlaceholder,
             turnId,
           );
-          newTree.elements[elementKey] = newElement;
+          newTree.elements[elementKey] = ensuredElement;
         }
       }
       break;

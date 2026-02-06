@@ -100,7 +100,7 @@ export function dispatchStreamEvent(
     case "patch":
       resetIdleTimer();
       newState.patchCount++;
-      newState.patchBuffer = [...state.patchBuffer, event.patch];
+      newState.patchBuffer = [...state.patchBuffer, ...event.patches];
       return { state: newState, handled: true };
 
     case "plan-created":

@@ -5954,6 +5954,8 @@ function createPlaceholder(key, turnId) {
     children: [],
     _meta: {
       turnId,
+      createdTurnId: turnId,
+      lastModifiedTurnId: turnId,
       createdAt: Date.now(),
       isPlaceholder: true
     }
@@ -5966,6 +5968,35 @@ function getPatchDepth(patch) {
 }
 
 // src/hooks/patch-utils.ts
+function buildCreatedMeta(existingMeta, turnId) {
+  if (!turnId && !existingMeta) return void 0;
+  const now = Date.now();
+  const createdTurnId = existingMeta?.createdTurnId ?? existingMeta?.turnId ?? turnId;
+  const lastModifiedTurnId = turnId ?? existingMeta?.lastModifiedTurnId ?? existingMeta?.turnId;
+  return {
+    ...existingMeta,
+    turnId: createdTurnId,
+    createdTurnId,
+    lastModifiedTurnId,
+    createdAt: existingMeta?.createdAt ?? now,
+    lastModifiedAt: existingMeta?.lastModifiedAt ?? now
+  };
+}
+function buildUpdatedMeta(existingMeta, turnId) {
+  if (!turnId && !existingMeta) return void 0;
+  const now = Date.now();
+  const createdTurnId = existingMeta?.createdTurnId ?? existingMeta?.turnId ?? turnId;
+  const resolvedLastModifiedAt = turnId ? now : existingMeta?.lastModifiedAt ?? now;
+  const lastModifiedTurnId = turnId ?? existingMeta?.lastModifiedTurnId ?? existingMeta?.turnId;
+  return {
+    ...existingMeta,
+    turnId: createdTurnId,
+    createdTurnId,
+    lastModifiedTurnId,
+    createdAt: existingMeta?.createdAt ?? now,
+    lastModifiedAt: resolvedLastModifiedAt
+  };
+}
 function applyPatch(tree, patch, options = {}) {
   const { turnId, protectedTypes = [] } = options;
   const newTree = { ...tree, elements: { ...tree.elements } };
@@ -5983,10 +6014,9 @@ function applyPatch(tree, patch, options = {}) {
         if (!elementKey) return newTree;
         if (pathParts.length === 1) {
           const element = patch.value;
-          const newElement = turnId ? {
-            ...element,
-            _meta: { ...element._meta, turnId, createdAt: Date.now() }
-          } : element;
+          const existingElement = newTree.elements[elementKey];
+          const meta = existingElement ? buildUpdatedMeta(existingElement._meta ?? element._meta, turnId) : buildCreatedMeta(element._meta, turnId);
+          const newElement = meta ? { ...element, _meta: meta } : element;
           ensureChildrenExist(
             newTree.elements,
             newElement.children,
@@ -6004,7 +6034,7 @@ function applyPatch(tree, patch, options = {}) {
                 type: "Stack",
                 props: { gap: "md" },
                 children: [],
-                _meta: { turnId, createdAt: Date.now(), autoCreated: true }
+                _meta: buildCreatedMeta({ autoCreated: true }, turnId)
               };
             } else {
               element = createPlaceholder(elementKey, turnId);
@@ -6030,14 +6060,11 @@ function applyPatch(tree, patch, options = {}) {
               };
             }
           }
-          const updatedElement = turnId ? {
-            ...newElement,
-            _meta: {
-              ...newElement._meta,
-              turnId,
-              lastModifiedAt: Date.now()
-            }
-          } : newElement;
+          const updatedMeta = buildUpdatedMeta(
+            newElement._meta ?? element._meta,
+            turnId
+          );
+          const updatedElement = updatedMeta ? { ...newElement, _meta: updatedMeta } : newElement;
           newTree.elements[elementKey] = updatedElement;
         }
       }
@@ -6084,18 +6111,15 @@ function applyPatch(tree, patch, options = {}) {
         if (!elementKey) return newTree;
         if (pathParts.length === 1 && !newTree.elements[elementKey]) {
           const newElement = patch.value;
-          if (turnId && newElement._meta) {
-            newElement._meta.turnId = turnId;
-          } else if (turnId) {
-            newElement._meta = { turnId };
-          }
+          const meta = buildCreatedMeta(newElement._meta, turnId);
+          const ensuredElement = meta ? { ...newElement, _meta: meta } : newElement;
           ensureChildrenExist(
             newTree.elements,
-            newElement.children,
+            ensuredElement.children,
             createPlaceholder,
             turnId
           );
-          newTree.elements[elementKey] = newElement;
+          newTree.elements[elementKey] = ensuredElement;
         }
       }
       break;
@@ -6736,7 +6760,7 @@ function addQuestionAnswer(turns, turnId, questionId, answers) {
 
 // src/hooks/ui-stream/stream-parser.ts
 var import_core5 = require("@onegenui/core");
-function parsePatch(patch) {
+function parsePatchOperation(patch) {
   if (patch.op === "message") {
     const content = patch.content ?? patch.value;
     if (!content) return null;
@@ -6757,7 +6781,34 @@ function parsePatch(patch) {
     return Array.isArray(suggestions) ? { type: "suggestion", suggestions } : null;
   }
   if (patch.path) {
-    return { type: "patch", patch };
+    return { type: "patch", patches: [patch] };
+  }
+  return null;
+}
+function parsePatchEvent(event) {
+  const rawPatches = event.patch ? [event.patch] : Array.isArray(event.patches) ? event.patches : [];
+  if (rawPatches.length === 0) {
+    return null;
+  }
+  const parsedEvents = rawPatches.map((patch) => parsePatchOperation(patch)).filter((candidate) => candidate !== null);
+  if (parsedEvents.length === 0) {
+    return null;
+  }
+  if (parsedEvents.length === 1) {
+    return parsedEvents[0] ?? null;
+  }
+  const patchEvents = parsedEvents.filter((candidate) => candidate.type === "patch");
+  if (patchEvents.length === parsedEvents.length) {
+    const mergedPatches = patchEvents.flatMap((candidate) => candidate.patches);
+    return { type: "patch", patches: mergedPatches };
+  }
+  const firstNonPatch = parsedEvents.find((candidate) => candidate.type !== "patch");
+  if (firstNonPatch) {
+    streamLog.warn(
+      "Mixed patch payload: non-patch operations cannot be split per frame",
+      { operations: rawPatches.length }
+    );
+    return firstNonPatch;
   }
   return null;
 }
@@ -6855,13 +6906,7 @@ function parseSSELine(line) {
           }
         };
       case "patch":
-        if (event.patch) {
-          return parsePatch(event.patch);
-        }
-        if (event.patches && event.patches.length > 0) {
-          return parsePatch(event.patches[0]);
-        }
-        return null;
+        return parsePatchEvent(event);
       case "error":
         return {
           type: "error",
@@ -7426,8 +7471,8 @@ function useUIStream({
                 }
               }
             } else if (event.type === "patch") {
-              patchCount++;
-              patchBuffer.push(event.patch);
+              patchCount += event.patches.length;
+              patchBuffer.push(...event.patches);
               if (!patchFlushTimerRef.current) {
                 patchFlushTimerRef.current = setTimeout(() => {
                   patchFlushTimerRef.current = null;
