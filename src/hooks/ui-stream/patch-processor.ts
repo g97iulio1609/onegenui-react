@@ -14,8 +14,8 @@ import type { UITree, JsonPatch } from "@onegenui/core";
 import { applyPatchesBatch } from "../patch-utils";
 import { streamLog } from "./logger";
 
-/** Flush interval in ms - higher = less jarring, lower = more responsive */
-const PATCH_FLUSH_INTERVAL_MS = 100;
+/** Flush interval in ms - tuned for near-real-time visual feedback */
+const PATCH_FLUSH_INTERVAL_MS = 24;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Selection Preservation Utilities

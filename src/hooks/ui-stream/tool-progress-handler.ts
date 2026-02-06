@@ -19,6 +19,7 @@ export interface ToolProgressStoreActions {
     status: ToolProgress["status"];
     message?: string;
     data?: unknown;
+    progress?: number;
   }) => void;
 }
 
@@ -34,6 +35,7 @@ export function parseToolProgress(
     status: payload.status as ToolProgress["status"],
     message: payload.message as string | undefined,
     data: payload.data,
+    progress: payload.progress as number | undefined,
   };
 }
 
@@ -61,6 +63,7 @@ export function processToolProgress(
     status: progress.status,
     message: progress.message,
     data: progress.data,
+    progress: progress.progress,
   });
 }
 

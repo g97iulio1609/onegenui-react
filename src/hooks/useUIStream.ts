@@ -50,8 +50,85 @@ import {
   restoreSelection,
   PATCH_FLUSH_INTERVAL_MS,
 } from "./ui-stream/patch-processor";
+import type {
+  DeepResearchEffortLevel,
+  ResearchPhase,
+} from "../store/slices/deep-research";
 
 const log = loggers.react;
+const DEEP_RESEARCH_PHASES: ReadonlyArray<ResearchPhase> = [
+  {
+    id: "decomposing",
+    label: "Decomposing",
+    status: "pending",
+    progress: 0,
+  },
+  {
+    id: "searching",
+    label: "Searching",
+    status: "pending",
+    progress: 0,
+  },
+  {
+    id: "ranking",
+    label: "Ranking",
+    status: "pending",
+    progress: 0,
+  },
+  {
+    id: "extracting",
+    label: "Extracting",
+    status: "pending",
+    progress: 0,
+  },
+  {
+    id: "analyzing",
+    label: "Analyzing",
+    status: "pending",
+    progress: 0,
+  },
+  {
+    id: "synthesizing",
+    label: "Synthesizing",
+    status: "pending",
+    progress: 0,
+  },
+  {
+    id: "visualizing",
+    label: "Visualizing",
+    status: "pending",
+    progress: 0,
+  },
+];
+
+// Phase keyword to index mapping for O(1) lookup
+const PHASE_KEYWORDS: readonly [string, number][] = [
+  ["decompos", 0],
+  ["search", 1],
+  ["rank", 2],
+  ["extract", 3],
+  ["analyz", 4],
+  ["synth", 5],
+  ["visual", 6],
+] as const;
+
+function mapDeepResearchPhase(message: string): ResearchPhase | null {
+  const normalized = message.toLowerCase();
+  for (const [keyword, index] of PHASE_KEYWORDS) {
+    if (normalized.includes(keyword)) {
+      return DEEP_RESEARCH_PHASES[index] ?? null;
+    }
+  }
+  return null;
+}
+
+function normalizeDeepResearchProgress(
+  progress: number | undefined,
+): number | undefined {
+  if (typeof progress !== "number") return undefined;
+  const scaled = progress <= 1 ? progress * 100 : progress;
+  return Math.round(scaled);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // useUIStream Hook
@@ -78,6 +155,47 @@ export function useUIStream({
   
   // Get store refs from extracted hook
   const { storeRef, planStoreRef, addProgressRef, storeSetUITreeRef, resetPlanExecution } = useStoreRefs();
+  const {
+    updateResearchProgress,
+    updateResearchPhase,
+    addResearchSource,
+    completeResearch,
+    failResearch,
+  } = useStore(
+    useShallow((s) => ({
+      updateResearchProgress: s.updateResearchProgress,
+      updateResearchPhase: s.updateResearchPhase,
+      addResearchSource: s.addResearchSource,
+      completeResearch: s.completeResearch,
+      failResearch: s.failResearch,
+    })),
+  );
+  const deepResearchSettings = useStore((s) => s.deepResearchSettings);
+  const deepResearchActiveRef = useRef(false);
+  useEffect(() => {
+    deepResearchActiveRef.current = deepResearchSettings.enabled;
+  }, [deepResearchSettings.enabled]);
+
+  const updateResearchProgressRef = useRef(updateResearchProgress);
+  const updateResearchPhaseRef = useRef(updateResearchPhase);
+  const addResearchSourceRef = useRef(addResearchSource);
+  const completeResearchRef = useRef(completeResearch);
+  const failResearchRef = useRef(failResearch);
+  useEffect(() => {
+    updateResearchProgressRef.current = updateResearchProgress;
+    updateResearchPhaseRef.current = updateResearchPhase;
+    addResearchSourceRef.current = addResearchSource;
+    completeResearchRef.current = completeResearch;
+    failResearchRef.current = failResearch;
+  }, [
+    updateResearchProgress,
+    updateResearchPhase,
+    addResearchSource,
+    completeResearch,
+    failResearch,
+  ]);
+
+  const deepResearchToolCallIdRef = useRef<string | null>(null);
   
   // CRITICAL: Create new tree reference when version changes to force re-renders
   const tree = useMemo(() => {
@@ -261,6 +379,25 @@ export function useUIStream({
       const pendingTurn = createPendingTurn(prompt, { isProactive, attachments });
       const turnId = pendingTurn.id;
       streamLog.debug("Creating turn", { turnId, isProactive, userMessage: prompt.slice(0, 50) });
+      deepResearchToolCallIdRef.current = null;
+      if (context?.deepResearch && deepResearchActiveRef.current) {
+        const effort =
+          (context.deepResearch as { effort?: DeepResearchEffortLevel })
+            .effort ?? "standard";
+        useStore.getState().setDeepResearchEffortLevel(effort);
+        useStore.getState().startResearch(prompt);
+        updateResearchProgressRef.current({
+          effortLevel: effort,
+          status: "searching",
+          currentPhase: "Decomposing",
+          phases: DEEP_RESEARCH_PHASES.map((phase, index) => ({
+            ...phase,
+            status: index === 0 ? "running" : "pending",
+            progress: 0,
+            startTime: index === 0 ? Date.now() : undefined,
+          })),
+        });
+      }
       
       // Add turn to conversation
       setConversation((prev) => {
@@ -379,6 +516,10 @@ export function useUIStream({
             if (event.type === "done" || event.type === "text-delta") {
               continue;
             }
+
+            if (event.type === "error") {
+              throw new Error(`[${event.error.code}] ${event.error.message}`);
+            }
             
             if (event.type === "message") {
               messageCount++;
@@ -400,7 +541,77 @@ export function useUIStream({
                 status: event.progress.status,
                 message: event.progress.message,
                 data: event.progress.data,
+                progress: normalizeDeepResearchProgress(event.progress.progress),
               });
+
+              if (event.progress.toolName === "deep-research") {
+                deepResearchToolCallIdRef.current =
+                  deepResearchToolCallIdRef.current ?? event.progress.toolCallId;
+                const progressValue = normalizeDeepResearchProgress(
+                  event.progress.progress,
+                );
+                if (typeof progressValue === "number") {
+                  updateResearchProgressRef.current({
+                    progress: progressValue,
+                    status:
+                      event.progress.status === "error" ? "error" : "searching",
+                  });
+                }
+
+                const message = event.progress.message?.trim();
+                if (message) {
+                  const phase = mapDeepResearchPhase(message);
+                  if (phase) {
+                    updateResearchProgressRef.current({
+                      currentPhase: phase.label,
+                    });
+                    updateResearchPhaseRef.current(phase.id, {
+                      status: "running",
+                      startTime: Date.now(),
+                    });
+                  }
+
+                  const sourceMatch = message.match(/\bhttps?:\/\/\S+/i);
+                  if (sourceMatch) {
+                    const url = sourceMatch[0] ?? "";
+                    if (url) {
+                      try {
+                        const urlObj = new URL(url);
+                        addResearchSourceRef.current({
+                          id: `src-${Date.now()}`,
+                          url,
+                          title: urlObj.hostname,
+                          domain: urlObj.hostname.replace("www.", ""),
+                          credibility: 0.5,
+                          status: "analyzing",
+                        });
+                      } catch {
+                        // ignore invalid URL
+                      }
+                    }
+                  }
+                }
+
+                if (event.progress.status === "complete") {
+                  for (const phase of DEEP_RESEARCH_PHASES) {
+                    updateResearchPhaseRef.current(phase.id, {
+                      status: "complete",
+                      progress: 100,
+                      endTime: Date.now(),
+                    });
+                  }
+                  completeResearchRef.current(0.8);
+                  updateResearchProgressRef.current({
+                    status: "complete",
+                    progress: 100,
+                    currentPhase: "Completed",
+                  });
+                } else if (event.progress.status === "error") {
+                  const errorMessage =
+                    event.progress.message ?? "Deep research failed";
+                  failResearchRef.current(errorMessage);
+                }
+              }
             } else if (event.type === "patch") {
               patchCount++;
               patchBuffer.push(event.patch);
@@ -544,6 +755,13 @@ export function useUIStream({
           }),
         );
 
+        if (deepResearchToolCallIdRef.current) {
+          updateResearchProgressRef.current({
+            status: "complete",
+            progress: 100,
+          });
+        }
+
         onComplete?.(currentTree);
       } catch (err) {
         // Clear buffer and timer on any error
@@ -555,6 +773,9 @@ export function useUIStream({
 
         if ((err as Error).name === "AbortError") {
           streamLog.info("Request aborted", { turnId });
+          if (deepResearchToolCallIdRef.current) {
+            updateResearchProgressRef.current({ status: "stopped" });
+          }
           setConversation((prev) => removeTurn(prev, turnId));
           return;
         }
@@ -562,6 +783,9 @@ export function useUIStream({
         streamLog.error("Stream error", { error: error.message, turnId });
         setError(error);
         onError?.(error);
+        if (deepResearchToolCallIdRef.current) {
+          failResearchRef.current(error.message);
+        }
         // Mark turn as failed using turn manager
         setConversation((prev) => markTurnFailed(prev, turnId, error.message));
       } finally {

@@ -146,9 +146,16 @@ export interface PersistedAttachment {
 export interface ToolProgress {
   toolName: string;
   toolCallId: string;
-  status: "starting" | "progress" | "complete" | "error";
+  status:
+    | "pending"
+    | "starting"
+    | "progress"
+    | "running"
+    | "complete"
+    | "error";
   message?: string;
   data?: unknown;
+  progress?: number;
 }
 
 /**

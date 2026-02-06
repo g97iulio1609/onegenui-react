@@ -244,6 +244,7 @@ export function classifyPayload(
             status: typed.status,
             message: typed.message,
             data: typed.data,
+            progress: typed.progress,
           },
         };
 

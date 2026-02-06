@@ -46,6 +46,7 @@ export type StreamPayload =
       status: ToolProgress["status"];
       message?: string;
       data?: unknown;
+      progress?: number;
     }
   | {
       type: "document-index-ui";

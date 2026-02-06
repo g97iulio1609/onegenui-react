@@ -6735,140 +6735,153 @@ function addQuestionAnswer(turns, turnId, questionId, answers) {
 }
 
 // src/hooks/ui-stream/stream-parser.ts
+var import_core5 = require("@onegenui/core");
+function parsePatch(patch) {
+  if (patch.op === "message") {
+    const content = patch.content ?? patch.value;
+    if (!content) return null;
+    return {
+      type: "message",
+      message: {
+        role: patch.role ?? "assistant",
+        content: String(content)
+      }
+    };
+  }
+  if (patch.op === "question") {
+    const question = patch.question ?? patch.value;
+    return question ? { type: "question", question } : null;
+  }
+  if (patch.op === "suggestion") {
+    const suggestions = patch.suggestions ?? patch.value;
+    return Array.isArray(suggestions) ? { type: "suggestion", suggestions } : null;
+  }
+  if (patch.path) {
+    return { type: "patch", patch };
+  }
+  return null;
+}
+function parseControlEvent(control) {
+  const data = control.data ?? {};
+  switch (control.action) {
+    case "start":
+      return {
+        type: "streaming-started",
+        timestamp: Date.now()
+      };
+    case "persisted-attachments":
+      return {
+        type: "persisted-attachments",
+        attachments: data.attachments ?? []
+      };
+    case "plan-created":
+      return { type: "plan-created", plan: data.plan };
+    case "step-started":
+      return { type: "step-started", stepId: Number(data.stepId ?? 0) };
+    case "step-done":
+      return {
+        type: "step-done",
+        stepId: Number(data.stepId ?? 0),
+        result: data.result
+      };
+    case "subtask-started":
+      return {
+        type: "subtask-started",
+        parentId: Number(data.parentId ?? 0),
+        stepId: Number(data.stepId ?? 0)
+      };
+    case "subtask-done":
+      return {
+        type: "subtask-done",
+        parentId: Number(data.parentId ?? 0),
+        stepId: Number(data.stepId ?? 0),
+        result: data.result
+      };
+    case "level-started":
+      return { type: "level-started", level: Number(data.level ?? 0) };
+    case "level-completed":
+      return { type: "level-completed", level: Number(data.level ?? 0) };
+    case "orchestration-done":
+      return { type: "orchestration-done", finalResult: data.finalResult };
+    case "document-index-ui":
+      return { type: "document-index-ui", uiComponent: data.uiComponent };
+    case "citations":
+      return { type: "citations", citations: data.citations ?? [] };
+    default:
+      return { type: "unknown", payload: { control } };
+  }
+}
 function parseSSELine(line) {
   if (!line) return null;
-  const colIdx = line.indexOf(":");
-  if (colIdx === -1) return null;
-  const lineType = line.slice(0, colIdx);
-  const content = line.slice(colIdx + 1);
+  const separatorIndex = line.indexOf(":");
+  if (separatorIndex === -1) return null;
+  const lineType = line.slice(0, separatorIndex);
   if (lineType !== "d" && lineType !== "data") {
     return null;
   }
-  if (content.trim() === "[DONE]") {
-    streamLog.debug("Stream DONE received");
-    return { type: "done" };
-  }
+  const content = line.slice(separatorIndex + 1).trim();
+  if (!content) return null;
   try {
-    const data = JSON.parse(content);
-    const payload = data?.type === "data" ? data.data : data;
-    return parsePayload(payload);
-  } catch {
-    streamLog.warn("Failed to parse SSE line", { content: content.slice(0, 100) });
-    return null;
-  }
-}
-function parsePayload(payload) {
-  if (!payload) return null;
-  if (payload.type === "streaming-started") {
-    return { type: "streaming-started", timestamp: payload.timestamp };
-  }
-  if (payload.type === "text-delta") {
-    return { type: "text-delta" };
-  }
-  if (payload.type === "plan-created") {
-    return { type: "plan-created", plan: payload.plan };
-  }
-  if (payload.type === "persisted-attachments") {
-    return { type: "persisted-attachments", attachments: payload.attachments };
-  }
-  if (payload.type === "tool-progress") {
-    return {
-      type: "tool-progress",
-      progress: {
-        toolName: payload.toolName,
-        toolCallId: payload.toolCallId,
-        status: payload.status,
-        message: payload.message,
-        data: payload.data
-      }
-    };
-  }
-  if (payload.type === "document-index-ui") {
-    return { type: "document-index-ui", uiComponent: payload.uiComponent };
-  }
-  if (payload.type === "level-started") {
-    return { type: "level-started", level: payload.level };
-  }
-  if (payload.type === "step-started") {
-    return { type: "step-started", stepId: payload.stepId };
-  }
-  if (payload.type === "subtask-started") {
-    return {
-      type: "subtask-started",
-      parentId: payload.parentId,
-      stepId: payload.stepId
-    };
-  }
-  if (payload.type === "subtask-done") {
-    return {
-      type: "subtask-done",
-      parentId: payload.parentId,
-      stepId: payload.stepId,
-      result: payload.result
-    };
-  }
-  if (payload.type === "step-done") {
-    return {
-      type: "step-done",
-      stepId: payload.stepId,
-      result: payload.result
-    };
-  }
-  if (payload.type === "level-completed") {
-    return { type: "level-completed", level: payload.level };
-  }
-  if (payload.type === "orchestration-done") {
-    return { type: "orchestration-done", finalResult: payload.finalResult };
-  }
-  if (payload.type === "citations") {
-    return { type: "citations", citations: payload.citations };
-  }
-  if (payload.op) {
-    const { op, path, value } = payload;
-    if (op === "message") {
-      const content = payload.content || value;
-      if (content) {
+    const payload = JSON.parse(content);
+    const frame = import_core5.WireFrameSchema.safeParse(payload);
+    if (!frame.success) {
+      streamLog.warn("Invalid wire frame", {
+        issues: frame.error.issues.map((issue) => issue.message)
+      });
+      return null;
+    }
+    const event = frame.data.event;
+    switch (event.kind) {
+      case "control":
+        return parseControlEvent(event);
+      case "progress":
+        return {
+          type: "tool-progress",
+          progress: {
+            toolName: event.toolName ?? "system",
+            toolCallId: event.toolCallId ?? `progress-${frame.data.sequence}`,
+            status: event.status ?? "progress",
+            message: event.message,
+            data: event.data,
+            progress: event.progress
+          }
+        };
+      case "message":
         return {
           type: "message",
           message: {
-            role: payload.role || "assistant",
-            content
+            role: event.role,
+            content: event.content
           }
         };
-      }
-    }
-    if (op === "question") {
-      const question = value || payload.question;
-      if (question) {
-        return { type: "question", question };
-      }
-    }
-    if (op === "suggestion") {
-      const suggestions = value || payload.suggestions;
-      if (Array.isArray(suggestions)) {
-        return { type: "suggestion", suggestions };
-      }
-    }
-    if (op === "tool-progress") {
-      return {
-        type: "tool-progress",
-        progress: {
-          toolName: payload.toolName,
-          toolCallId: payload.toolCallId,
-          status: payload.status,
-          message: payload.message,
-          data: payload.data
+      case "patch":
+        if (event.patch) {
+          return parsePatch(event.patch);
         }
-      };
+        if (event.patches && event.patches.length > 0) {
+          return parsePatch(event.patches[0]);
+        }
+        return null;
+      case "error":
+        return {
+          type: "error",
+          error: {
+            code: event.code,
+            message: event.message,
+            recoverable: event.recoverable
+          }
+        };
+      case "done":
+        return { type: "done" };
+      default:
+        return { type: "unknown", payload: event };
     }
-    if (path) {
-      return {
-        type: "patch",
-        patch: { op, path, value }
-      };
-    }
+  } catch {
+    streamLog.warn("Failed to parse SSE line", {
+      content: content.slice(0, 100)
+    });
+    return null;
   }
-  return { type: "unknown", payload };
 }
 
 // src/hooks/ui-stream/stream-reader.ts
@@ -6908,7 +6921,7 @@ async function* readStreamWithTimeout(reader) {
 }
 
 // src/hooks/ui-stream/patch-processor.ts
-var PATCH_FLUSH_INTERVAL_MS = 100;
+var PATCH_FLUSH_INTERVAL_MS = 24;
 function getNodePath(node) {
   const path = [];
   let current = node;
@@ -6958,6 +6971,73 @@ function restoreSelection(saved) {
 
 // src/hooks/useUIStream.ts
 var log3 = import_utils16.loggers.react;
+var DEEP_RESEARCH_PHASES = [
+  {
+    id: "decomposing",
+    label: "Decomposing",
+    status: "pending",
+    progress: 0
+  },
+  {
+    id: "searching",
+    label: "Searching",
+    status: "pending",
+    progress: 0
+  },
+  {
+    id: "ranking",
+    label: "Ranking",
+    status: "pending",
+    progress: 0
+  },
+  {
+    id: "extracting",
+    label: "Extracting",
+    status: "pending",
+    progress: 0
+  },
+  {
+    id: "analyzing",
+    label: "Analyzing",
+    status: "pending",
+    progress: 0
+  },
+  {
+    id: "synthesizing",
+    label: "Synthesizing",
+    status: "pending",
+    progress: 0
+  },
+  {
+    id: "visualizing",
+    label: "Visualizing",
+    status: "pending",
+    progress: 0
+  }
+];
+var PHASE_KEYWORDS = [
+  ["decompos", 0],
+  ["search", 1],
+  ["rank", 2],
+  ["extract", 3],
+  ["analyz", 4],
+  ["synth", 5],
+  ["visual", 6]
+];
+function mapDeepResearchPhase(message) {
+  const normalized = message.toLowerCase();
+  for (const [keyword, index] of PHASE_KEYWORDS) {
+    if (normalized.includes(keyword)) {
+      return DEEP_RESEARCH_PHASES[index] ?? null;
+    }
+  }
+  return null;
+}
+function normalizeDeepResearchProgress(progress) {
+  if (typeof progress !== "number") return void 0;
+  const scaled = progress <= 1 ? progress * 100 : progress;
+  return Math.round(scaled);
+}
 function useUIStream({
   api,
   onComplete,
@@ -6973,6 +7053,45 @@ function useUIStream({
     }))
   );
   const { storeRef, planStoreRef, addProgressRef, storeSetUITreeRef, resetPlanExecution } = useStoreRefs();
+  const {
+    updateResearchProgress,
+    updateResearchPhase,
+    addResearchSource,
+    completeResearch,
+    failResearch
+  } = useStore(
+    (0, import_shallow4.useShallow)((s) => ({
+      updateResearchProgress: s.updateResearchProgress,
+      updateResearchPhase: s.updateResearchPhase,
+      addResearchSource: s.addResearchSource,
+      completeResearch: s.completeResearch,
+      failResearch: s.failResearch
+    }))
+  );
+  const deepResearchSettings = useStore((s) => s.deepResearchSettings);
+  const deepResearchActiveRef = (0, import_react32.useRef)(false);
+  (0, import_react32.useEffect)(() => {
+    deepResearchActiveRef.current = deepResearchSettings.enabled;
+  }, [deepResearchSettings.enabled]);
+  const updateResearchProgressRef = (0, import_react32.useRef)(updateResearchProgress);
+  const updateResearchPhaseRef = (0, import_react32.useRef)(updateResearchPhase);
+  const addResearchSourceRef = (0, import_react32.useRef)(addResearchSource);
+  const completeResearchRef = (0, import_react32.useRef)(completeResearch);
+  const failResearchRef = (0, import_react32.useRef)(failResearch);
+  (0, import_react32.useEffect)(() => {
+    updateResearchProgressRef.current = updateResearchProgress;
+    updateResearchPhaseRef.current = updateResearchPhase;
+    addResearchSourceRef.current = addResearchSource;
+    completeResearchRef.current = completeResearch;
+    failResearchRef.current = failResearch;
+  }, [
+    updateResearchProgress,
+    updateResearchPhase,
+    addResearchSource,
+    completeResearch,
+    failResearch
+  ]);
+  const deepResearchToolCallIdRef = (0, import_react32.useRef)(null);
   const tree = (0, import_react32.useMemo)(() => {
     if (!storeTree) return null;
     return { ...storeTree, elements: { ...storeTree.elements } };
@@ -7115,6 +7234,23 @@ function useUIStream({
       const pendingTurn = createPendingTurn(prompt, { isProactive, attachments });
       const turnId = pendingTurn.id;
       streamLog.debug("Creating turn", { turnId, isProactive, userMessage: prompt.slice(0, 50) });
+      deepResearchToolCallIdRef.current = null;
+      if (context?.deepResearch && deepResearchActiveRef.current) {
+        const effort = context.deepResearch.effort ?? "standard";
+        useStore.getState().setDeepResearchEffortLevel(effort);
+        useStore.getState().startResearch(prompt);
+        updateResearchProgressRef.current({
+          effortLevel: effort,
+          status: "searching",
+          currentPhase: "Decomposing",
+          phases: DEEP_RESEARCH_PHASES.map((phase, index) => ({
+            ...phase,
+            status: index === 0 ? "running" : "pending",
+            progress: 0,
+            startTime: index === 0 ? Date.now() : void 0
+          }))
+        });
+      }
       setConversation((prev) => {
         const updated = [...prev, pendingTurn];
         streamLog.debug("Conversation updated", {
@@ -7203,6 +7339,9 @@ function useUIStream({
             if (event.type === "done" || event.type === "text-delta") {
               continue;
             }
+            if (event.type === "error") {
+              throw new Error(`[${event.error.code}] ${event.error.message}`);
+            }
             if (event.type === "message") {
               messageCount++;
               streamLog.debug("Message received", { messageCount, contentLength: event.message.content?.length ?? 0 });
@@ -7222,8 +7361,70 @@ function useUIStream({
                 toolName: event.progress.toolName,
                 status: event.progress.status,
                 message: event.progress.message,
-                data: event.progress.data
+                data: event.progress.data,
+                progress: normalizeDeepResearchProgress(event.progress.progress)
               });
+              if (event.progress.toolName === "deep-research") {
+                deepResearchToolCallIdRef.current = deepResearchToolCallIdRef.current ?? event.progress.toolCallId;
+                const progressValue = normalizeDeepResearchProgress(
+                  event.progress.progress
+                );
+                if (typeof progressValue === "number") {
+                  updateResearchProgressRef.current({
+                    progress: progressValue,
+                    status: event.progress.status === "error" ? "error" : "searching"
+                  });
+                }
+                const message = event.progress.message?.trim();
+                if (message) {
+                  const phase = mapDeepResearchPhase(message);
+                  if (phase) {
+                    updateResearchProgressRef.current({
+                      currentPhase: phase.label
+                    });
+                    updateResearchPhaseRef.current(phase.id, {
+                      status: "running",
+                      startTime: Date.now()
+                    });
+                  }
+                  const sourceMatch = message.match(/\bhttps?:\/\/\S+/i);
+                  if (sourceMatch) {
+                    const url = sourceMatch[0] ?? "";
+                    if (url) {
+                      try {
+                        const urlObj = new URL(url);
+                        addResearchSourceRef.current({
+                          id: `src-${Date.now()}`,
+                          url,
+                          title: urlObj.hostname,
+                          domain: urlObj.hostname.replace("www.", ""),
+                          credibility: 0.5,
+                          status: "analyzing"
+                        });
+                      } catch {
+                      }
+                    }
+                  }
+                }
+                if (event.progress.status === "complete") {
+                  for (const phase of DEEP_RESEARCH_PHASES) {
+                    updateResearchPhaseRef.current(phase.id, {
+                      status: "complete",
+                      progress: 100,
+                      endTime: Date.now()
+                    });
+                  }
+                  completeResearchRef.current(0.8);
+                  updateResearchProgressRef.current({
+                    status: "complete",
+                    progress: 100,
+                    currentPhase: "Completed"
+                  });
+                } else if (event.progress.status === "error") {
+                  const errorMessage = event.progress.message ?? "Deep research failed";
+                  failResearchRef.current(errorMessage);
+                }
+              }
             } else if (event.type === "patch") {
               patchCount++;
               patchBuffer.push(event.patch);
@@ -7331,6 +7532,12 @@ function useUIStream({
             documentIndex: currentDocumentIndex
           })
         );
+        if (deepResearchToolCallIdRef.current) {
+          updateResearchProgressRef.current({
+            status: "complete",
+            progress: 100
+          });
+        }
         onComplete?.(currentTree);
       } catch (err) {
         if (patchFlushTimerRef.current) {
@@ -7340,6 +7547,9 @@ function useUIStream({
         patchBuffer = [];
         if (err.name === "AbortError") {
           streamLog.info("Request aborted", { turnId });
+          if (deepResearchToolCallIdRef.current) {
+            updateResearchProgressRef.current({ status: "stopped" });
+          }
           setConversation((prev) => removeTurn(prev, turnId));
           return;
         }
@@ -7347,6 +7557,9 @@ function useUIStream({
         streamLog.error("Stream error", { error: error2.message, turnId });
         setError(error2);
         onError?.(error2);
+        if (deepResearchToolCallIdRef.current) {
+          failResearchRef.current(error2.message);
+        }
         setConversation((prev) => markTurnFailed(prev, turnId, error2.message));
       } finally {
         sendingRef.current = false;

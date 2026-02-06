@@ -1,20 +1,10 @@
 "use client";
 
 /**
- * Stream Parser - SSE event parsing and dispatch
- *
- * Handles parsing of Server-Sent Events from the API:
- * - Text deltas
- * - JSON patches
- * - Messages
- * - Questions
- * - Suggestions
- * - Tool progress
- * - Plan events
- * - Document index
+ * Stream Parser - SSE line parser for wire protocol v3.
  */
 
-import type { JsonPatch } from "@onegenui/core";
+import { WireFrameSchema, type JsonPatch } from "@onegenui/core";
 import type {
   ChatMessage,
   QuestionPayload,
@@ -23,10 +13,10 @@ import type {
 } from "../types";
 import { streamLog } from "./logger";
 
-/** Parsed SSE event with typed payload */
 export type StreamEvent =
   | { type: "text-delta" }
   | { type: "done" }
+  | { type: "error"; error: { code: string; message: string; recoverable: boolean } }
   | { type: "streaming-started"; timestamp: number }
   | { type: "message"; message: ChatMessage }
   | { type: "question"; question: QuestionPayload }
@@ -46,183 +36,178 @@ export type StreamEvent =
   | { type: "citations"; citations: unknown[] }
   | { type: "unknown"; payload: unknown };
 
-/**
- * Parse a single SSE line into a stream event
- */
-export function parseSSELine(line: string): StreamEvent | null {
-  if (!line) return null;
+function parsePatch(patch: JsonPatch): StreamEvent | null {
+  if (patch.op === "message") {
+    const content = (patch as { content?: unknown }).content ?? patch.value;
+    if (!content) return null;
 
-  const colIdx = line.indexOf(":");
-  if (colIdx === -1) return null;
-
-  const lineType = line.slice(0, colIdx);
-  const content = line.slice(colIdx + 1);
-
-  // Only process "d" or "data" line types
-  if (lineType !== "d" && lineType !== "data") {
-    return null;
-  }
-
-  if (content.trim() === "[DONE]") {
-    streamLog.debug("Stream DONE received");
-    return { type: "done" };
-  }
-
-  try {
-    const data = JSON.parse(content);
-    // Handle wrapped format: { type: "data", data: {...} }
-    const payload = data?.type === "data" ? data.data : data;
-    return parsePayload(payload);
-  } catch {
-    streamLog.warn("Failed to parse SSE line", { content: content.slice(0, 100) });
-    return null;
-  }
-}
-
-/**
- * Parse payload into typed event
- */
-function parsePayload(payload: Record<string, unknown> | null): StreamEvent | null {
-  if (!payload) return null;
-
-  // Type-based events
-  if (payload.type === "streaming-started") {
-    return { type: "streaming-started", timestamp: payload.timestamp as number };
-  }
-
-  if (payload.type === "text-delta") {
-    return { type: "text-delta" };
-  }
-
-  if (payload.type === "plan-created") {
-    return { type: "plan-created", plan: payload.plan };
-  }
-
-  if (payload.type === "persisted-attachments") {
-    return { type: "persisted-attachments", attachments: payload.attachments as unknown[] };
-  }
-
-  if (payload.type === "tool-progress") {
     return {
-      type: "tool-progress",
-      progress: {
-        toolName: payload.toolName as string,
-        toolCallId: payload.toolCallId as string,
-        status: payload.status as ToolProgress["status"],
-        message: payload.message as string | undefined,
-        data: payload.data,
+      type: "message",
+      message: {
+        role:
+          (patch as { role?: "user" | "assistant" | "system" }).role ??
+          "assistant",
+        content: String(content),
       },
     };
   }
 
-  if (payload.type === "document-index-ui") {
-    return { type: "document-index-ui", uiComponent: payload.uiComponent };
+  if (patch.op === "question") {
+    const question =
+      (patch as { question?: unknown }).question ??
+      patch.value;
+    return question ? { type: "question", question: question as QuestionPayload } : null;
   }
 
-  if (payload.type === "level-started") {
-    return { type: "level-started", level: payload.level as number };
+  if (patch.op === "suggestion") {
+    const suggestions =
+      (patch as { suggestions?: unknown }).suggestions ??
+      patch.value;
+    return Array.isArray(suggestions)
+      ? { type: "suggestion", suggestions: suggestions as SuggestionChip[] }
+      : null;
   }
 
-  if (payload.type === "step-started") {
-    return { type: "step-started", stepId: payload.stepId as number };
+  if (patch.path) {
+    return { type: "patch", patch };
   }
 
-  if (payload.type === "subtask-started") {
-    return {
-      type: "subtask-started",
-      parentId: payload.parentId as number,
-      stepId: payload.stepId as number,
-    };
+  return null;
+}
+
+function parseControlEvent(control: {
+  action: string;
+  data?: unknown;
+}): StreamEvent | null {
+  const data = (control.data ?? {}) as Record<string, unknown>;
+
+  switch (control.action) {
+    case "start":
+      return {
+        type: "streaming-started",
+        timestamp: Date.now(),
+      };
+    case "persisted-attachments":
+      return {
+        type: "persisted-attachments",
+        attachments: (data.attachments as unknown[]) ?? [],
+      };
+    case "plan-created":
+      return { type: "plan-created", plan: data.plan };
+    case "step-started":
+      return { type: "step-started", stepId: Number(data.stepId ?? 0) };
+    case "step-done":
+      return {
+        type: "step-done",
+        stepId: Number(data.stepId ?? 0),
+        result: data.result,
+      };
+    case "subtask-started":
+      return {
+        type: "subtask-started",
+        parentId: Number(data.parentId ?? 0),
+        stepId: Number(data.stepId ?? 0),
+      };
+    case "subtask-done":
+      return {
+        type: "subtask-done",
+        parentId: Number(data.parentId ?? 0),
+        stepId: Number(data.stepId ?? 0),
+        result: data.result,
+      };
+    case "level-started":
+      return { type: "level-started", level: Number(data.level ?? 0) };
+    case "level-completed":
+      return { type: "level-completed", level: Number(data.level ?? 0) };
+    case "orchestration-done":
+      return { type: "orchestration-done", finalResult: data.finalResult };
+    case "document-index-ui":
+      return { type: "document-index-ui", uiComponent: data.uiComponent };
+    case "citations":
+      return { type: "citations", citations: (data.citations as unknown[]) ?? [] };
+    default:
+      return { type: "unknown", payload: { control } };
+  }
+}
+
+export function parseSSELine(line: string): StreamEvent | null {
+  if (!line) return null;
+
+  const separatorIndex = line.indexOf(":");
+  if (separatorIndex === -1) return null;
+
+  const lineType = line.slice(0, separatorIndex);
+  if (lineType !== "d" && lineType !== "data") {
+    return null;
   }
 
-  if (payload.type === "subtask-done") {
-    return {
-      type: "subtask-done",
-      parentId: payload.parentId as number,
-      stepId: payload.stepId as number,
-      result: payload.result,
-    };
-  }
+  const content = line.slice(separatorIndex + 1).trim();
+  if (!content) return null;
 
-  if (payload.type === "step-done") {
-    return {
-      type: "step-done",
-      stepId: payload.stepId as number,
-      result: payload.result,
-    };
-  }
+  try {
+    const payload = JSON.parse(content) as unknown;
+    const frame = WireFrameSchema.safeParse(payload);
+    if (!frame.success) {
+      streamLog.warn("Invalid wire frame", {
+        issues: frame.error.issues.map((issue) => issue.message),
+      });
+      return null;
+    }
 
-  if (payload.type === "level-completed") {
-    return { type: "level-completed", level: payload.level as number };
-  }
-
-  if (payload.type === "orchestration-done") {
-    return { type: "orchestration-done", finalResult: payload.finalResult };
-  }
-
-  if (payload.type === "citations") {
-    return { type: "citations", citations: payload.citations as unknown[] };
-  }
-
-  // Op-based events
-  if (payload.op) {
-    const { op, path, value } = payload;
-
-    if (op === "message") {
-      const content = (payload.content || value) as string;
-      if (content) {
+    const event = frame.data.event;
+    switch (event.kind) {
+      case "control":
+        return parseControlEvent(event);
+      case "progress":
+        return {
+          type: "tool-progress",
+          progress: {
+            toolName: event.toolName ?? "system",
+            toolCallId: event.toolCallId ?? `progress-${frame.data.sequence}`,
+            status: event.status ?? "progress",
+            message: event.message,
+            data: event.data,
+            progress: event.progress,
+          },
+        };
+      case "message":
         return {
           type: "message",
           message: {
-            role: (payload.role as ChatMessage["role"]) || "assistant",
-            content,
+            role: event.role,
+            content: event.content,
           },
         };
-      }
+      case "patch":
+        if (event.patch) {
+          return parsePatch(event.patch);
+        }
+        if (event.patches && event.patches.length > 0) {
+          return parsePatch(event.patches[0] as JsonPatch);
+        }
+        return null;
+      case "error":
+        return {
+          type: "error",
+          error: {
+            code: event.code,
+            message: event.message,
+            recoverable: event.recoverable,
+          },
+        };
+      case "done":
+        return { type: "done" };
+      default:
+        return { type: "unknown", payload: event };
     }
-
-    if (op === "question") {
-      const question = value || payload.question;
-      if (question) {
-        return { type: "question", question: question as QuestionPayload };
-      }
-    }
-
-    if (op === "suggestion") {
-      const suggestions = value || payload.suggestions;
-      if (Array.isArray(suggestions)) {
-        return { type: "suggestion", suggestions: suggestions as SuggestionChip[] };
-      }
-    }
-
-    if (op === "tool-progress") {
-      return {
-        type: "tool-progress",
-        progress: {
-          toolName: payload.toolName as string,
-          toolCallId: payload.toolCallId as string,
-          status: payload.status as ToolProgress["status"],
-          message: payload.message as string | undefined,
-          data: payload.data,
-        },
-      };
-    }
-
-    // Tree patch
-    if (path) {
-      return {
-        type: "patch",
-        patch: { op, path, value } as JsonPatch,
-      };
-    }
+  } catch {
+    streamLog.warn("Failed to parse SSE line", {
+      content: content.slice(0, 100),
+    });
+    return null;
   }
-
-  return { type: "unknown", payload };
 }
 
-/**
- * Create a line buffer for processing chunked SSE data
- */
 export function createLineBuffer(): {
   add: (chunk: string) => string[];
   flush: () => string | null;
