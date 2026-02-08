@@ -21,6 +21,7 @@ import type { UITreeSlice } from "./slices/ui-tree";
 import type { WorkspaceSlice } from "./slices/workspace";
 import type { CanvasSlice } from "./slices/canvas";
 import type { ComponentStateSlice } from "./slices/component-state";
+import type { McpSlice } from "./slices/mcp";
 
 // =============================================================================
 // Combined Store Type
@@ -42,7 +43,8 @@ export type StoreState = DomainSlice &
   UITreeSlice &
   WorkspaceSlice &
   CanvasSlice &
-  ComponentStateSlice;
+  ComponentStateSlice &
+  McpSlice;
 
 // =============================================================================
 // Slice Creator Type (with immer middleware)
@@ -88,4 +90,5 @@ export type {
   WorkspaceSlice,
   CanvasSlice,
   ComponentStateSlice,
+  McpSlice,
 };

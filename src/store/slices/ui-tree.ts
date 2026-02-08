@@ -25,7 +25,6 @@ export interface UITreeSlice {
   applyTreePatch: (patch: JsonPatch) => void;
   setTreeStreaming: (streaming: boolean) => void;
   clearUITree: () => void;
-  bumpTreeVersion: () => void;
 }
 
 const initialTree: UITree | null = null;
@@ -123,10 +122,6 @@ export const createUITreeSlice: SliceCreator<UITreeSlice> = (set, get) => ({
       state.isTreeStreaming = false;
     }),
 
-  bumpTreeVersion: () =>
-    set((state) => {
-      state.treeVersion += 1;
-    }),
 });
 
 /**
@@ -143,11 +138,21 @@ function applyNestedPatch(obj: unknown, path: string, value: unknown): void {
   for (let i = 0; i < parts.length - 1; i++) {
     const key = parts[i]!;
     if (!current[key] || typeof current[key] !== "object") {
-      current[key] = {};
+      // Look ahead: create [] if next segment is "-" (append) or numeric index
+      const nextKey = parts[i + 1];
+      const isNextArray =
+        nextKey === "-" ||
+        (nextKey !== undefined && /^\d+$/.test(nextKey));
+      current[key] = isNextArray ? [] : {};
     }
     current = current[key] as Record<string, unknown>;
   }
 
   const lastKey = parts[parts.length - 1]!;
-  current[lastKey] = value;
+  if (lastKey === "-" && Array.isArray(current)) {
+    // RFC 6901 "-" means array append
+    (current as unknown[]).push(value);
+  } else {
+    current[lastKey] = value;
+  }
 }

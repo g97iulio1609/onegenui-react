@@ -93,4 +93,28 @@ describe("stream-parser", () => {
       expect(parsed.error.code).toBe("STREAM_PROTOCOL_ERROR");
     }
   });
+
+  it("surfaces invalid patch frames as protocol errors", () => {
+    const line = toLine({
+      version: "3.0",
+      correlationId: "corr-invalid",
+      sequence: 1,
+      timestamp: Date.now(),
+      event: {
+        kind: "patch",
+        patch: {
+          op: "add",
+          path: "/elements/main-stack",
+          value:
+            '{"key":"main-stack","type":"Stack","props":{"gap":"lg"},"children":[]}',
+        },
+      },
+    });
+
+    const parsed = parseSSELine(line);
+    expect(parsed?.type).toBe("error");
+    if (parsed?.type === "error") {
+      expect(parsed.error.code).toBe("STREAM_PROTOCOL_ERROR");
+    }
+  });
 });

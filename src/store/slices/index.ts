@@ -84,3 +84,11 @@ export {
   createComponentStateSlice,
   type ComponentStateSlice,
 } from "./component-state";
+export {
+  createMcpSlice,
+  type McpSlice,
+  type McpServerView,
+  type McpServerStatus,
+  type McpTransportView,
+  type McpToolView,
+} from "./mcp";

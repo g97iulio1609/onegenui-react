@@ -90,6 +90,8 @@ export interface SuggestionChip {
  * Chat message type
  */
 export interface ChatMessage {
+  id?: string;
+  mode?: "append" | "replace" | "final";
   role: "assistant" | "user" | "system";
   content: string;
 }

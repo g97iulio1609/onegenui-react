@@ -31,7 +31,11 @@ export function setByPathWithStructuralSharing<
     } else if (nextValue && typeof nextValue === "object") {
       current[segment] = { ...nextValue };
     } else {
-      current[segment] = {};
+      // Look ahead: create [] if the next segment is "-" (array append) or numeric index
+      const nextSeg = segments[i + 1];
+      const isNextArray =
+        nextSeg === "-" || (nextSeg !== undefined && /^\d+$/.test(nextSeg));
+      current[segment] = isNextArray ? [] : {};
     }
     parent = current;
     parentKey = segment;

@@ -27,7 +27,6 @@ export function useHistory(
   conversation: ConversationTurn[],
   setTree: (tree: UITree | null) => void,
   setConversation: React.Dispatch<React.SetStateAction<ConversationTurn[]>>,
-  treeRef: React.MutableRefObject<UITree | null>,
 ): UseHistoryReturn {
   const [history, setHistory] = useState<HistorySnapshot[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -49,11 +48,10 @@ export function useHistory(
     const snapshot = history[historyIndex];
     if (snapshot) {
       setTree(snapshot.tree);
-      treeRef.current = snapshot.tree;
       setConversation(snapshot.conversation);
       setHistoryIndex((prev) => prev - 1);
     }
-  }, [history, historyIndex, setTree, setConversation, treeRef]);
+  }, [history, historyIndex, setTree, setConversation]);
 
   const redo = useCallback(() => {
     if (historyIndex >= history.length - 1) return;
@@ -61,10 +59,9 @@ export function useHistory(
     const snapshot = history[nextIndex];
     if (!snapshot) return;
     setTree(snapshot.tree);
-    treeRef.current = snapshot.tree;
     setConversation(snapshot.conversation);
     setHistoryIndex(nextIndex);
-  }, [history, historyIndex, setTree, setConversation, treeRef]);
+  }, [history, historyIndex, setTree, setConversation]);
 
   const canUndo = historyIndex >= 0;
   const canRedo = historyIndex < history.length - 1;

@@ -978,9 +978,6 @@ var createUITreeSlice = (set, get) => ({
     state.uiTree = null;
     state.treeVersion = 0;
     state.isTreeStreaming = false;
-  }),
-  bumpTreeVersion: () => set((state) => {
-    state.treeVersion += 1;
   })
 });
 function applyNestedPatch(obj, path, value) {
@@ -992,12 +989,18 @@ function applyNestedPatch(obj, path, value) {
   for (let i = 0; i < parts.length - 1; i++) {
     const key = parts[i];
     if (!current[key] || typeof current[key] !== "object") {
-      current[key] = {};
+      const nextKey = parts[i + 1];
+      const isNextArray = nextKey === "-" || nextKey !== void 0 && /^\d+$/.test(nextKey);
+      current[key] = isNextArray ? [] : {};
     }
     current = current[key];
   }
   const lastKey = parts[parts.length - 1];
-  current[lastKey] = value;
+  if (lastKey === "-" && Array.isArray(current)) {
+    current.push(value);
+  } else {
+    current[lastKey] = value;
+  }
 }
 
 // src/store/slices/workspace.ts
@@ -1292,6 +1295,114 @@ var createComponentStateSlice = (set, get) => ({
   getElementState: (elementKey) => get().componentState[elementKey] ?? {}
 });
 
+// src/store/slices/mcp.ts
+var MCP_API_BASE = "/api/mcp/servers";
+async function apiFetch(url, options) {
+  const res = await fetch(url, {
+    headers: { "Content-Type": "application/json" },
+    ...options
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(body.error ?? res.statusText);
+  }
+  return res.json();
+}
+var createMcpSlice = (set) => ({
+  // State
+  servers: [],
+  isLoadingServers: false,
+  mcpError: null,
+  // Synchronous setters (used by async actions)
+  setServers: (servers) => set((state) => {
+    state.servers = servers;
+  }),
+  setLoadingServers: (loading) => set((state) => {
+    state.isLoadingServers = loading;
+  }),
+  setMcpError: (error) => set((state) => {
+    state.mcpError = error;
+  }),
+  // Async actions
+  fetchServers: async () => {
+    set((state) => {
+      state.isLoadingServers = true;
+      state.mcpError = null;
+    });
+    try {
+      const data = await apiFetch(MCP_API_BASE);
+      set((state) => {
+        state.servers = data.servers;
+        state.isLoadingServers = false;
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to fetch servers";
+      set((state) => {
+        state.mcpError = message;
+        state.isLoadingServers = false;
+      });
+    }
+  },
+  addServer: async (config) => {
+    set((state) => {
+      state.mcpError = null;
+    });
+    try {
+      const data = await apiFetch(MCP_API_BASE, {
+        method: "POST",
+        body: JSON.stringify(config)
+      });
+      set((state) => {
+        state.servers = data.servers;
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to add server";
+      set((state) => {
+        state.mcpError = message;
+      });
+      throw err;
+    }
+  },
+  removeServer: async (serverId) => {
+    set((state) => {
+      state.mcpError = null;
+    });
+    try {
+      await apiFetch(`${MCP_API_BASE}/${serverId}`, { method: "DELETE" });
+      set((state) => {
+        state.servers = state.servers.filter((s) => s.id !== serverId);
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to remove server";
+      set((state) => {
+        state.mcpError = message;
+      });
+    }
+  },
+  toggleServer: async (serverId) => {
+    set((state) => {
+      state.mcpError = null;
+    });
+    try {
+      const data = await apiFetch(
+        `${MCP_API_BASE}/${serverId}`,
+        { method: "PATCH" }
+      );
+      set((state) => {
+        const idx = state.servers.findIndex((s) => s.id === serverId);
+        if (idx >= 0) {
+          state.servers[idx] = data.server;
+        }
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to toggle server";
+      set((state) => {
+        state.mcpError = message;
+      });
+    }
+  }
+});
+
 // src/store/index.ts
 enableMapSet();
 var useStore = create()(
@@ -1311,7 +1422,8 @@ var useStore = create()(
         ...createUITreeSlice(...args),
         ...createWorkspaceSlice(...args),
         ...createCanvasSlice(...args),
-        ...createComponentStateSlice(...args)
+        ...createComponentStateSlice(...args),
+        ...createMcpSlice(...args)
       }))
     ),
     {
@@ -1476,6 +1588,17 @@ var useComponentStateActions = () => useStore(
     clearComponentState: s.clearComponentState,
     clearAllComponentState: s.clearAllComponentState,
     getElementState: s.getElementState
+  }))
+);
+var useMcpServers = () => useStore(useShallow((s) => s.servers));
+var useMcpLoadingServers = () => useStore((s) => s.isLoadingServers);
+var useMcpError = () => useStore((s) => s.mcpError);
+var useMcpActions = () => useStore(
+  useShallow((s) => ({
+    fetchServers: s.fetchServers,
+    addServer: s.addServer,
+    removeServer: s.removeServer,
+    toggleServer: s.toggleServer
   }))
 );
 
@@ -4988,7 +5111,7 @@ var ErrorBoundary = class extends Component {
 };
 
 // src/renderer/element-renderer.tsx
-import React17, { useMemo as useMemo19 } from "react";
+import React17, { useMemo as useMemo20 } from "react";
 
 // src/components/ResizableWrapper.tsx
 import React12, { useRef as useRef11, useCallback as useCallback20, useMemo as useMemo16 } from "react";
@@ -5717,15 +5840,20 @@ function SelectionWrapper({
 // src/components/editable-wrapper/component.tsx
 import React16, {
   memo as memo4,
-  useCallback as useCallback32,
-  useRef as useRef21,
+  useCallback as useCallback37,
+  useRef as useRef24,
   useState as useState16
 } from "react";
 
 // src/hooks/useUIStream.ts
-import { useState as useState10, useCallback as useCallback23, useRef as useRef16, useEffect as useEffect17, useMemo as useMemo17 } from "react";
-import { useShallow as useShallow4 } from "zustand/shallow";
+import { useCallback as useCallback28, useEffect as useEffect19, useMemo as useMemo18 } from "react";
+import { useShallow as useShallow5 } from "zustand/shallow";
 import { loggers as loggers3 } from "@onegenui/utils";
+
+// src/hooks/patch-utils.ts
+import {
+  NormalizedUiPatchSchema
+} from "@onegenui/core";
 
 // src/hooks/patches/structural-sharing.ts
 function setByPathWithStructuralSharing(obj, path, value) {
@@ -5745,7 +5873,9 @@ function setByPathWithStructuralSharing(obj, path, value) {
     } else if (nextValue && typeof nextValue === "object") {
       current[segment] = { ...nextValue };
     } else {
-      current[segment] = {};
+      const nextSeg = segments[i + 1];
+      const isNextArray = nextSeg === "-" || nextSeg !== void 0 && /^\d+$/.test(nextSeg);
+      current[segment] = isNextArray ? [] : {};
     }
     parent = current;
     parentKey = segment;
@@ -5826,7 +5956,7 @@ function removeNodeFromTree(tree, key) {
   if (!element) return;
   if (element.parentKey) {
     const parent = tree.elements[element.parentKey];
-    if (parent && parent.children) {
+    if (parent && Array.isArray(parent.children)) {
       parent.children = parent.children.filter((k) => k !== key);
     }
   } else if (tree.root === key) {
@@ -5837,7 +5967,7 @@ function removeNodeFromTree(tree, key) {
     const currentKey = stack.pop();
     const current = tree.elements[currentKey];
     delete tree.elements[currentKey];
-    if (current && current.children) {
+    if (current && Array.isArray(current.children)) {
       stack.push(...current.children);
     }
   }
@@ -5904,26 +6034,51 @@ function buildUpdatedMeta(existingMeta, turnId) {
     lastModifiedAt: resolvedLastModifiedAt
   };
 }
+function mergeElementForAdd(existing, incoming) {
+  const existingChildren = Array.isArray(existing.children) ? existing.children : [];
+  const incomingChildren = Array.isArray(incoming.children) ? incoming.children : [];
+  const mergedChildren = incoming.children === void 0 || incomingChildren.length === 0 ? existingChildren : [.../* @__PURE__ */ new Set([...existingChildren, ...incomingChildren])];
+  return {
+    ...existing,
+    ...incoming,
+    props: {
+      ...existing.props ?? {},
+      ...incoming.props ?? {}
+    },
+    children: mergedChildren
+  };
+}
 function applyPatch(tree, patch, options = {}) {
   const { turnId, protectedTypes = [] } = options;
+  const parsedPatch = NormalizedUiPatchSchema.safeParse(patch);
+  if (!parsedPatch.success) {
+    const reason = parsedPatch.error.issues.map((issue) => issue.message).join("; ");
+    throw new Error(`Invalid UI patch: ${reason}`);
+  }
+  const normalizedPatch = parsedPatch.data;
+  const patchPath = normalizedPatch.path;
+  if (typeof patchPath !== "string") {
+    throw new Error("Invalid UI patch: path is required.");
+  }
   const newTree = { ...tree, elements: { ...tree.elements } };
-  switch (patch.op) {
+  switch (normalizedPatch.op) {
     case "set":
     case "add":
     case "replace": {
-      if (patch.path === "/root") {
-        newTree.root = patch.value;
+      if (patchPath === "/root") {
+        newTree.root = normalizedPatch.value;
         return newTree;
       }
-      if (patch.path.startsWith("/elements/")) {
-        const pathParts = patch.path.slice("/elements/".length).split("/");
+      if (patchPath.startsWith("/elements/")) {
+        const pathParts = patchPath.slice("/elements/".length).split("/");
         const elementKey = pathParts[0];
         if (!elementKey) return newTree;
         if (pathParts.length === 1) {
-          const element = patch.value;
+          const element = normalizedPatch.value;
           const existingElement = newTree.elements[elementKey];
-          const meta = existingElement ? buildUpdatedMeta(existingElement._meta ?? element._meta, turnId) : buildCreatedMeta(element._meta, turnId);
-          const newElement = meta ? { ...element, _meta: meta } : element;
+          const mergedElement = (normalizedPatch.op === "add" || normalizedPatch.op === "replace") && existingElement ? mergeElementForAdd(existingElement, element) : element;
+          const meta = existingElement ? buildUpdatedMeta(mergedElement._meta ?? existingElement._meta, turnId) : buildCreatedMeta(mergedElement._meta, turnId);
+          const newElement = meta ? { ...mergedElement, _meta: meta } : mergedElement;
           ensureChildrenExist(
             newTree.elements,
             newElement.children,
@@ -5952,10 +6107,10 @@ function applyPatch(tree, patch, options = {}) {
           const newElement = setByPathWithStructuralSharing(
             element,
             propPath,
-            patch.value
+            normalizedPatch.value
           );
-          if (propPath.startsWith("/children") && typeof patch.value === "string") {
-            const childKey = patch.value;
+          if (propPath.startsWith("/children") && typeof normalizedPatch.value === "string") {
+            const childKey = normalizedPatch.value;
             if (!newTree.elements[childKey]) {
               newTree.elements[childKey] = createPlaceholder(childKey, turnId);
             }
@@ -5978,12 +6133,12 @@ function applyPatch(tree, patch, options = {}) {
       break;
     }
     case "remove": {
-      if (patch.path === "/root") {
+      if (patchPath === "/root") {
         newTree.root = "";
         return newTree;
       }
-      if (patch.path.startsWith("/elements/")) {
-        const pathParts = patch.path.slice("/elements/".length).split("/");
+      if (patchPath.startsWith("/elements/")) {
+        const pathParts = patchPath.slice("/elements/".length).split("/");
         const elementKey = pathParts[0];
         if (!elementKey) return newTree;
         if (pathParts.length === 1) {
@@ -6012,12 +6167,12 @@ function applyPatch(tree, patch, options = {}) {
       break;
     }
     case "ensure": {
-      if (patch.path.startsWith("/elements/")) {
-        const pathParts = patch.path.slice("/elements/".length).split("/");
+      if (patchPath.startsWith("/elements/")) {
+        const pathParts = patchPath.slice("/elements/".length).split("/");
         const elementKey = pathParts[0];
         if (!elementKey) return newTree;
         if (pathParts.length === 1 && !newTree.elements[elementKey]) {
-          const newElement = patch.value;
+          const newElement = normalizedPatch.value;
           const meta = buildCreatedMeta(newElement._meta, turnId);
           const ensuredElement = meta ? { ...newElement, _meta: meta } : newElement;
           ensureChildrenExist(
@@ -6057,19 +6212,52 @@ function applyPatchesBatch(tree, patches, options = {}) {
   elementPatches.sort((a, b) => a.path.localeCompare(b.path));
   propPatches.sort((a, b) => a.path.localeCompare(b.path));
   let newTree = { ...tree, elements: { ...tree.elements } };
-  for (const patch of rootPatches) {
-    newTree = applyPatch(newTree, patch, options);
-  }
-  for (const patch of elementPatches) {
-    newTree = applyPatch(newTree, patch, options);
-  }
-  for (const patch of propPatches) {
-    newTree = applyPatch(newTree, patch, options);
-  }
-  for (const patch of otherPatches) {
-    newTree = applyPatch(newTree, patch, options);
-  }
+  const applyGroup = (group) => {
+    for (const patch of group) {
+      try {
+        newTree = applyPatch(newTree, patch, options);
+      } catch (e) {
+        if (typeof console !== "undefined") {
+          console.warn("[applyPatchesBatch] Skipping invalid patch:", patch.path, e);
+        }
+      }
+    }
+  };
+  applyGroup(rootPatches);
+  applyGroup(elementPatches);
+  applyGroup(propPatches);
+  applyGroup(otherPatches);
   return newTree;
+}
+
+// src/hooks/ui-stream/tree-store-bridge.ts
+function createTreeStoreBridge() {
+  return {
+    getTree() {
+      return useStore.getState().uiTree;
+    },
+    applyPatches(patches, options = {}) {
+      const state = useStore.getState();
+      const tree = state.uiTree;
+      if (!tree || patches.length === 0) return tree;
+      const updated = applyPatchesBatch(tree, patches, options);
+      state.setUITree(updated);
+      return updated;
+    },
+    setTree(tree) {
+      if (tree) {
+        useStore.getState().setUITree(tree);
+      } else {
+        useStore.getState().clearUITree();
+      }
+    },
+    setStreaming(streaming) {
+      useStore.getState().setTreeStreaming(streaming);
+    },
+    clear() {
+      useStore.getState().clearUITree();
+    }
+  };
 }
 
 // src/hooks/ui-stream/tree-mutations.ts
@@ -6207,7 +6395,7 @@ function updateElementLayoutInTree(tree, elementKey, layoutUpdates) {
 
 // src/hooks/ui-stream/use-history.ts
 import { useState as useState9, useCallback as useCallback22 } from "react";
-function useHistory(tree, conversation, setTree, setConversation, treeRef) {
+function useHistory(tree, conversation, setTree, setConversation) {
   const [history, setHistory] = useState9([]);
   const [historyIndex, setHistoryIndex] = useState9(-1);
   const pushHistory = useCallback22(() => {
@@ -6226,21 +6414,19 @@ function useHistory(tree, conversation, setTree, setConversation, treeRef) {
     const snapshot = history[historyIndex];
     if (snapshot) {
       setTree(snapshot.tree);
-      treeRef.current = snapshot.tree;
       setConversation(snapshot.conversation);
       setHistoryIndex((prev) => prev - 1);
     }
-  }, [history, historyIndex, setTree, setConversation, treeRef]);
+  }, [history, historyIndex, setTree, setConversation]);
   const redo = useCallback22(() => {
     if (historyIndex >= history.length - 1) return;
     const nextIndex = historyIndex + 1;
     const snapshot = history[nextIndex];
     if (!snapshot) return;
     setTree(snapshot.tree);
-    treeRef.current = snapshot.tree;
     setConversation(snapshot.conversation);
     setHistoryIndex(nextIndex);
-  }, [history, historyIndex, setTree, setConversation, treeRef]);
+  }, [history, historyIndex, setTree, setConversation]);
   const canUndo = historyIndex >= 0;
   const canRedo = historyIndex < history.length - 1;
   return {
@@ -6282,78 +6468,6 @@ var streamLog = {
     console.error(formatLog("ERROR", msg, data));
   }
 };
-
-// src/hooks/ui-stream/plan-handler.ts
-function handlePlanCreated(payload, store) {
-  const { plan } = payload;
-  store.setPlanCreated(
-    plan.goal,
-    plan.steps.map((s) => ({
-      id: s.id,
-      task: s.task,
-      agent: s.agent,
-      dependencies: s.dependencies ?? [],
-      parallel: s.parallel,
-      subtasks: s.subtasks?.map((st) => ({
-        id: st.id,
-        task: st.task,
-        agent: st.agent
-      }))
-    }))
-  );
-}
-function handleStepStarted(payload, store) {
-  store.setStepStarted(payload.stepId);
-}
-function handleStepDone(payload, store) {
-  store.setStepDone(payload.stepId, payload.result);
-}
-function handleSubtaskStarted(payload, store) {
-  store.setSubtaskStarted(payload.parentId, payload.stepId);
-}
-function handleSubtaskDone(payload, store) {
-  store.setSubtaskDone(payload.parentId, payload.stepId, payload.result);
-}
-function handleLevelStarted(payload, store) {
-  store.setLevelStarted(payload.level);
-}
-function handleOrchestrationDone(payload, store) {
-  store.setOrchestrationDone(payload.finalResult);
-}
-function processPlanEvent(payload, store) {
-  const type = payload.type;
-  switch (type) {
-    case "plan-created":
-      handlePlanCreated(payload, store);
-      return true;
-    case "step-started":
-      handleStepStarted(payload, store);
-      return true;
-    case "step-done":
-      handleStepDone(payload, store);
-      return true;
-    case "subtask-started":
-      handleSubtaskStarted(
-        payload,
-        store
-      );
-      return true;
-    case "subtask-done":
-      handleSubtaskDone(
-        payload,
-        store
-      );
-      return true;
-    case "level-started":
-      handleLevelStarted(payload, store);
-      return true;
-    case "orchestration-done":
-      handleOrchestrationDone(payload, store);
-      return true;
-    default:
-      return false;
-  }
-}
 
 // src/hooks/ui-stream/request-builder.ts
 function generateIdempotencyKey() {
@@ -6452,6 +6566,78 @@ function buildRequest(input) {
   return { body: JSON.stringify(bodyPayload), headers };
 }
 
+// src/hooks/ui-stream/plan-handler.ts
+function handlePlanCreated(payload, store) {
+  const { plan } = payload;
+  store.setPlanCreated(
+    plan.goal,
+    plan.steps.map((s) => ({
+      id: s.id,
+      task: s.task,
+      agent: s.agent,
+      dependencies: s.dependencies ?? [],
+      parallel: s.parallel,
+      subtasks: s.subtasks?.map((st) => ({
+        id: st.id,
+        task: st.task,
+        agent: st.agent
+      }))
+    }))
+  );
+}
+function handleStepStarted(payload, store) {
+  store.setStepStarted(payload.stepId);
+}
+function handleStepDone(payload, store) {
+  store.setStepDone(payload.stepId, payload.result);
+}
+function handleSubtaskStarted(payload, store) {
+  store.setSubtaskStarted(payload.parentId, payload.stepId);
+}
+function handleSubtaskDone(payload, store) {
+  store.setSubtaskDone(payload.parentId, payload.stepId, payload.result);
+}
+function handleLevelStarted(payload, store) {
+  store.setLevelStarted(payload.level);
+}
+function handleOrchestrationDone(payload, store) {
+  store.setOrchestrationDone(payload.finalResult);
+}
+function processPlanEvent(payload, store) {
+  const type = payload.type;
+  switch (type) {
+    case "plan-created":
+      handlePlanCreated(payload, store);
+      return true;
+    case "step-started":
+      handleStepStarted(payload, store);
+      return true;
+    case "step-done":
+      handleStepDone(payload, store);
+      return true;
+    case "subtask-started":
+      handleSubtaskStarted(
+        payload,
+        store
+      );
+      return true;
+    case "subtask-done":
+      handleSubtaskDone(
+        payload,
+        store
+      );
+      return true;
+    case "level-started":
+      handleLevelStarted(payload, store);
+      return true;
+    case "orchestration-done":
+      handleOrchestrationDone(payload, store);
+      return true;
+    default:
+      return false;
+  }
+}
+
 // src/hooks/ui-stream/document-index-handler.ts
 function processDocumentIndex(uiComponent, currentIndex) {
   if (!uiComponent?.props) return currentIndex;
@@ -6484,7 +6670,6 @@ function useStoreRefs() {
   const storeSetUITree = useStore((s) => s.setUITree);
   const storeClearUITree = useStore((s) => s.clearUITree);
   const storeSetTreeStreaming = useStore((s) => s.setTreeStreaming);
-  const storeBumpTreeVersion = useStore((s) => s.bumpTreeVersion);
   const addProgressEvent = useStore((s) => s.addProgressEvent);
   const setPlanCreated = useStore((s) => s.setPlanCreated);
   const setStepStarted = useStore((s) => s.setStepStarted);
@@ -6500,18 +6685,16 @@ function useStoreRefs() {
   }, [addProgressEvent]);
   const storeRef = useRef15({
     setUITree: storeSetUITree,
-    bumpTreeVersion: storeBumpTreeVersion,
     setTreeStreaming: storeSetTreeStreaming,
     clearUITree: storeClearUITree
   });
   useEffect16(() => {
     storeRef.current = {
       setUITree: storeSetUITree,
-      bumpTreeVersion: storeBumpTreeVersion,
       setTreeStreaming: storeSetTreeStreaming,
       clearUITree: storeClearUITree
     };
-  }, [storeSetUITree, storeBumpTreeVersion, storeSetTreeStreaming, storeClearUITree]);
+  }, [storeSetUITree, storeSetTreeStreaming, storeClearUITree]);
   const planStoreRef = useRef15({
     setPlanCreated,
     setStepStarted,
@@ -6540,24 +6723,25 @@ function useStoreRefs() {
     setLevelStarted,
     setOrchestrationDone
   ]);
-  const storeSetUITreeRef = useRef15(storeSetUITree);
-  useEffect16(() => {
-    storeSetUITreeRef.current = storeSetUITree;
-  }, [storeSetUITree]);
   return {
     storeRef,
     planStoreRef,
     addProgressRef,
-    storeSetUITreeRef,
     resetPlanExecution
   };
 }
 
 // src/hooks/ui-stream/turn-manager.ts
+function createTurnId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `turn-${crypto.randomUUID()}`;
+  }
+  return `turn-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
 function createPendingTurn(prompt, options = {}) {
   const { isProactive = false, attachments } = options;
   return {
-    id: `turn-${Date.now()}`,
+    id: createTurnId(),
     userMessage: prompt,
     assistantMessages: [],
     treeSnapshot: null,
@@ -6665,6 +6849,170 @@ function addQuestionAnswer(turns, turnId, questionId, answers) {
   });
 }
 
+// src/hooks/ui-stream/use-stream-session.ts
+import { useState as useState10, useCallback as useCallback23, useRef as useRef16, useEffect as useEffect17 } from "react";
+function useStreamSession(bridge, resetPlanExecution) {
+  const [conversation, setConversation] = useState10([]);
+  const conversationRef = useRef16([]);
+  const [isStreaming, setIsStreaming] = useState10(false);
+  const [error, setError] = useState10(null);
+  const sendingRef = useRef16(false);
+  useEffect17(() => {
+    conversationRef.current = conversation;
+  }, [conversation]);
+  const clear = useCallback23(() => {
+    bridge.clear();
+    setConversation([]);
+    conversationRef.current = [];
+    setError(null);
+    resetPlanExecution();
+  }, [bridge, resetPlanExecution]);
+  return {
+    conversation,
+    isStreaming,
+    error,
+    conversationRef,
+    sendingRef,
+    setConversation,
+    setIsStreaming,
+    setError,
+    clear
+  };
+}
+
+// src/hooks/ui-stream/use-stream-connection.ts
+import { useRef as useRef17, useCallback as useCallback24, useMemo as useMemo17 } from "react";
+
+// src/hooks/ui-stream/reconnection-manager.ts
+var DEFAULT_CONFIG = {
+  maxRetries: 3,
+  baseDelayMs: 1e3,
+  maxDelayMs: 8e3
+};
+function createReconnectionManager(config = {}) {
+  const cfg = { ...DEFAULT_CONFIG, ...config };
+  let lastSequence = -1;
+  let retryCount = 0;
+  return {
+    recordSequence(sequence) {
+      if (sequence > lastSequence) {
+        lastSequence = sequence;
+      }
+    },
+    getLastSequence() {
+      return lastSequence;
+    },
+    shouldRetry() {
+      return retryCount < cfg.maxRetries;
+    },
+    getRetryDelay() {
+      const exponential = cfg.baseDelayMs * Math.pow(2, retryCount);
+      const capped = Math.min(exponential, cfg.maxDelayMs);
+      const jitter = capped * (0.1 + Math.random() * 0.2);
+      retryCount++;
+      return Math.round(capped + jitter);
+    },
+    getResumeHeaders() {
+      if (lastSequence < 0) return {};
+      return { "X-Resume-After-Sequence": String(lastSequence) };
+    },
+    reset() {
+      lastSequence = -1;
+      retryCount = 0;
+    },
+    getState() {
+      return {
+        lastSequence,
+        retryCount,
+        isReconnecting: retryCount > 0
+      };
+    }
+  };
+}
+
+// src/hooks/ui-stream/use-stream-connection.ts
+async function performFetch(params, extraHeaders = {}) {
+  const dynamicHeaders = params.getHeaders ? await params.getHeaders() : {};
+  const mergedHeaders = { ...params.headers, ...dynamicHeaders, ...extraHeaders };
+  const response = await fetch(params.api, {
+    method: "POST",
+    headers: mergedHeaders,
+    body: params.body,
+    signal: params.signal
+  });
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "Unknown error");
+    throw new Error(`Stream request failed (${response.status}): ${errorText}`);
+  }
+  if (!response.body) {
+    throw new Error("Response body is null \u2014 streaming not supported");
+  }
+  return response.body.getReader();
+}
+function delay(ms, signal) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => {
+      clearTimeout(timer);
+      reject(new DOMException("Aborted", "AbortError"));
+    }, { once: true });
+  });
+}
+function useStreamConnection() {
+  const controllersRef = useRef17(/* @__PURE__ */ new Map());
+  const reconnection = useMemo17(() => createReconnectionManager(), []);
+  const setupAbort = useCallback24((chatId) => {
+    for (const controller2 of controllersRef.current.values()) {
+      controller2.abort();
+    }
+    controllersRef.current.clear();
+    reconnection.reset();
+    const controller = new AbortController();
+    const abortKey = chatId ?? "default";
+    controllersRef.current.set(abortKey, controller);
+    return { signal: controller.signal, abortKey };
+  }, [reconnection]);
+  const connect = useCallback24(
+    (params) => performFetch(params),
+    []
+  );
+  const connectWithRetry = useCallback24(
+    async (params) => {
+      try {
+        const resumeHeaders = reconnection.getResumeHeaders();
+        return await performFetch(params, resumeHeaders);
+      } catch (err) {
+        if (err.name === "AbortError") throw err;
+        if (!reconnection.shouldRetry()) throw err;
+        const retryDelay = reconnection.getRetryDelay();
+        const state = reconnection.getState();
+        streamLog.warn("Stream connection failed, retrying", {
+          attempt: state.retryCount,
+          delayMs: retryDelay,
+          lastSequence: state.lastSequence,
+          error: err.message
+        });
+        await delay(retryDelay, params.signal);
+        return connectWithRetry(params);
+      }
+    },
+    [reconnection]
+  );
+  const abort = useCallback24(() => {
+    for (const controller of controllersRef.current.values()) {
+      controller.abort();
+    }
+    controllersRef.current.clear();
+  }, []);
+  const clearControllers = useCallback24(() => {
+    controllersRef.current.clear();
+  }, []);
+  return { setupAbort, connect, connectWithRetry, abort, clearControllers, reconnection };
+}
+
+// src/hooks/ui-stream/use-stream-event-loop.ts
+import { useCallback as useCallback25 } from "react";
+
 // src/hooks/ui-stream/stream-parser.ts
 import { WireFrameSchema } from "@onegenui/core";
 function parsePatchOperation(patch) {
@@ -6697,17 +7045,22 @@ function parsePatchEvent(event) {
   if (rawPatches.length === 0) {
     return null;
   }
+  const atomic = event.atomic;
   const parsedEvents = rawPatches.map((patch) => parsePatchOperation(patch)).filter((candidate) => candidate !== null);
   if (parsedEvents.length === 0) {
     return null;
   }
   if (parsedEvents.length === 1) {
-    return parsedEvents[0] ?? null;
+    const first = parsedEvents[0];
+    if (first.type === "patch" && atomic) {
+      return { ...first, atomic };
+    }
+    return first;
   }
   const patchEvents = parsedEvents.filter((candidate) => candidate.type === "patch");
   if (patchEvents.length === parsedEvents.length) {
     const mergedPatches = patchEvents.flatMap((candidate) => candidate.patches);
-    return { type: "patch", patches: mergedPatches };
+    return { type: "patch", patches: mergedPatches, atomic };
   }
   const firstNonPatch = parsedEvents.find((candidate) => candidate.type !== "patch");
   if (firstNonPatch) {
@@ -6783,10 +7136,18 @@ function parseSSELine(line) {
     const payload = JSON.parse(content);
     const frame = WireFrameSchema.safeParse(payload);
     if (!frame.success) {
+      const issues = frame.error.issues.map((issue) => issue.message);
       streamLog.warn("Invalid wire frame", {
-        issues: frame.error.issues.map((issue) => issue.message)
+        issues
       });
-      return null;
+      return {
+        type: "error",
+        error: {
+          code: "STREAM_PROTOCOL_ERROR",
+          message: `Invalid wire frame: ${issues.join("; ") || "unknown validation error"}`,
+          recoverable: false
+        }
+      };
     }
     const event = frame.data.event;
     switch (event.kind) {
@@ -6808,6 +7169,8 @@ function parseSSELine(line) {
         return {
           type: "message",
           message: {
+            id: event.id,
+            mode: event.mode,
             role: event.role,
             content: event.content
           }
@@ -6872,8 +7235,128 @@ async function* readStreamWithTimeout(reader) {
   }
 }
 
-// src/hooks/ui-stream/patch-processor.ts
-var PATCH_FLUSH_INTERVAL_MS = 24;
+// src/hooks/ui-stream/use-stream-event-loop.ts
+var PLAN_EVENT_TYPES = /* @__PURE__ */ new Set([
+  "plan-created",
+  "step-started",
+  "step-done",
+  "subtask-started",
+  "subtask-done",
+  "level-started",
+  "level-completed",
+  "orchestration-done"
+]);
+var CRITICAL_EVENT_TYPES = /* @__PURE__ */ new Set([
+  "message",
+  "patch",
+  "question",
+  "suggestion",
+  "persisted-attachments"
+]);
+function applyMessageEvent(messages, message) {
+  const mode = message.mode ?? "final";
+  const messageId = message.id;
+  if (!messageId || mode === "final") {
+    messages.push({ ...message, mode: "final" });
+    return;
+  }
+  const existingIndex = messages.findIndex((item) => item.id === messageId);
+  if (existingIndex === -1) {
+    messages.push({ ...message, mode: "final" });
+    return;
+  }
+  const existing = messages[existingIndex];
+  if (!existing) return;
+  const nextContent = mode === "append" ? `${existing.content}${message.content}` : message.content;
+  messages[existingIndex] = { ...existing, ...message, mode: "final", content: nextContent };
+}
+function useStreamEventLoop() {
+  const processStream = useCallback25(
+    async (params) => {
+      const { reader, turnId, setConversation, handlers } = params;
+      const msgs = [];
+      const questions = [];
+      const suggestions = [];
+      const toolProgress = [];
+      const attachments = [];
+      let docIndex;
+      let patchCount = 0;
+      let messageCount = 0;
+      const updateTurnData = () => {
+        setConversation(
+          (prev) => prev.map(
+            (t) => t.id === turnId ? {
+              ...t,
+              assistantMessages: [...msgs],
+              questions: [...questions],
+              suggestions: [...suggestions],
+              toolProgress: [...toolProgress],
+              persistedAttachments: attachments.length > 0 ? [...attachments] : t.persistedAttachments,
+              documentIndex: docIndex ?? t.documentIndex
+            } : t
+          )
+        );
+      };
+      setConversation(
+        (prev) => prev.map((t) => t.id === turnId ? { ...t, status: "streaming" } : t)
+      );
+      streamLog.debug("Starting stream processing");
+      for await (const event of readStreamWithTimeout(reader)) {
+        try {
+          if (event.type === "done" || event.type === "text-delta") continue;
+          if (event.type === "error") throw new Error(`[${event.error.code}] ${event.error.message}`);
+          if (event.type === "message") {
+            messageCount++;
+            streamLog.debug("Message received", { messageCount, contentLength: event.message.content?.length ?? 0 });
+            applyMessageEvent(msgs, event.message);
+            updateTurnData();
+          } else if (event.type === "question") {
+            questions.push(event.question);
+            updateTurnData();
+          } else if (event.type === "suggestion") {
+            suggestions.push(...event.suggestions);
+            updateTurnData();
+          } else if (event.type === "tool-progress") {
+            toolProgress.push(event.progress);
+            updateTurnData();
+            handlers.onToolProgress(event.progress);
+          } else if (event.type === "patch") {
+            patchCount += event.patches.length;
+            handlers.onPatch(event.patches, event.atomic);
+          } else if (PLAN_EVENT_TYPES.has(event.type)) {
+            handlers.onPlanEvent(event);
+          } else if (event.type === "persisted-attachments") {
+            attachments.push(...event.attachments);
+            updateTurnData();
+          } else if (event.type === "document-index-ui") {
+            const ui = event.uiComponent;
+            const updated = handlers.onDocumentIndex(ui, docIndex);
+            if (updated) {
+              docIndex = updated;
+              updateTurnData();
+            }
+          } else if (event.type === "citations" && Array.isArray(event.citations)) {
+            handlers.onCitations(event.citations);
+          }
+        } catch (e) {
+          if (CRITICAL_EVENT_TYPES.has(event.type)) throw e;
+          streamLog.warn("Event processing error", {
+            error: e instanceof Error ? e.message : String(e),
+            eventType: event.type
+          });
+        }
+      }
+      return { messages: msgs, questions, suggestions, persistedAttachments: attachments, documentIndex: docIndex, patchCount, messageCount };
+    },
+    []
+  );
+  return { processStream };
+}
+
+// src/hooks/ui-stream/use-patch-pipeline-hook.ts
+import { useRef as useRef18, useCallback as useCallback26 } from "react";
+
+// src/hooks/ui-stream/patch-pipeline.ts
 function getNodePath(node) {
   const path = [];
   let current = node;
@@ -6887,9 +7370,9 @@ function getNodePath(node) {
 }
 function resolveNodePath(path, root) {
   let node = root.body;
-  for (const index of path) {
-    if (!node.childNodes[index]) return null;
-    node = node.childNodes[index];
+  for (const idx of path) {
+    if (!node.childNodes[idx]) return null;
+    node = node.childNodes[idx];
   }
   return node;
 }
@@ -6907,65 +7390,144 @@ function saveSelection() {
 function restoreSelection(saved) {
   if (!saved || typeof window === "undefined") return;
   try {
-    const anchorNode = resolveNodePath(saved.anchorNodePath, document);
-    const focusNode = resolveNodePath(saved.focusNodePath, document);
-    if (!anchorNode || !focusNode) return;
+    const anchor = resolveNodePath(saved.anchorNodePath, document);
+    const focus = resolveNodePath(saved.focusNodePath, document);
+    if (!anchor || !focus) return;
     const sel = window.getSelection();
     if (!sel) return;
     const range = document.createRange();
-    range.setStart(anchorNode, Math.min(saved.anchorOffset, anchorNode.textContent?.length ?? 0));
-    range.setEnd(focusNode, Math.min(saved.focusOffset, focusNode.textContent?.length ?? 0));
+    range.setStart(anchor, Math.min(saved.anchorOffset, anchor.textContent?.length ?? 0));
+    range.setEnd(focus, Math.min(saved.focusOffset, focus.textContent?.length ?? 0));
     sel.removeAllRanges();
     sel.addRange(range);
   } catch {
   }
 }
-
-// src/hooks/useUIStream.ts
-var log3 = loggers3.react;
-var DEEP_RESEARCH_PHASES = [
-  {
-    id: "decomposing",
-    label: "Decomposing",
-    status: "pending",
-    progress: 0
-  },
-  {
-    id: "searching",
-    label: "Searching",
-    status: "pending",
-    progress: 0
-  },
-  {
-    id: "ranking",
-    label: "Ranking",
-    status: "pending",
-    progress: 0
-  },
-  {
-    id: "extracting",
-    label: "Extracting",
-    status: "pending",
-    progress: 0
-  },
-  {
-    id: "analyzing",
-    label: "Analyzing",
-    status: "pending",
-    progress: 0
-  },
-  {
-    id: "synthesizing",
-    label: "Synthesizing",
-    status: "pending",
-    progress: 0
-  },
-  {
-    id: "visualizing",
-    label: "Visualizing",
-    status: "pending",
-    progress: 0
+function createPatchPipeline(bridge, options = {}) {
+  const maxBuffer = options.maxBufferSize ?? 50;
+  const patchOpts = options.patchOptions ?? {};
+  let buffer = [];
+  let totalPatches = 0;
+  let rafId = null;
+  function applyBuffer() {
+    if (buffer.length === 0) return;
+    const toApply = buffer;
+    const count = totalPatches;
+    buffer = [];
+    totalPatches = 0;
+    rafId = null;
+    const savedSel = saveSelection();
+    const allPatches = [];
+    for (const group of toApply) {
+      if (group.atomic) {
+        if (allPatches.length > 0) {
+          try {
+            bridge.applyPatches([...allPatches], patchOpts);
+          } catch (e) {
+            streamLog.error("Patch application failed", { error: e, patchCount: allPatches.length });
+          }
+          allPatches.length = 0;
+        }
+        try {
+          bridge.applyPatches(group.patches, patchOpts);
+        } catch (e) {
+          streamLog.error("Atomic patch application failed", { error: e, patchCount: group.patches.length });
+        }
+      } else {
+        allPatches.push(...group.patches);
+      }
+    }
+    if (allPatches.length > 0) {
+      try {
+        bridge.applyPatches(allPatches, patchOpts);
+      } catch (e) {
+        streamLog.error("Patch application failed", { error: e, patchCount: allPatches.length });
+      }
+    }
+    streamLog.debug("Pipeline flushed", { groups: toApply.length, totalPatches: count });
+    if (savedSel) {
+      requestAnimationFrame(() => restoreSelection(savedSel));
+    }
   }
+  function scheduleFlush() {
+    if (rafId !== null) return;
+    if (typeof requestAnimationFrame !== "undefined") {
+      rafId = requestAnimationFrame(applyBuffer);
+    } else {
+      setTimeout(applyBuffer, 0);
+    }
+  }
+  return {
+    push(patches, atomic = false) {
+      if (patches.length === 0) return;
+      buffer.push({ patches, atomic });
+      totalPatches += patches.length;
+      if (totalPatches >= maxBuffer) {
+        if (rafId !== null) {
+          cancelAnimationFrame(rafId);
+          rafId = null;
+        }
+        applyBuffer();
+      } else {
+        scheduleFlush();
+      }
+    },
+    flush() {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      applyBuffer();
+    },
+    reset() {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      buffer = [];
+      totalPatches = 0;
+    },
+    destroy() {
+      this.flush();
+    }
+  };
+}
+
+// src/hooks/ui-stream/use-patch-pipeline-hook.ts
+function usePatchPipelineHook(bridge) {
+  const pipelineRef = useRef18(null);
+  const create3 = useCallback26(
+    (options) => {
+      pipelineRef.current?.reset();
+      const pipeline = createPatchPipeline(bridge, {
+        patchOptions: {
+          turnId: options.turnId,
+          protectedTypes: options.protectedTypes ?? []
+        }
+      });
+      pipelineRef.current = pipeline;
+      return pipeline;
+    },
+    [bridge]
+  );
+  const cleanup = useCallback26(() => {
+    pipelineRef.current?.reset();
+    pipelineRef.current = null;
+  }, []);
+  return { create: create3, cleanup };
+}
+
+// src/hooks/ui-stream/use-deep-research-tracker.ts
+import { useRef as useRef19, useEffect as useEffect18, useCallback as useCallback27 } from "react";
+import { useShallow as useShallow4 } from "zustand/shallow";
+var DEEP_RESEARCH_PHASES = [
+  { id: "decomposing", label: "Decomposing", status: "pending", progress: 0 },
+  { id: "searching", label: "Searching", status: "pending", progress: 0 },
+  { id: "ranking", label: "Ranking", status: "pending", progress: 0 },
+  { id: "extracting", label: "Extracting", status: "pending", progress: 0 },
+  { id: "analyzing", label: "Analyzing", status: "pending", progress: 0 },
+  { id: "synthesizing", label: "Synthesizing", status: "pending", progress: 0 },
+  { id: "visualizing", label: "Visualizing", status: "pending", progress: 0 }
 ];
 var PHASE_KEYWORDS = [
   ["decompos", 0],
@@ -6979,39 +7541,16 @@ var PHASE_KEYWORDS = [
 function mapDeepResearchPhase(message) {
   const normalized = message.toLowerCase();
   for (const [keyword, index] of PHASE_KEYWORDS) {
-    if (normalized.includes(keyword)) {
-      return DEEP_RESEARCH_PHASES[index] ?? null;
-    }
+    if (normalized.includes(keyword)) return DEEP_RESEARCH_PHASES[index] ?? null;
   }
   return null;
 }
 function normalizeDeepResearchProgress(progress) {
   if (typeof progress !== "number") return void 0;
-  const scaled = progress <= 1 ? progress * 100 : progress;
-  return Math.round(scaled);
+  return Math.round(progress <= 1 ? progress * 100 : progress);
 }
-function useUIStream({
-  api,
-  onComplete,
-  onError,
-  getHeaders,
-  getChatId,
-  onBackgroundComplete
-}) {
-  const { storeTree, treeVersion } = useStore(
-    useShallow4((s) => ({
-      storeTree: s.uiTree,
-      treeVersion: s.treeVersion
-    }))
-  );
-  const { storeRef, planStoreRef, addProgressRef, storeSetUITreeRef, resetPlanExecution } = useStoreRefs();
-  const {
-    updateResearchProgress,
-    updateResearchPhase,
-    addResearchSource,
-    completeResearch,
-    failResearch
-  } = useStore(
+function useDeepResearchTracker() {
+  const { updateResearchProgress, updateResearchPhase, addResearchSource, completeResearch, failResearch } = useStore(
     useShallow4((s) => ({
       updateResearchProgress: s.updateResearchProgress,
       updateResearchPhase: s.updateResearchPhase,
@@ -7021,575 +7560,314 @@ function useUIStream({
     }))
   );
   const deepResearchSettings = useStore((s) => s.deepResearchSettings);
-  const deepResearchActiveRef = useRef16(false);
-  useEffect17(() => {
+  const deepResearchActiveRef = useRef19(false);
+  useEffect18(() => {
     deepResearchActiveRef.current = deepResearchSettings.enabled;
   }, [deepResearchSettings.enabled]);
-  const updateResearchProgressRef = useRef16(updateResearchProgress);
-  const updateResearchPhaseRef = useRef16(updateResearchPhase);
-  const addResearchSourceRef = useRef16(addResearchSource);
-  const completeResearchRef = useRef16(completeResearch);
-  const failResearchRef = useRef16(failResearch);
-  useEffect17(() => {
-    updateResearchProgressRef.current = updateResearchProgress;
-    updateResearchPhaseRef.current = updateResearchPhase;
-    addResearchSourceRef.current = addResearchSource;
-    completeResearchRef.current = completeResearch;
-    failResearchRef.current = failResearch;
-  }, [
-    updateResearchProgress,
-    updateResearchPhase,
-    addResearchSource,
-    completeResearch,
-    failResearch
-  ]);
-  const deepResearchToolCallIdRef = useRef16(null);
-  const tree = useMemo17(() => {
+  const updateProgressRef = useRef19(updateResearchProgress);
+  const updatePhaseRef = useRef19(updateResearchPhase);
+  const addSourceRef = useRef19(addResearchSource);
+  const completeRef = useRef19(completeResearch);
+  const failRef = useRef19(failResearch);
+  useEffect18(() => {
+    updateProgressRef.current = updateResearchProgress;
+    updatePhaseRef.current = updateResearchPhase;
+    addSourceRef.current = addResearchSource;
+    completeRef.current = completeResearch;
+    failRef.current = failResearch;
+  }, [updateResearchProgress, updateResearchPhase, addResearchSource, completeResearch, failResearch]);
+  const deepResearchToolCallIdRef = useRef19(null);
+  const initializeResearch = useCallback27((context, prompt) => {
+    deepResearchToolCallIdRef.current = null;
+    if (!context?.deepResearch || !deepResearchActiveRef.current) return;
+    const effort = context.deepResearch.effort ?? "standard";
+    useStore.getState().setDeepResearchEffortLevel(effort);
+    useStore.getState().startResearch(prompt);
+    updateProgressRef.current({
+      effortLevel: effort,
+      status: "searching",
+      currentPhase: "Decomposing",
+      phases: DEEP_RESEARCH_PHASES.map((phase, i) => ({
+        ...phase,
+        status: i === 0 ? "running" : "pending",
+        progress: 0,
+        startTime: i === 0 ? Date.now() : void 0
+      }))
+    });
+  }, []);
+  const handleDeepResearchToolProgress = useCallback27((progress) => {
+    if (progress.toolName !== "deep-research") return;
+    deepResearchToolCallIdRef.current = deepResearchToolCallIdRef.current ?? progress.toolCallId;
+    const pv = normalizeDeepResearchProgress(progress.progress);
+    if (typeof pv === "number") {
+      updateProgressRef.current({ progress: pv, status: progress.status === "error" ? "error" : "searching" });
+    }
+    const message = progress.message?.trim();
+    if (message) {
+      const phase = mapDeepResearchPhase(message);
+      if (phase) {
+        updateProgressRef.current({ currentPhase: phase.label });
+        updatePhaseRef.current(phase.id, { status: "running", startTime: Date.now() });
+      }
+      const sourceMatch = message.match(/\bhttps?:\/\/\S+/i);
+      if (sourceMatch?.[0]) {
+        try {
+          const urlObj = new URL(sourceMatch[0]);
+          addSourceRef.current({
+            id: `src-${Date.now()}`,
+            url: sourceMatch[0],
+            title: urlObj.hostname,
+            domain: urlObj.hostname.replace("www.", ""),
+            credibility: 0.5,
+            status: "analyzing"
+          });
+        } catch {
+        }
+      }
+    }
+    if (progress.status === "complete") {
+      for (const p of DEEP_RESEARCH_PHASES) {
+        updatePhaseRef.current(p.id, { status: "complete", progress: 100, endTime: Date.now() });
+      }
+      completeRef.current(0.8);
+      updateProgressRef.current({ status: "complete", progress: 100, currentPhase: "Completed" });
+    } else if (progress.status === "error") {
+      failRef.current(progress.message ?? "Deep research failed");
+    }
+  }, []);
+  const handleCompletion = useCallback27(() => {
+    if (deepResearchToolCallIdRef.current) updateProgressRef.current({ status: "complete", progress: 100 });
+  }, []);
+  const handleAbort = useCallback27(() => {
+    if (deepResearchToolCallIdRef.current) updateProgressRef.current({ status: "stopped" });
+  }, []);
+  const handleError = useCallback27((errorMessage) => {
+    if (deepResearchToolCallIdRef.current) failRef.current(errorMessage);
+  }, []);
+  return {
+    deepResearchActiveRef,
+    deepResearchToolCallIdRef,
+    initializeResearch,
+    handleDeepResearchToolProgress,
+    handleCompletion,
+    handleAbort,
+    handleError
+  };
+}
+
+// src/hooks/useUIStream.ts
+var log3 = loggers3.react;
+function useUIStream({
+  api,
+  onComplete,
+  onError,
+  getHeaders,
+  getChatId,
+  onBackgroundComplete
+}) {
+  const { storeTree, treeVersion } = useStore(
+    useShallow5((s) => ({ storeTree: s.uiTree, treeVersion: s.treeVersion }))
+  );
+  const { planStoreRef, addProgressRef, resetPlanExecution } = useStoreRefs();
+  const bridge = useMemo18(() => createTreeStoreBridge(), []);
+  const tree = useMemo18(() => {
     if (!storeTree) return null;
     return { ...storeTree, elements: { ...storeTree.elements } };
   }, [storeTree, treeVersion]);
-  const [conversation, setConversation] = useState10([]);
-  const treeRef = useRef16(null);
-  useEffect17(() => {
-    treeRef.current = tree;
-  }, [tree, treeVersion]);
-  const setTree = useCallback23((newTree) => {
-    log3.debug("[useUIStream] setTree called", { isFunction: typeof newTree === "function" });
-    if (typeof newTree === "function") {
-      const updatedTree = newTree(treeRef.current);
-      log3.debug("[useUIStream] setTree functional update", {
-        hasResult: !!updatedTree,
-        elementsCount: updatedTree?.elements ? Object.keys(updatedTree.elements).length : 0
+  const setTree = useCallback28(
+    (newTree) => {
+      const finalTree = typeof newTree === "function" ? newTree(bridge.getTree()) : newTree;
+      log3.debug("[useUIStream] setTree", {
+        hasTree: !!finalTree,
+        elementsCount: finalTree?.elements ? Object.keys(finalTree.elements).length : 0
       });
-      treeRef.current = updatedTree;
-      storeSetUITreeRef.current(updatedTree);
-    } else {
-      log3.debug("[useUIStream] setTree direct value", {
-        hasTree: !!newTree,
-        elementsCount: newTree?.elements ? Object.keys(newTree.elements).length : 0
-      });
-      treeRef.current = newTree;
-      storeSetUITreeRef.current(newTree);
-    }
-  }, [storeSetUITreeRef]);
-  const {
-    pushHistory,
-    undo,
-    redo,
-    canUndo,
-    canRedo,
-    setHistory,
-    setHistoryIndex
-  } = useHistory(tree, conversation, setTree, setConversation, treeRef);
-  useEffect17(() => {
-    treeRef.current = tree;
-  }, [tree]);
-  const [isStreaming, setIsStreaming] = useState10(false);
-  const [error, setError] = useState10(null);
-  const abortControllersRef = useRef16(/* @__PURE__ */ new Map());
-  const sendingRef = useRef16(false);
-  const patchFlushTimerRef = useRef16(null);
-  const clear = useCallback23(() => {
-    setTree(null);
-    setConversation([]);
-    treeRef.current = null;
-    setError(null);
-    resetPlanExecution();
-    storeRef.current.clearUITree();
-  }, [resetPlanExecution, setTree, storeRef]);
-  const loadSession = useCallback23(
-    (session) => {
-      const rootElement = session.tree?.elements?.[session.tree?.root];
-      log3.debug("[useUIStream] loadSession called", {
-        hasTree: !!session.tree,
-        rootKey: session.tree?.root,
-        rootChildrenCount: rootElement?.children?.length,
-        elementsCount: session.tree?.elements ? Object.keys(session.tree.elements).length : 0,
-        conversationLength: session.conversation?.length
-      });
-      setTree(session.tree);
-      treeRef.current = session.tree;
-      setConversation(session.conversation);
-      setHistory([]);
-      setHistoryIndex(-1);
-      log3.debug("[useUIStream] loadSession complete, tree set");
+      bridge.setTree(finalTree);
     },
-    [setTree, setHistory, setHistoryIndex]
+    [bridge]
   );
-  const removeElement = useCallback23(
+  const session = useStreamSession(bridge, resetPlanExecution);
+  const connection = useStreamConnection();
+  const { processStream } = useStreamEventLoop();
+  const pipelineHook = usePatchPipelineHook(bridge);
+  const deepResearch = useDeepResearchTracker();
+  const { pushHistory, undo, redo, canUndo, canRedo, setHistory, setHistoryIndex } = useHistory(tree, session.conversation, setTree, session.setConversation);
+  const removeElement = useCallback28(
     (key) => {
       pushHistory();
       setTree((prev) => prev ? removeElementFromTree(prev, key) : null);
     },
     [pushHistory, setTree]
   );
-  const removeSubItems = useCallback23(
+  const removeSubItems = useCallback28(
     (elementKey, identifiers) => {
       if (identifiers.length === 0) return;
       pushHistory();
-      setTree(
-        (prev) => prev ? removeSubItemsFromTree(prev, elementKey, identifiers) : null
-      );
+      setTree((prev) => prev ? removeSubItemsFromTree(prev, elementKey, identifiers) : null);
     },
     [pushHistory, setTree]
   );
-  const updateElement = useCallback23(
+  const updateElement = useCallback28(
     (elementKey, updates) => {
-      setTree(
-        (prev) => prev ? updateElementInTree(prev, elementKey, updates) : null
-      );
+      setTree((prev) => prev ? updateElementInTree(prev, elementKey, updates) : null);
     },
     [setTree]
   );
-  const updateElementLayout = useCallback23(
+  const updateElementLayout = useCallback28(
     (elementKey, layoutUpdates) => {
       pushHistory();
-      setTree(
-        (prev) => prev ? updateElementLayoutInTree(prev, elementKey, layoutUpdates) : null
-      );
+      setTree((prev) => prev ? updateElementLayoutInTree(prev, elementKey, layoutUpdates) : null);
     },
     [pushHistory, setTree]
   );
-  const send = useCallback23(
+  const send = useCallback28(
     async (prompt, context, attachments) => {
       const chatId = context?.chatId ?? getChatId?.();
-      if (sendingRef.current) {
-        streamLog.warn("Ignoring concurrent send", {
-          prompt: prompt.slice(0, 100)
-        });
+      if (session.sendingRef.current) {
+        streamLog.warn("Ignoring concurrent send", { prompt: prompt.slice(0, 100) });
         return;
       }
-      sendingRef.current = true;
-      streamLog.info("Starting send", {
-        promptLength: prompt.length,
-        hasContext: !!context,
-        attachmentCount: attachments?.length ?? 0,
-        chatId
-      });
-      if (abortControllersRef.current.size > 0) {
-        abortControllersRef.current.forEach((controller) => controller.abort());
-        abortControllersRef.current.clear();
-      }
-      const abortController = new AbortController();
-      const abortKey = chatId ?? "default";
-      abortControllersRef.current.set(abortKey, abortController);
-      const signal = abortController.signal;
-      setIsStreaming(true);
-      setError(null);
-      let currentTree = treeRef.current ? JSON.parse(JSON.stringify(treeRef.current)) : { root: "", elements: {} };
-      if (!treeRef.current) {
+      session.sendingRef.current = true;
+      streamLog.info("Starting send", { promptLength: prompt.length, hasContext: !!context, attachmentCount: attachments?.length ?? 0, chatId });
+      const { signal } = connection.setupAbort(chatId);
+      session.setIsStreaming(true);
+      session.setError(null);
+      bridge.setStreaming(true);
+      if (!bridge.getTree()) {
         streamLog.debug("Initializing empty tree");
-        setTree(currentTree);
-        treeRef.current = currentTree;
+        bridge.setTree({ root: "", elements: {} });
       }
       const isProactive = context?.hideUserMessage === true;
       const pendingTurn = createPendingTurn(prompt, { isProactive, attachments });
       const turnId = pendingTurn.id;
       streamLog.debug("Creating turn", { turnId, isProactive, userMessage: prompt.slice(0, 50) });
-      deepResearchToolCallIdRef.current = null;
-      if (context?.deepResearch && deepResearchActiveRef.current) {
-        const effort = context.deepResearch.effort ?? "standard";
-        useStore.getState().setDeepResearchEffortLevel(effort);
-        useStore.getState().startResearch(prompt);
-        updateResearchProgressRef.current({
-          effortLevel: effort,
-          status: "searching",
-          currentPhase: "Decomposing",
-          phases: DEEP_RESEARCH_PHASES.map((phase, index) => ({
-            ...phase,
-            status: index === 0 ? "running" : "pending",
-            progress: 0,
-            startTime: index === 0 ? Date.now() : void 0
-          }))
-        });
-      }
-      setConversation((prev) => {
+      deepResearch.initializeResearch(context, prompt);
+      session.setConversation((prev) => {
         const updated = [...prev, pendingTurn];
-        streamLog.debug("Conversation updated", {
-          prevLength: prev.length,
-          newLength: updated.length,
-          pendingTurnId: pendingTurn.id,
-          userMessage: pendingTurn.userMessage?.slice(0, 50)
-        });
+        streamLog.debug("Conversation updated", { prevLength: prev.length, newLength: updated.length, pendingTurnId: pendingTurn.id, userMessage: pendingTurn.userMessage?.slice(0, 50) });
         return updated;
       });
-      let patchBuffer = [];
-      if (patchFlushTimerRef.current) {
-        clearTimeout(patchFlushTimerRef.current);
-        patchFlushTimerRef.current = null;
-      }
+      const protectedTypes = context?.forceCanvasMode === true ? ["Canvas"] : [];
+      const pipeline = pipelineHook.create({ turnId, protectedTypes });
       try {
-        const fileAttachments = attachments?.filter(isFileAttachment2) ?? [];
-        if (fileAttachments.length > 0) {
-          streamLog.debug("Uploading attachments", {
-            count: fileAttachments.length,
-            files: fileAttachments.map((att) => ({
-              name: att.file.name,
-              type: att.file.type,
-              size: att.file.size
-            }))
-          });
+        const fileAtts = attachments?.filter(isFileAttachment2) ?? [];
+        if (fileAtts.length > 0) {
+          streamLog.debug("Uploading attachments", { count: fileAtts.length, files: fileAtts.map((a) => ({ name: a.file.name, type: a.file.type, size: a.file.size })) });
         }
-        const { body, headers } = buildRequest({
-          prompt,
-          context,
-          currentTree,
-          conversation,
-          attachments,
-          componentState: useStore.getState().componentState
-        });
-        if (getHeaders) {
-          const dynamicHeaders = await getHeaders();
-          Object.assign(headers, dynamicHeaders);
-        }
+        const { body, headers } = buildRequest({ prompt, context, currentTree: bridge.getTree() ?? { root: "", elements: {} }, conversation: session.conversationRef.current, attachments, componentState: useStore.getState().componentState });
         streamLog.info("Sending request to API", { api, hasAuth: !!getHeaders });
-        const response = await fetch(api, {
-          method: "POST",
-          headers,
-          body,
-          signal
-        });
-        streamLog.debug("Response received", { status: response.status, ok: response.ok });
-        if (!response.ok) {
-          throw new Error(`HTTP error: ${response.status}`);
-        }
-        if (!response.body) {
-          throw new Error("No response body");
-        }
-        const reader = response.body.getReader();
-        const currentMessages = [];
-        const currentQuestions = [];
-        const currentSuggestions = [];
-        const currentToolProgress = [];
-        const currentPersistedAttachments = [];
-        let currentDocumentIndex = void 0;
-        let patchCount = 0;
-        let messageCount = 0;
-        setConversation(
-          (prev) => prev.map(
-            (t) => t.id === turnId ? { ...t, status: "streaming" } : t
-          )
-        );
-        const updateTurnData = () => {
-          setConversation(
-            (prev) => prev.map(
-              (t) => t.id === turnId ? {
-                ...t,
-                assistantMessages: [...currentMessages],
-                questions: [...currentQuestions],
-                suggestions: [...currentSuggestions],
-                toolProgress: [...currentToolProgress],
-                persistedAttachments: currentPersistedAttachments.length > 0 ? [...currentPersistedAttachments] : t.persistedAttachments,
-                documentIndex: currentDocumentIndex ?? t.documentIndex
-              } : t
-            )
-          );
-        };
-        streamLog.debug("Starting stream processing");
-        for await (const event of readStreamWithTimeout(reader)) {
-          try {
-            if (event.type === "done" || event.type === "text-delta") {
-              continue;
+        const reader = await connection.connect({ api, body, headers, signal, getHeaders });
+        const result = await processStream({
+          reader,
+          turnId,
+          setConversation: session.setConversation,
+          handlers: {
+            onPatch: (patches, atomic) => pipeline.push(patches, atomic),
+            onToolProgress: (progress) => {
+              addProgressRef.current({ toolCallId: progress.toolCallId, toolName: progress.toolName, status: progress.status, message: progress.message, data: progress.data, progress: normalizeDeepResearchProgress(progress.progress) });
+              deepResearch.handleDeepResearchToolProgress(progress);
+            },
+            onPlanEvent: (event) => processPlanEvent(event, planStoreRef.current),
+            onDocumentIndex: (uiComponent, current) => processDocumentIndex(uiComponent, current),
+            onCitations: (citations) => {
+              if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("onegenui:citations", { detail: { citations } }));
             }
-            if (event.type === "error") {
-              throw new Error(`[${event.error.code}] ${event.error.message}`);
-            }
-            if (event.type === "message") {
-              messageCount++;
-              streamLog.debug("Message received", { messageCount, contentLength: event.message.content?.length ?? 0 });
-              currentMessages.push(event.message);
-              updateTurnData();
-            } else if (event.type === "question") {
-              currentQuestions.push(event.question);
-              updateTurnData();
-            } else if (event.type === "suggestion") {
-              currentSuggestions.push(...event.suggestions);
-              updateTurnData();
-            } else if (event.type === "tool-progress") {
-              currentToolProgress.push(event.progress);
-              updateTurnData();
-              addProgressRef.current({
-                toolCallId: event.progress.toolCallId,
-                toolName: event.progress.toolName,
-                status: event.progress.status,
-                message: event.progress.message,
-                data: event.progress.data,
-                progress: normalizeDeepResearchProgress(event.progress.progress)
-              });
-              if (event.progress.toolName === "deep-research") {
-                deepResearchToolCallIdRef.current = deepResearchToolCallIdRef.current ?? event.progress.toolCallId;
-                const progressValue = normalizeDeepResearchProgress(
-                  event.progress.progress
-                );
-                if (typeof progressValue === "number") {
-                  updateResearchProgressRef.current({
-                    progress: progressValue,
-                    status: event.progress.status === "error" ? "error" : "searching"
-                  });
-                }
-                const message = event.progress.message?.trim();
-                if (message) {
-                  const phase = mapDeepResearchPhase(message);
-                  if (phase) {
-                    updateResearchProgressRef.current({
-                      currentPhase: phase.label
-                    });
-                    updateResearchPhaseRef.current(phase.id, {
-                      status: "running",
-                      startTime: Date.now()
-                    });
-                  }
-                  const sourceMatch = message.match(/\bhttps?:\/\/\S+/i);
-                  if (sourceMatch) {
-                    const url = sourceMatch[0] ?? "";
-                    if (url) {
-                      try {
-                        const urlObj = new URL(url);
-                        addResearchSourceRef.current({
-                          id: `src-${Date.now()}`,
-                          url,
-                          title: urlObj.hostname,
-                          domain: urlObj.hostname.replace("www.", ""),
-                          credibility: 0.5,
-                          status: "analyzing"
-                        });
-                      } catch {
-                      }
-                    }
-                  }
-                }
-                if (event.progress.status === "complete") {
-                  for (const phase of DEEP_RESEARCH_PHASES) {
-                    updateResearchPhaseRef.current(phase.id, {
-                      status: "complete",
-                      progress: 100,
-                      endTime: Date.now()
-                    });
-                  }
-                  completeResearchRef.current(0.8);
-                  updateResearchProgressRef.current({
-                    status: "complete",
-                    progress: 100,
-                    currentPhase: "Completed"
-                  });
-                } else if (event.progress.status === "error") {
-                  const errorMessage = event.progress.message ?? "Deep research failed";
-                  failResearchRef.current(errorMessage);
-                }
-              }
-            } else if (event.type === "patch") {
-              patchCount += event.patches.length;
-              patchBuffer.push(...event.patches);
-              if (!patchFlushTimerRef.current) {
-                patchFlushTimerRef.current = setTimeout(() => {
-                  patchFlushTimerRef.current = null;
-                  if (patchBuffer.length > 0) {
-                    streamLog.debug("Flushing patches", { count: patchBuffer.length });
-                    const baseTree = treeRef.current ?? currentTree;
-                    const protectedTypes = context?.forceCanvasMode === true ? ["Canvas"] : [];
-                    const updatedTree = applyPatchesBatch(
-                      baseTree,
-                      patchBuffer,
-                      { turnId, protectedTypes }
-                    );
-                    patchBuffer = [];
-                    treeRef.current = updatedTree;
-                    currentTree = updatedTree;
-                    const savedSel = saveSelection();
-                    const store = storeRef.current;
-                    store.setUITree({
-                      root: updatedTree.root,
-                      elements: { ...updatedTree.elements }
-                    });
-                    store.bumpTreeVersion();
-                    if (savedSel) {
-                      requestAnimationFrame(() => restoreSelection(savedSel));
-                    }
-                    streamLog.debug("Tree updated", {
-                      elementCount: Object.keys(updatedTree.elements).length
-                    });
-                  }
-                }, PATCH_FLUSH_INTERVAL_MS);
-              }
-            } else if (event.type === "plan-created" || event.type === "step-started" || event.type === "step-done" || event.type === "subtask-started" || event.type === "subtask-done" || event.type === "level-started" || event.type === "level-completed" || event.type === "orchestration-done") {
-              processPlanEvent(event, planStoreRef.current);
-            } else if (event.type === "persisted-attachments") {
-              currentPersistedAttachments.push(...event.attachments);
-              updateTurnData();
-            } else if (event.type === "document-index-ui") {
-              const uiComponent = event.uiComponent;
-              const updated = processDocumentIndex(uiComponent, currentDocumentIndex);
-              if (updated) {
-                currentDocumentIndex = updated;
-                updateTurnData();
-              }
-            } else if (event.type === "citations") {
-              if (Array.isArray(event.citations) && typeof window !== "undefined") {
-                window.dispatchEvent(
-                  new CustomEvent("onegenui:citations", {
-                    detail: { citations: event.citations }
-                  })
-                );
-              }
-            }
-          } catch (e) {
-            streamLog.warn("Event processing error", {
-              error: e instanceof Error ? e.message : String(e),
-              eventType: event.type
-            });
           }
-        }
-        streamLog.info("Stream completed", {
-          totalPatches: patchCount,
-          totalMessages: messageCount,
-          treeElementCount: Object.keys(currentTree.elements).length
         });
-        treeRef.current = currentTree;
-        setTree({
-          root: currentTree.root,
-          elements: { ...currentTree.elements }
-        });
-        if (patchFlushTimerRef.current) {
-          clearTimeout(patchFlushTimerRef.current);
-          patchFlushTimerRef.current = null;
-        }
-        if (patchBuffer.length > 0) {
-          streamLog.debug("Final patch flush", { count: patchBuffer.length });
-          const baseTree = treeRef.current ?? currentTree;
-          const protectedTypes = context?.forceCanvasMode === true ? ["Canvas"] : [];
-          currentTree = applyPatchesBatch(baseTree, patchBuffer, { turnId, protectedTypes });
-          patchBuffer = [];
-          treeRef.current = currentTree;
-          const store = storeRef.current;
-          store.setUITree({
-            root: currentTree.root,
-            elements: { ...currentTree.elements }
-          });
-          store.bumpTreeVersion();
-          streamLog.debug("Final tree state", {
-            elementCount: Object.keys(currentTree.elements).length
-          });
-        }
+        pipeline.flush();
+        const finalTree = bridge.getTree() ?? { root: "", elements: {} };
+        streamLog.info("Stream completed", { totalPatches: result.patchCount, totalMessages: result.messageCount, treeElementCount: Object.keys(finalTree.elements).length });
         if (signal.aborted) {
           streamLog.warn("Request aborted before finalization");
           return;
         }
         streamLog.debug("Finalizing turn", { turnId });
-        setConversation(
-          (prev) => finalizeTurn(prev, turnId, {
-            messages: currentMessages,
-            questions: currentQuestions,
-            suggestions: currentSuggestions,
-            treeSnapshot: currentTree,
-            documentIndex: currentDocumentIndex
-          })
-        );
-        if (deepResearchToolCallIdRef.current) {
-          updateResearchProgressRef.current({
-            status: "complete",
-            progress: 100
-          });
-        }
-        onComplete?.(currentTree);
+        session.setConversation((prev) => finalizeTurn(prev, turnId, { messages: result.messages, questions: result.questions, suggestions: result.suggestions, treeSnapshot: finalTree, documentIndex: result.documentIndex }));
+        deepResearch.handleCompletion();
+        onComplete?.(finalTree);
       } catch (err) {
-        if (patchFlushTimerRef.current) {
-          clearTimeout(patchFlushTimerRef.current);
-          patchFlushTimerRef.current = null;
-        }
-        patchBuffer = [];
+        pipeline.reset();
         if (err.name === "AbortError") {
           streamLog.info("Request aborted", { turnId });
-          if (deepResearchToolCallIdRef.current) {
-            updateResearchProgressRef.current({ status: "stopped" });
-          }
-          setConversation((prev) => removeTurn(prev, turnId));
+          deepResearch.handleAbort();
+          session.setConversation((prev) => removeTurn(prev, turnId));
           return;
         }
-        const error2 = err instanceof Error ? err : new Error(String(err));
-        streamLog.error("Stream error", { error: error2.message, turnId });
-        setError(error2);
-        onError?.(error2);
-        if (deepResearchToolCallIdRef.current) {
-          failResearchRef.current(error2.message);
-        }
-        setConversation((prev) => markTurnFailed(prev, turnId, error2.message));
+        const error = err instanceof Error ? err : new Error(String(err));
+        streamLog.error("Stream error", { error: error.message, turnId });
+        session.setError(error);
+        onError?.(error);
+        deepResearch.handleError(error.message);
+        session.setConversation((prev) => markTurnFailed(prev, turnId, error.message));
       } finally {
-        sendingRef.current = false;
-        abortControllersRef.current.clear();
-        setIsStreaming(false);
+        session.sendingRef.current = false;
+        connection.clearControllers();
+        session.setIsStreaming(false);
+        bridge.setStreaming(false);
         streamLog.debug("Send completed");
       }
     },
-    [api, onComplete, onError, setTree, getChatId]
+    [api, onComplete, onError, setTree, getChatId, getHeaders, bridge, connection, session, processStream, pipelineHook, deepResearch]
   );
-  const answerQuestion = useCallback23(
+  const answerQuestion = useCallback28(
     (turnId, questionId, answers) => {
-      const turn = conversation.find((t) => t.id === turnId);
+      const turn = session.conversation.find((t) => t.id === turnId);
       const question = turn?.questions?.find((q) => q.id === questionId);
-      const allPreviousAnswers = collectPreviousAnswers(conversation, turnId);
-      setConversation((prev) => addQuestionAnswer(prev, turnId, questionId, answers));
-      if (question) {
-        const prompt = buildQuestionResponsePrompt(question.text, answers);
-        const context = buildQuestionResponseContext(
-          question,
-          turnId,
-          answers,
-          allPreviousAnswers
-        );
-        send(prompt, context);
-      }
+      const allPrev = collectPreviousAnswers(session.conversation, turnId);
+      session.setConversation((prev) => addQuestionAnswer(prev, turnId, questionId, answers));
+      if (question) send(buildQuestionResponsePrompt(question.text, answers), buildQuestionResponseContext(question, turnId, answers, allPrev));
     },
-    [conversation, send]
+    [session.conversation, send]
   );
-  useEffect17(() => {
-    return () => {
-      if (patchFlushTimerRef.current) {
-        clearTimeout(patchFlushTimerRef.current);
-        patchFlushTimerRef.current = null;
-      }
-      for (const controller of abortControllersRef.current.values()) {
-        controller.abort();
-      }
-      abortControllersRef.current.clear();
-    };
-  }, []);
-  const deleteTurn = useCallback23(
+  const loadSession = useCallback28(
+    (sess) => {
+      const rootEl = sess.tree?.elements?.[sess.tree?.root];
+      log3.debug("[useUIStream] loadSession called", { hasTree: !!sess.tree, rootKey: sess.tree?.root, rootChildrenCount: rootEl?.children?.length, elementsCount: sess.tree?.elements ? Object.keys(sess.tree.elements).length : 0, conversationLength: sess.conversation?.length });
+      setTree(sess.tree);
+      session.setConversation(sess.conversation);
+      session.conversationRef.current = sess.conversation;
+      setHistory([]);
+      setHistoryIndex(-1);
+      log3.debug("[useUIStream] loadSession complete, tree set");
+    },
+    [setTree, setHistory, setHistoryIndex]
+  );
+  const deleteTurn = useCallback28(
     (turnId) => {
       pushHistory();
-      const result = rollbackToTurn(conversation, turnId);
+      const result = rollbackToTurn(session.conversation, turnId);
       if (!result) return;
-      const treeToRestore = result.restoredTree ?? { root: "", elements: {} };
-      setTree(treeToRestore);
-      treeRef.current = treeToRestore;
-      setConversation(result.newConversation);
+      setTree(result.restoredTree ?? { root: "", elements: {} });
+      session.setConversation(result.newConversation);
     },
-    [conversation, pushHistory, setTree]
+    [session.conversation, pushHistory, setTree]
   );
-  const editTurn = useCallback23(
+  const editTurn = useCallback28(
     async (turnId, newMessage) => {
       pushHistory();
-      const result = rollbackToTurn(conversation, turnId);
+      const result = rollbackToTurn(session.conversation, turnId);
       if (!result) return;
       setTree(result.restoredTree);
-      treeRef.current = result.restoredTree;
-      setConversation(result.newConversation);
+      session.setConversation(result.newConversation);
       await send(newMessage, result.restoredTree ? { tree: result.restoredTree } : void 0);
     },
-    [conversation, send, pushHistory, setTree]
+    [session.conversation, send, pushHistory, setTree]
   );
-  const abort = useCallback23(() => {
-    abortControllersRef.current.forEach((controller) => controller.abort());
-    abortControllersRef.current.clear();
-    sendingRef.current = false;
-    setIsStreaming(false);
+  const abort = useCallback28(() => {
+    connection.abort();
+    session.sendingRef.current = false;
+    session.setIsStreaming(false);
+  }, []);
+  useEffect19(() => () => {
+    pipelineHook.cleanup();
+    connection.abort();
   }, []);
   return {
     tree,
-    conversation,
-    isStreaming,
-    error,
+    conversation: session.conversation,
+    isStreaming: session.isStreaming,
+    error: session.error,
     send,
-    clear,
+    clear: session.clear,
     loadSession,
     removeElement,
     removeSubItems,
@@ -7607,9 +7885,9 @@ function useUIStream({
 }
 
 // src/hooks/useTextSelection.ts
-import { useCallback as useCallback24 } from "react";
+import { useCallback as useCallback29 } from "react";
 function useTextSelection() {
-  const getTextSelection = useCallback24(() => {
+  const getTextSelection = useCallback29(() => {
     if (typeof window === "undefined") return null;
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed) return null;
@@ -7628,19 +7906,19 @@ function useTextSelection() {
       elementType
     };
   }, []);
-  const restoreTextSelection = useCallback24((range) => {
+  const restoreTextSelection = useCallback29((range) => {
     if (typeof window === "undefined") return;
     const selection = window.getSelection();
     if (!selection) return;
     selection.removeAllRanges();
     selection.addRange(range);
   }, []);
-  const clearTextSelection = useCallback24(() => {
+  const clearTextSelection = useCallback29(() => {
     if (typeof window === "undefined") return;
     window.getSelection()?.removeAllRanges();
     document.dispatchEvent(new CustomEvent("jsonui-text-selection-cleared"));
   }, []);
-  const hasTextSelection = useCallback24(() => {
+  const hasTextSelection = useCallback29(() => {
     if (typeof window === "undefined") return false;
     const selection = window.getSelection();
     return !!(selection && !selection.isCollapsed && selection.toString().trim());
@@ -7654,10 +7932,10 @@ function useTextSelection() {
 }
 
 // src/hooks/useIsMobile.ts
-import { useState as useState11, useEffect as useEffect18 } from "react";
+import { useState as useState11, useEffect as useEffect20 } from "react";
 function useIsMobile(breakpoint = 768) {
   const [isMobile, setIsMobile] = useState11(false);
-  useEffect18(() => {
+  useEffect20(() => {
     if (typeof window === "undefined") return;
     const media = window.matchMedia(`(max-width: ${breakpoint}px)`);
     const update = () => setIsMobile(media.matches);
@@ -7669,13 +7947,13 @@ function useIsMobile(breakpoint = 768) {
 }
 
 // src/hooks/usePreservedSelection.ts
-import { useState as useState12, useCallback as useCallback25, useRef as useRef17, useEffect as useEffect19 } from "react";
+import { useState as useState12, useCallback as useCallback30, useRef as useRef20, useEffect as useEffect21 } from "react";
 function usePreservedSelection() {
   const [preserved, setPreserved] = useState12(
     null
   );
-  const rangeRef = useRef17(null);
-  const preserve = useCallback25(async () => {
+  const rangeRef = useRef20(null);
+  const preserve = useCallback30(async () => {
     if (typeof window === "undefined") return;
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed) return;
@@ -7711,7 +7989,7 @@ function usePreservedSelection() {
       copiedToClipboard
     });
   }, []);
-  const restore = useCallback25(() => {
+  const restore = useCallback30(() => {
     if (typeof window === "undefined") return false;
     if (!rangeRef.current) return false;
     const selection = window.getSelection();
@@ -7724,11 +8002,11 @@ function usePreservedSelection() {
       return false;
     }
   }, []);
-  const clear = useCallback25(() => {
+  const clear = useCallback30(() => {
     setPreserved(null);
     rangeRef.current = null;
   }, []);
-  const copyToClipboard = useCallback25(async () => {
+  const copyToClipboard = useCallback30(async () => {
     if (!preserved?.text) return false;
     try {
       await navigator.clipboard.writeText(preserved.text);
@@ -7740,7 +8018,7 @@ function usePreservedSelection() {
       return false;
     }
   }, [preserved]);
-  useEffect19(() => {
+  useEffect21(() => {
     if (!preserved) return;
     const timeout = setTimeout(
       () => {
@@ -7761,13 +8039,13 @@ function usePreservedSelection() {
 }
 
 // src/hooks/useLayoutManager.ts
-import { useCallback as useCallback26, useMemo as useMemo18 } from "react";
+import { useCallback as useCallback31, useMemo as useMemo19 } from "react";
 function useLayoutManager({
   tree,
   onTreeUpdate,
   onLayoutChange
 }) {
-  const updateLayout = useCallback26(
+  const updateLayout = useCallback31(
     (elementKey, layoutUpdate) => {
       if (!tree || !onTreeUpdate) return;
       onTreeUpdate((currentTree) => {
@@ -7797,7 +8075,7 @@ function useLayoutManager({
     },
     [tree, onTreeUpdate, onLayoutChange]
   );
-  const updateSize = useCallback26(
+  const updateSize = useCallback31(
     (elementKey, width, height) => {
       updateLayout(elementKey, {
         size: { width, height }
@@ -7805,7 +8083,7 @@ function useLayoutManager({
     },
     [updateLayout]
   );
-  const updateGridPosition = useCallback26(
+  const updateGridPosition = useCallback31(
     (elementKey, position) => {
       updateLayout(elementKey, {
         grid: position
@@ -7813,20 +8091,20 @@ function useLayoutManager({
     },
     [updateLayout]
   );
-  const setResizable = useCallback26(
+  const setResizable = useCallback31(
     (elementKey, resizable) => {
       updateLayout(elementKey, { resizable });
     },
     [updateLayout]
   );
-  const getLayout = useCallback26(
+  const getLayout = useCallback31(
     (elementKey) => {
       if (!tree) return void 0;
       return tree.elements[elementKey]?.layout;
     },
     [tree]
   );
-  const getLayoutElements = useMemo18(() => {
+  const getLayoutElements = useMemo19(() => {
     return () => {
       if (!tree) return [];
       return Object.entries(tree.elements).filter(([, element]) => element.layout !== void 0).map(([key, element]) => ({
@@ -7846,19 +8124,19 @@ function useLayoutManager({
 }
 
 // src/hooks/useHistory.ts
-import { useState as useState13, useCallback as useCallback27 } from "react";
+import { useState as useState13, useCallback as useCallback32 } from "react";
 
 // src/hooks/useDeepResearch.ts
-import { useCallback as useCallback28, useRef as useRef18 } from "react";
+import { useCallback as useCallback33, useRef as useRef21 } from "react";
 
 // src/hooks/useRenderEditableText.tsx
-import React14, { useCallback as useCallback30 } from "react";
+import React14, { useCallback as useCallback35 } from "react";
 
 // src/components/EditableText.tsx
 import {
-  useRef as useRef19,
-  useCallback as useCallback29,
-  useEffect as useEffect20,
+  useRef as useRef22,
+  useCallback as useCallback34,
+  useEffect as useEffect22,
   useState as useState14,
   memo as memo2
 } from "react";
@@ -7875,16 +8153,16 @@ var EditableText = memo2(function EditableText2({
   style,
   onValueChange
 }) {
-  const ref = useRef19(null);
+  const ref = useRef22(null);
   const [localValue, setLocalValue] = useState14(value);
   const { isEditing, isFocused, handleChange, handleFocus } = useElementEdit(elementKey);
-  useEffect20(() => {
+  useEffect22(() => {
     setLocalValue(value);
     if (ref.current && !isFocused) {
       ref.current.textContent = value || "";
     }
   }, [value, isFocused]);
-  const handleInput = useCallback29(() => {
+  const handleInput = useCallback34(() => {
     if (ref.current) {
       const newValue = ref.current.textContent || "";
       setLocalValue(newValue);
@@ -7892,7 +8170,7 @@ var EditableText = memo2(function EditableText2({
       onValueChange?.(newValue);
     }
   }, [handleChange, propName, onValueChange]);
-  const handleKeyDown = useCallback29(
+  const handleKeyDown = useCallback34(
     (e) => {
       if (!multiline && e.key === "Enter") {
         e.preventDefault();
@@ -7908,7 +8186,7 @@ var EditableText = memo2(function EditableText2({
     },
     [multiline, value]
   );
-  const handleBlur = useCallback29(
+  const handleBlur = useCallback34(
     (e) => {
       if (ref.current) {
         const finalValue = ref.current.textContent || "";
@@ -7920,7 +8198,7 @@ var EditableText = memo2(function EditableText2({
     },
     [handleChange, propName, value, onValueChange]
   );
-  const handleFocusEvent = useCallback29(() => {
+  const handleFocusEvent = useCallback34(() => {
     handleFocus();
     if (ref.current && document.activeElement === ref.current) {
       const selection = window.getSelection();
@@ -8026,10 +8304,10 @@ function flatToTree(elements) {
 // src/components/editable-wrapper/EditableTextNode.tsx
 import {
   memo as memo3,
-  useCallback as useCallback31,
-  useRef as useRef20,
+  useCallback as useCallback36,
+  useRef as useRef23,
   useState as useState15,
-  useEffect as useEffect21
+  useEffect as useEffect23
 } from "react";
 import { jsx as jsx23 } from "react/jsx-runtime";
 var EditableTextNode = memo3(function EditableTextNode2({
@@ -8039,15 +8317,15 @@ var EditableTextNode = memo3(function EditableTextNode2({
   isMobile,
   onTextChange
 }) {
-  const ref = useRef20(null);
+  const ref = useRef23(null);
   const { isEditing, recordChange, focusedKey, setFocusedKey } = useEditMode();
   const [localValue, setLocalValue] = useState15(value);
   const [isActive, setIsActive] = useState15(false);
   const canEdit = isEditing && (isMobile ? focusedKey === elementKey : true);
-  useEffect21(() => {
+  useEffect23(() => {
     setLocalValue(value);
   }, [value]);
-  const handleClick = useCallback31(
+  const handleClick = useCallback36(
     (e) => {
       if (!isEditing) return;
       e.stopPropagation();
@@ -8070,7 +8348,7 @@ var EditableTextNode = memo3(function EditableTextNode2({
     },
     [isEditing, isMobile, elementKey, setFocusedKey]
   );
-  const handleDoubleClick = useCallback31(
+  const handleDoubleClick = useCallback36(
     (e) => {
       if (!isEditing || !isMobile) return;
       e.stopPropagation();
@@ -8083,7 +8361,7 @@ var EditableTextNode = memo3(function EditableTextNode2({
     },
     [isEditing, isMobile]
   );
-  const handleInput = useCallback31(() => {
+  const handleInput = useCallback36(() => {
     if (ref.current) {
       const newValue = ref.current.textContent || "";
       setLocalValue(newValue);
@@ -8091,13 +8369,13 @@ var EditableTextNode = memo3(function EditableTextNode2({
       onTextChange?.(propName, newValue);
     }
   }, [elementKey, propName, recordChange, onTextChange]);
-  const handleBlur = useCallback31(() => {
+  const handleBlur = useCallback36(() => {
     setIsActive(false);
     if (!isMobile) {
       setFocusedKey(null);
     }
   }, [isMobile, setFocusedKey]);
-  const handleKeyDown = useCallback31(
+  const handleKeyDown = useCallback36(
     (e) => {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -8159,14 +8437,14 @@ var EditableWrapper = memo4(function EditableWrapper2({
 }) {
   const isMobile = useIsMobile();
   const { isEditing, focusedKey, setFocusedKey, recordChange } = useEditMode();
-  const containerRef = useRef21(null);
+  const containerRef = useRef24(null);
   const [isActiveEditing, setIsActiveEditing] = useState16(false);
   const isElementEditable = forceEditable !== void 0 ? forceEditable : element.editable !== false;
   if (!isEditing || !isElementEditable || element.locked) {
     return /* @__PURE__ */ jsx24(Fragment2, { children });
   }
   const isFocused = focusedKey === element.key;
-  const handleContainerClick = useCallback32(
+  const handleContainerClick = useCallback37(
     (e) => {
       e.stopPropagation();
       setFocusedKey(element.key);
@@ -8176,7 +8454,7 @@ var EditableWrapper = memo4(function EditableWrapper2({
     },
     [isMobile, element.key, setFocusedKey]
   );
-  const handleDoubleClick = useCallback32(
+  const handleDoubleClick = useCallback37(
     (e) => {
       e.stopPropagation();
       if (isMobile) {
@@ -8185,7 +8463,7 @@ var EditableWrapper = memo4(function EditableWrapper2({
     },
     [isMobile]
   );
-  const handleBlur = useCallback32(() => {
+  const handleBlur = useCallback37(() => {
     setIsActiveEditing(false);
     if (containerRef.current) {
       const textContent = containerRef.current.textContent || "";
@@ -8194,7 +8472,7 @@ var EditableWrapper = memo4(function EditableWrapper2({
       onTextChange?.(propName, textContent);
     }
   }, [element.key, element.props, recordChange, onTextChange]);
-  const handleKeyDown = useCallback32((e) => {
+  const handleKeyDown = useCallback37((e) => {
     if (e.key === "Escape") {
       e.preventDefault();
       setIsActiveEditing(false);
@@ -8269,7 +8547,7 @@ function hasDescendantChanged(elementKey, prevTree, nextTree, visited = /* @__PU
     return true;
   }
   const children = prevElement?.children;
-  if (children) {
+  if (Array.isArray(children)) {
     for (const childKey of children) {
       if (hasDescendantChanged(childKey, prevTree, nextTree, visited)) {
         return true;
@@ -8317,7 +8595,7 @@ var ElementRenderer = React17.memo(function ElementRenderer2({
   const { execute } = useActions();
   const { renderText } = useMarkdown();
   const { isEditing } = useEditMode();
-  const renderEditableText = useMemo19(
+  const renderEditableText = useMemo20(
     () => createRenderEditableText(element, isEditing),
     [element, isEditing]
   );
@@ -8339,7 +8617,7 @@ var ElementRenderer = React17.memo(function ElementRenderer2({
     console.warn(`No renderer for component type: ${element.type}`);
     return null;
   }
-  const children = element.children?.map((childKey, index) => {
+  const children = Array.isArray(element.children) ? element.children.map((childKey, index) => {
     const childElement = tree.elements[childKey];
     if (!childElement) {
       if (loading) {
@@ -8369,7 +8647,7 @@ var ElementRenderer = React17.memo(function ElementRenderer2({
       },
       `${childKey}-${index}`
     );
-  });
+  }) : null;
   const isResizable = element.layout?.resizable !== false;
   const isEditable = isEditing && element.editable !== false && !element.locked;
   const content = /* @__PURE__ */ jsx25(
@@ -8559,7 +8837,7 @@ function elementRendererPropsAreEqual2(prevProps, nextProps) {
   }
   if (prevProps.tree !== nextProps.tree) {
     const children = prevProps.element.children;
-    if (children) {
+    if (Array.isArray(children)) {
       for (const childKey of children) {
         if (prevProps.tree.elements[childKey] !== nextProps.tree.elements[childKey]) {
           return false;
@@ -8600,7 +8878,7 @@ import React18, {
   createContext as createContext15,
   useContext as useContext15,
   useState as useState17,
-  useCallback as useCallback33
+  useCallback as useCallback38
 } from "react";
 import { jsx as jsx29 } from "react/jsx-runtime";
 var EditableContext = createContext15(null);
@@ -8610,11 +8888,11 @@ function EditableProvider({
 }) {
   const [editingPath, setEditingPath] = useState17(null);
   const [editingValue, setEditingValue] = useState17(null);
-  const startEdit = useCallback33((path, currentValue) => {
+  const startEdit = useCallback38((path, currentValue) => {
     setEditingPath(path);
     setEditingValue(currentValue);
   }, []);
-  const commitEdit = useCallback33(
+  const commitEdit = useCallback38(
     (path, newValue) => {
       onValueChange?.(path, newValue);
       setEditingPath(null);
@@ -8622,7 +8900,7 @@ function EditableProvider({
     },
     [onValueChange]
   );
-  const cancelEdit = useCallback33(() => {
+  const cancelEdit = useCallback38(() => {
     setEditingPath(null);
     setEditingValue(null);
   }, []);
@@ -8648,18 +8926,18 @@ function useEditable(path, currentValue, locked = false) {
   const ctx = useEditableContext();
   const isEditing = ctx?.editingPath === path;
   const value = isEditing ? ctx?.editingValue : currentValue;
-  const onStartEdit = useCallback33(() => {
+  const onStartEdit = useCallback38(() => {
     if (locked || !ctx) return;
     ctx.startEdit(path, currentValue);
   }, [ctx, path, currentValue, locked]);
-  const onCommit = useCallback33(
+  const onCommit = useCallback38(
     (newValue) => {
       if (!ctx) return;
       ctx.commitEdit(path, newValue);
     },
     [ctx, path]
   );
-  const onCancel = useCallback33(() => {
+  const onCancel = useCallback38(() => {
     ctx?.cancelEdit();
   }, [ctx]);
   const editableClassName = locked ? "" : "cursor-text rounded transition-[background-color,box-shadow] duration-150 hover:bg-black/5";
@@ -8974,7 +9252,7 @@ function TextSelectionBadge({
 }
 
 // src/components/free-grid/canvas.tsx
-import { useMemo as useMemo21 } from "react";
+import { useMemo as useMemo22 } from "react";
 
 // src/components/free-grid/styles.ts
 var gridContainerBaseStyle = {
@@ -8998,10 +9276,10 @@ var gridCellBaseStyle = {
 };
 
 // src/components/free-grid/grid-lines.tsx
-import { useMemo as useMemo20 } from "react";
+import { useMemo as useMemo21 } from "react";
 import { jsx as jsx32, jsxs as jsxs11 } from "react/jsx-runtime";
 function GridLines({ columns, rows, color }) {
-  const patternId = useMemo20(
+  const patternId = useMemo21(
     () => `grid-pattern-${Math.random().toString(36).substr(2, 9)}`,
     []
   );
@@ -9046,13 +9324,13 @@ function FreeGridCanvas({
   className,
   style
 }) {
-  const gridTemplateColumns = useMemo21(() => {
+  const gridTemplateColumns = useMemo22(() => {
     if (cellSize) {
       return `repeat(${columns}, ${cellSize}px)`;
     }
     return `repeat(${columns}, 1fr)`;
   }, [columns, cellSize]);
-  const gridTemplateRows = useMemo21(() => {
+  const gridTemplateRows = useMemo22(() => {
     if (rows) {
       if (cellSize) {
         return `repeat(${rows}, ${cellSize}px)`;
@@ -9156,7 +9434,7 @@ function createLayout(options = {}) {
 }
 
 // src/components/ToolProgressOverlay.tsx
-import { memo as memo7, useEffect as useEffect22, useState as useState18 } from "react";
+import { memo as memo7, useEffect as useEffect24, useState as useState18 } from "react";
 
 // src/components/tool-progress/icons.tsx
 import { jsx as jsx35, jsxs as jsxs13 } from "react/jsx-runtime";
@@ -9486,7 +9764,7 @@ var ToolProgressOverlay = memo7(function ToolProgressOverlay2({
   const activeProgress = useActiveToolProgress2();
   const isRunning = useIsToolRunning();
   const [mounted, setMounted] = useState18(false);
-  useEffect22(() => {
+  useEffect24(() => {
     setMounted(true);
   }, []);
   const shouldShow = show ?? isRunning;
@@ -9524,7 +9802,7 @@ var ToolProgressOverlay = memo7(function ToolProgressOverlay2({
 });
 
 // src/components/Canvas/CanvasBlock.tsx
-import { memo as memo8, useCallback as useCallback34, useState as useState19, useEffect as useEffect23, useMemo as useMemo22 } from "react";
+import { memo as memo8, useCallback as useCallback39, useState as useState19, useEffect as useEffect25, useMemo as useMemo23 } from "react";
 import { jsx as jsx38, jsxs as jsxs16 } from "react/jsx-runtime";
 function CanvasBlockSkeleton() {
   return /* @__PURE__ */ jsx38("div", { className: "w-full min-h-[200px] bg-zinc-900/50 rounded-xl border border-white/5 flex items-center justify-center", children: /* @__PURE__ */ jsx38("div", { className: "text-zinc-500 text-sm", children: "Loading editor..." }) });
@@ -9549,7 +9827,7 @@ var CanvasBlock = memo8(function CanvasBlock2({
   } = element.props;
   const [content, setContent] = useState19(initialContent || null);
   const [editorKey, setEditorKey] = useState19(0);
-  const processedContent = useMemo22(() => {
+  const processedContent = useMemo23(() => {
     if (initialContent) return initialContent;
     if (markdown) {
       return { markdown, images };
@@ -9559,13 +9837,13 @@ var CanvasBlock = memo8(function CanvasBlock2({
     }
     return null;
   }, [initialContent, markdown, images]);
-  useEffect23(() => {
+  useEffect25(() => {
     if (processedContent !== void 0 && processedContent !== null) {
       setContent(processedContent);
       setEditorKey((k) => k + 1);
     }
   }, [processedContent]);
-  const handleChange = useCallback34(
+  const handleChange = useCallback39(
     (_state, serialized) => {
       setContent(serialized);
       onAction?.({
@@ -9578,7 +9856,7 @@ var CanvasBlock = memo8(function CanvasBlock2({
     },
     [documentId, onAction]
   );
-  const handleSave = useCallback34(() => {
+  const handleSave = useCallback39(() => {
     if (content) {
       onAction?.({
         type: "canvas:save",
@@ -9589,7 +9867,7 @@ var CanvasBlock = memo8(function CanvasBlock2({
       });
     }
   }, [documentId, content, onAction]);
-  const handleOpenInCanvas = useCallback34(() => {
+  const handleOpenInCanvas = useCallback39(() => {
     onAction?.({
       type: "canvas:open",
       payload: {
@@ -10708,7 +10986,7 @@ function createDOMPurify() {
 var purify = createDOMPurify();
 
 // src/components/Document/DocumentBlock.tsx
-import { memo as memo9, useMemo as useMemo23 } from "react";
+import { memo as memo9, useMemo as useMemo24 } from "react";
 import { jsx as jsx39, jsxs as jsxs17 } from "react/jsx-runtime";
 var DocumentBlock = memo9(function DocumentBlock2({
   element,
@@ -10724,7 +11002,7 @@ var DocumentBlock = memo9(function DocumentBlock2({
     documentId,
     showOpenInCanvas = true
   } = element.props;
-  const renderedContent = useMemo23(() => {
+  const renderedContent = useMemo24(() => {
     if (format === "html") {
       return /* @__PURE__ */ jsx39(
         "div",
@@ -11118,6 +11396,10 @@ export {
   useLayoutManager,
   useLoadingActions,
   useMarkdown,
+  useMcpActions,
+  useMcpError,
+  useMcpLoadingServers,
+  useMcpServers,
   usePendingAIEdits,
   usePendingConfirmations,
   usePlanExecution,

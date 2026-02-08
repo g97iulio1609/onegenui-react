@@ -6,11 +6,30 @@
  * - Tool execution history
  * - Auto-cleanup of completed tools
  */
-import type { ToolProgressStatus, ToolProgressEvent } from "@onegenui/core";
 import type { SliceCreator } from "../types";
 
-// Re-export types from core for convenience
-export type { ToolProgressStatus, ToolProgressEvent } from "@onegenui/core";
+// ─────────────────────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type ToolProgressStatus =
+  | "pending"
+  | "starting"
+  | "progress"
+  | "running"
+  | "complete"
+  | "error";
+
+export interface ToolProgressEvent {
+  type: "tool-progress";
+  toolName: string;
+  toolCallId: string;
+  status: ToolProgressStatus;
+  message?: string;
+  data?: unknown;
+  progress?: number;
+  timestamp?: number;
+}
 
 /**
  * Slice-specific progress event (with required timestamp and message history)

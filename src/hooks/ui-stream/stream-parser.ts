@@ -22,7 +22,7 @@ export type StreamEvent =
   | { type: "question"; question: QuestionPayload }
   | { type: "suggestion"; suggestions: SuggestionChip[] }
   | { type: "tool-progress"; progress: ToolProgress }
-  | { type: "patch"; patches: JsonPatch[] }
+  | { type: "patch"; patches: JsonPatch[]; atomic?: boolean }
   | { type: "plan-created"; plan: unknown }
   | { type: "persisted-attachments"; attachments: unknown[] }
   | { type: "document-index-ui"; uiComponent: unknown }
@@ -78,6 +78,7 @@ function parsePatchOperation(patch: JsonPatch): StreamEvent | null {
 function parsePatchEvent(event: {
   patch?: JsonPatch;
   patches?: JsonPatch[];
+  atomic?: boolean;
 }): StreamEvent | null {
   const rawPatches = event.patch
     ? [event.patch]
@@ -89,6 +90,8 @@ function parsePatchEvent(event: {
     return null;
   }
 
+  const atomic = event.atomic;
+
   const parsedEvents = rawPatches
     .map((patch) => parsePatchOperation(patch))
     .filter((candidate): candidate is StreamEvent => candidate !== null);
@@ -98,13 +101,17 @@ function parsePatchEvent(event: {
   }
 
   if (parsedEvents.length === 1) {
-    return parsedEvents[0] ?? null;
+    const first = parsedEvents[0]!;
+    if (first.type === "patch" && atomic) {
+      return { ...first, atomic };
+    }
+    return first;
   }
 
   const patchEvents = parsedEvents.filter((candidate) => candidate.type === "patch");
   if (patchEvents.length === parsedEvents.length) {
     const mergedPatches = patchEvents.flatMap((candidate) => candidate.patches);
-    return { type: "patch", patches: mergedPatches };
+    return { type: "patch", patches: mergedPatches, atomic };
   }
 
   const firstNonPatch = parsedEvents.find((candidate) => candidate.type !== "patch");
@@ -192,10 +199,18 @@ export function parseSSELine(line: string): StreamEvent | null {
     const payload = JSON.parse(content) as unknown;
     const frame = WireFrameSchema.safeParse(payload);
     if (!frame.success) {
+      const issues = frame.error.issues.map((issue) => issue.message);
       streamLog.warn("Invalid wire frame", {
-        issues: frame.error.issues.map((issue) => issue.message),
+        issues,
       });
-      return null;
+      return {
+        type: "error",
+        error: {
+          code: "STREAM_PROTOCOL_ERROR",
+          message: `Invalid wire frame: ${issues.join("; ") || "unknown validation error"}`,
+          recoverable: false,
+        },
+      };
     }
 
     const event = frame.data.event;
@@ -218,6 +233,8 @@ export function parseSSELine(line: string): StreamEvent | null {
         return {
           type: "message",
           message: {
+            id: event.id,
+            mode: event.mode,
             role: event.role,
             content: event.content,
           },

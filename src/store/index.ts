@@ -29,6 +29,7 @@ import {
   createWorkspaceSlice,
   createCanvasSlice,
   createComponentStateSlice,
+  createMcpSlice,
 } from "./slices";
 
 import type { StoreState } from "./types";
@@ -93,6 +94,7 @@ export const useStore: OneGenUIStore = create<StoreState>()(
         ...createWorkspaceSlice(...args),
         ...createCanvasSlice(...args),
         ...createComponentStateSlice(...args),
+        ...createMcpSlice(...args),
       })),
     ),
     {
@@ -301,7 +303,6 @@ export const useUITreeActions = () =>
       applyTreePatch: s.applyTreePatch,
       setTreeStreaming: s.setTreeStreaming,
       clearUITree: s.clearUITree,
-      bumpTreeVersion: s.bumpTreeVersion,
     })),
   );
 
@@ -375,6 +376,23 @@ export const useComponentStateActions = () =>
     })),
   );
 
+// MCP selectors
+export const useMcpServers = () =>
+  useStore(useShallow((s) => s.servers));
+export const useMcpLoadingServers = () =>
+  useStore((s) => s.isLoadingServers);
+export const useMcpError = () =>
+  useStore((s) => s.mcpError);
+export const useMcpActions = () =>
+  useStore(
+    useShallow((s) => ({
+      fetchServers: s.fetchServers,
+      addServer: s.addServer,
+      removeServer: s.removeServer,
+      toggleServer: s.toggleServer,
+    })),
+  );
+
 // =============================================================================
 // Re-export slice creators for direct use
 // =============================================================================
@@ -394,6 +412,7 @@ export {
   createWorkspaceSlice,
   createCanvasSlice,
   createComponentStateSlice,
+  createMcpSlice,
 } from "./slices";
 
 export type {
@@ -409,3 +428,11 @@ export type {
   CanvasEditorState,
   CanvasPendingUpdate,
 } from "./slices/canvas";
+
+export type {
+  McpSlice,
+  McpServerView,
+  McpServerStatus,
+  McpTransportView,
+  McpToolView,
+} from "./slices/mcp";

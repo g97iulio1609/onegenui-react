@@ -15,7 +15,6 @@ import type { PlanStoreActions } from "./plan-handler";
 
 export interface TreeStoreRef {
   setUITree: ReturnType<typeof useStore>["setUITree"];
-  bumpTreeVersion: ReturnType<typeof useStore>["bumpTreeVersion"];
   setTreeStreaming: ReturnType<typeof useStore>["setTreeStreaming"];
   clearUITree: ReturnType<typeof useStore>["clearUITree"];
 }
@@ -29,7 +28,6 @@ export function useStoreRefs() {
   const storeSetUITree = useStore((s) => s.setUITree);
   const storeClearUITree = useStore((s) => s.clearUITree);
   const storeSetTreeStreaming = useStore((s) => s.setTreeStreaming);
-  const storeBumpTreeVersion = useStore((s) => s.bumpTreeVersion);
 
   // Tool progress
   const addProgressEvent = useStore((s) => s.addProgressEvent);
@@ -53,18 +51,16 @@ export function useStoreRefs() {
   // Tree store ref
   const storeRef = useRef<TreeStoreRef>({
     setUITree: storeSetUITree,
-    bumpTreeVersion: storeBumpTreeVersion,
     setTreeStreaming: storeSetTreeStreaming,
     clearUITree: storeClearUITree,
   });
   useEffect(() => {
     storeRef.current = {
       setUITree: storeSetUITree,
-      bumpTreeVersion: storeBumpTreeVersion,
       setTreeStreaming: storeSetTreeStreaming,
       clearUITree: storeClearUITree,
     };
-  }, [storeSetUITree, storeBumpTreeVersion, storeSetTreeStreaming, storeClearUITree]);
+  }, [storeSetUITree, storeSetTreeStreaming, storeClearUITree]);
 
   // Plan store ref
   const planStoreRef = useRef<PlanStoreActions>({
@@ -96,17 +92,10 @@ export function useStoreRefs() {
     setOrchestrationDone,
   ]);
 
-  // Keep setUITree ref for sync wrapper
-  const storeSetUITreeRef = useRef(storeSetUITree);
-  useEffect(() => {
-    storeSetUITreeRef.current = storeSetUITree;
-  }, [storeSetUITree]);
-
   return {
     storeRef,
     planStoreRef,
     addProgressRef,
-    storeSetUITreeRef,
     resetPlanExecution,
   };
 }

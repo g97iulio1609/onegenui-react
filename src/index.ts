@@ -317,6 +317,11 @@ export {
   useComponentState,
   useAllComponentState,
   useComponentStateActions,
+  // MCP selectors
+  useMcpServers,
+  useMcpLoadingServers,
+  useMcpError,
+  useMcpActions,
   // Types
   type PlanExecutionState,
   type PlanStep,
@@ -331,6 +336,11 @@ export {
   type CanvasInstance,
   type CanvasEditorState,
   type CanvasPendingUpdate,
+  type McpSlice,
+  type McpServerView,
+  type McpServerStatus,
+  type McpTransportView,
+  type McpToolView,
   // Note: DeepSelectionInfo is exported from ./contexts/selection
 } from "./store";
 

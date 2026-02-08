@@ -1,4 +1,9 @@
-import type { UITree, UIElement, JsonPatch } from "@onegenui/core";
+import {
+  NormalizedUiPatchSchema,
+  type UITree,
+  type UIElement,
+  type JsonPatch,
+} from "@onegenui/core";
 import {
   setByPathWithStructuralSharing,
   removeByPath as removeByPathSharing,
@@ -84,6 +89,33 @@ function buildUpdatedMeta(existingMeta: ElementMeta, turnId?: string): ElementMe
   };
 }
 
+function mergeElementForAdd(
+  existing: UIElement,
+  incoming: UIElement,
+): UIElement {
+  const existingChildren = Array.isArray(existing.children)
+    ? existing.children
+    : [];
+  const incomingChildren = Array.isArray(incoming.children)
+    ? incoming.children
+    : [];
+
+  const mergedChildren =
+    incoming.children === undefined || incomingChildren.length === 0
+      ? existingChildren
+      : [...new Set([...existingChildren, ...incomingChildren])];
+
+  return {
+    ...existing,
+    ...incoming,
+    props: {
+      ...(existing.props ?? {}),
+      ...(incoming.props ?? {}),
+    },
+    children: mergedChildren,
+  };
+}
+
 /**
  * Apply a JSON patch to the current tree
  */
@@ -93,31 +125,53 @@ export function applyPatch(
   options: ApplyPatchOptions = {},
 ): UITree {
   const { turnId, protectedTypes = [] } = options;
+  const parsedPatch = NormalizedUiPatchSchema.safeParse(patch);
+  if (!parsedPatch.success) {
+    const reason = parsedPatch.error.issues
+      .map((issue) => issue.message)
+      .join("; ");
+    throw new Error(`Invalid UI patch: ${reason}`);
+  }
+  const normalizedPatch = parsedPatch.data;
+  const patchPath = normalizedPatch.path;
+  if (typeof patchPath !== "string") {
+    throw new Error("Invalid UI patch: path is required.");
+  }
 
   const newTree = { ...tree, elements: { ...tree.elements } };
 
-  switch (patch.op) {
+  switch (normalizedPatch.op) {
     case "set":
     case "add":
     case "replace": {
-      if (patch.path === "/root") {
-        newTree.root = patch.value as string;
+      if (patchPath === "/root") {
+        newTree.root = normalizedPatch.value as string;
         return newTree;
       }
 
-      if (patch.path.startsWith("/elements/")) {
-        const pathParts = patch.path.slice("/elements/".length).split("/");
+      if (patchPath.startsWith("/elements/")) {
+        const pathParts = patchPath
+          .slice("/elements/".length)
+          .split("/");
         const elementKey = pathParts[0];
 
         if (!elementKey) return newTree;
 
         if (pathParts.length === 1) {
-          const element = patch.value as UIElement;
+          const element = normalizedPatch.value as UIElement;
           const existingElement = newTree.elements[elementKey];
+          const mergedElement =
+            (normalizedPatch.op === "add" ||
+              normalizedPatch.op === "replace") &&
+            existingElement
+              ? mergeElementForAdd(existingElement, element)
+              : element;
           const meta = existingElement
-            ? buildUpdatedMeta(existingElement._meta ?? element._meta, turnId)
-            : buildCreatedMeta(element._meta, turnId);
-          const newElement = meta ? { ...element, _meta: meta } : element;
+            ? buildUpdatedMeta(mergedElement._meta ?? existingElement._meta, turnId)
+            : buildCreatedMeta(mergedElement._meta, turnId);
+          const newElement = meta
+            ? { ...mergedElement, _meta: meta }
+            : mergedElement;
 
           ensureChildrenExist(
             newTree.elements,
@@ -149,14 +203,14 @@ export function applyPatch(
           const newElement = setByPathWithStructuralSharing(
             element as unknown as Record<string, unknown>,
             propPath,
-            patch.value,
+            normalizedPatch.value,
           ) as unknown as UIElement;
 
           if (
             propPath.startsWith("/children") &&
-            typeof patch.value === "string"
+            typeof normalizedPatch.value === "string"
           ) {
-            const childKey = patch.value;
+            const childKey = normalizedPatch.value;
             if (!newTree.elements[childKey]) {
               newTree.elements[childKey] = createPlaceholder(childKey, turnId);
             }
@@ -183,13 +237,15 @@ export function applyPatch(
       break;
     }
     case "remove": {
-      if (patch.path === "/root") {
+      if (patchPath === "/root") {
         newTree.root = "";
         return newTree;
       }
 
-      if (patch.path.startsWith("/elements/")) {
-        const pathParts = patch.path.slice("/elements/".length).split("/");
+      if (patchPath.startsWith("/elements/")) {
+        const pathParts = patchPath
+          .slice("/elements/".length)
+          .split("/");
         const elementKey = pathParts[0];
 
         if (!elementKey) return newTree;
@@ -222,14 +278,16 @@ export function applyPatch(
       break;
     }
     case "ensure": {
-      if (patch.path.startsWith("/elements/")) {
-        const pathParts = patch.path.slice("/elements/".length).split("/");
+      if (patchPath.startsWith("/elements/")) {
+        const pathParts = patchPath
+          .slice("/elements/".length)
+          .split("/");
         const elementKey = pathParts[0];
 
         if (!elementKey) return newTree;
 
         if (pathParts.length === 1 && !newTree.elements[elementKey]) {
-          const newElement = patch.value as UIElement;
+          const newElement = normalizedPatch.value as UIElement;
           const meta = buildCreatedMeta(newElement._meta, turnId);
           const ensuredElement = meta ? { ...newElement, _meta: meta } : newElement;
           ensureChildrenExist(
@@ -283,18 +341,21 @@ export function applyPatchesBatch(
 
   let newTree = { ...tree, elements: { ...tree.elements } };
 
-  for (const patch of rootPatches) {
-    newTree = applyPatch(newTree, patch, options);
-  }
-  for (const patch of elementPatches) {
-    newTree = applyPatch(newTree, patch, options);
-  }
-  for (const patch of propPatches) {
-    newTree = applyPatch(newTree, patch, options);
-  }
-  for (const patch of otherPatches) {
-    newTree = applyPatch(newTree, patch, options);
-  }
+  const applyGroup = (group: JsonPatch[]) => {
+    for (const patch of group) {
+      try {
+        newTree = applyPatch(newTree, patch, options);
+      } catch (e) {
+        if (typeof console !== "undefined") {
+          console.warn("[applyPatchesBatch] Skipping invalid patch:", patch.path, e);
+        }
+      }
+    }
+  };
+  applyGroup(rootPatches);
+  applyGroup(elementPatches);
+  applyGroup(propPatches);
+  applyGroup(otherPatches);
 
   return newTree;
 }

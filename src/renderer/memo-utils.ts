@@ -33,7 +33,7 @@ export function elementRendererPropsAreEqual(
   // Tree change - check if children have changed
   if (prevProps.tree !== nextProps.tree) {
     const children = prevProps.element.children;
-    if (children) {
+    if (Array.isArray(children)) {
       for (const childKey of children) {
         if (
           prevProps.tree.elements[childKey] !==

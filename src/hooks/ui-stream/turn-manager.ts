@@ -30,6 +30,17 @@ export interface TurnData {
   documentIndex: DocumentIndex | null | undefined;
 }
 
+function createTurnId(): string {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
+    return `turn-${crypto.randomUUID()}`;
+  }
+
+  return `turn-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 /**
  * Create a new pending conversation turn
  */
@@ -42,7 +53,7 @@ export function createPendingTurn(
 ): ConversationTurn {
   const { isProactive = false, attachments } = options;
   return {
-    id: `turn-${Date.now()}`,
+    id: createTurnId(),
     userMessage: prompt,
     assistantMessages: [],
     treeSnapshot: null,

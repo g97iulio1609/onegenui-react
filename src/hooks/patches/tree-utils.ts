@@ -14,7 +14,7 @@ export function removeNodeFromTree(tree: UITree, key: string): void {
   // Remove from parent
   if (element.parentKey) {
     const parent = tree.elements[element.parentKey];
-    if (parent && parent.children) {
+    if (parent && Array.isArray(parent.children)) {
       parent.children = parent.children.filter((k) => k !== key);
     }
   } else if (tree.root === key) {
@@ -28,7 +28,7 @@ export function removeNodeFromTree(tree: UITree, key: string): void {
     const current = tree.elements[currentKey];
     delete tree.elements[currentKey];
 
-    if (current && current.children) {
+    if (current && Array.isArray(current.children)) {
       stack.push(...current.children);
     }
   }
@@ -75,7 +75,7 @@ export function getDescendantKeys(tree: UITree, key: string): string[] {
       result.push(currentKey);
     }
 
-    if (element?.children) {
+    if (element && Array.isArray(element.children)) {
       stack.push(...element.children);
     }
   }

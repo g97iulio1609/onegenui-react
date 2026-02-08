@@ -52,7 +52,7 @@ function hasDescendantChanged(
 
   // Check all children recursively
   const children = prevElement?.children;
-  if (children) {
+  if (Array.isArray(children)) {
     for (const childKey of children) {
       if (hasDescendantChanged(childKey, prevTree, nextTree, visited)) {
         return true;
@@ -150,7 +150,7 @@ export const ElementRenderer = React.memo(function ElementRenderer({
     return null;
   }
 
-  const children = element.children?.map((childKey, index) => {
+  const children = Array.isArray(element.children) ? element.children.map((childKey, index) => {
     const childElement = tree.elements[childKey];
     if (!childElement) {
       if (loading) {
@@ -178,7 +178,7 @@ export const ElementRenderer = React.memo(function ElementRenderer({
         onResize={onResize}
       />
     );
-  });
+  }) : null;
 
   const isResizable = element.layout?.resizable !== false;
   // All elements are editable by default when in edit mode

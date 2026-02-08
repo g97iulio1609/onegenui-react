@@ -1,905 +1,241 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { useShallow } from "zustand/shallow";
 import { loggers } from "@onegenui/utils";
-import type { UITree, JsonPatch } from "@onegenui/core";
-import { applyPatchesBatch } from "./patch-utils";
-import type {
-  UseUIStreamOptions,
-  UseUIStreamReturn,
-  ConversationTurn,
-  ChatMessage,
-  QuestionPayload,
-  SuggestionChip,
-  ToolProgress,
-  PersistedAttachment,
-  Attachment,
-} from "./types";
-import type { DocumentIndex } from "@onegenui/core";
+import type { UITree } from "@onegenui/core";
+import { createTreeStoreBridge } from "./ui-stream/tree-store-bridge";
+import type { UseUIStreamOptions, UseUIStreamReturn, ConversationTurn, Attachment } from "./types";
 import { useStore } from "../store";
-import {
-  removeElementFromTree,
-  removeSubItemsFromTree,
-  updateElementInTree,
-  updateElementLayoutInTree,
-  type LayoutUpdates,
-} from "./ui-stream/tree-mutations";
+import { removeElementFromTree, removeSubItemsFromTree, updateElementInTree, updateElementLayoutInTree, type LayoutUpdates } from "./ui-stream/tree-mutations";
 import { useHistory } from "./ui-stream/use-history";
 import { streamLog } from "./ui-stream/logger";
-import { processPlanEvent } from "./ui-stream/plan-handler";
 import { buildRequest, isFileAttachment } from "./ui-stream/request-builder";
+import { processPlanEvent } from "./ui-stream/plan-handler";
 import { processDocumentIndex } from "./ui-stream/document-index-handler";
 import { useStoreRefs } from "./ui-stream/use-store-refs";
-import {
-  createPendingTurn,
-  finalizeTurn,
-  markTurnFailed,
-  removeTurn,
-  rollbackToTurn,
-} from "./ui-stream/turn-manager";
-import {
-  collectPreviousAnswers,
-  buildQuestionResponsePrompt,
-  buildQuestionResponseContext,
-  addQuestionAnswer,
-} from "./ui-stream/question-handler";
-import { readStreamWithTimeout } from "./ui-stream/stream-reader";
-import {
-  saveSelection,
-  restoreSelection,
-  PATCH_FLUSH_INTERVAL_MS,
-} from "./ui-stream/patch-processor";
-import type {
-  DeepResearchEffortLevel,
-  ResearchPhase,
-} from "../store/slices/deep-research";
+import { createPendingTurn, finalizeTurn, markTurnFailed, removeTurn, rollbackToTurn } from "./ui-stream/turn-manager";
+import { collectPreviousAnswers, buildQuestionResponsePrompt, buildQuestionResponseContext, addQuestionAnswer } from "./ui-stream/question-handler";
+import { useStreamSession } from "./ui-stream/use-stream-session";
+import { useStreamConnection } from "./ui-stream/use-stream-connection";
+import { useStreamEventLoop } from "./ui-stream/use-stream-event-loop";
+import { usePatchPipelineHook } from "./ui-stream/use-patch-pipeline-hook";
+import { useDeepResearchTracker, normalizeDeepResearchProgress } from "./ui-stream/use-deep-research-tracker";
 
 const log = loggers.react;
-const DEEP_RESEARCH_PHASES: ReadonlyArray<ResearchPhase> = [
-  {
-    id: "decomposing",
-    label: "Decomposing",
-    status: "pending",
-    progress: 0,
-  },
-  {
-    id: "searching",
-    label: "Searching",
-    status: "pending",
-    progress: 0,
-  },
-  {
-    id: "ranking",
-    label: "Ranking",
-    status: "pending",
-    progress: 0,
-  },
-  {
-    id: "extracting",
-    label: "Extracting",
-    status: "pending",
-    progress: 0,
-  },
-  {
-    id: "analyzing",
-    label: "Analyzing",
-    status: "pending",
-    progress: 0,
-  },
-  {
-    id: "synthesizing",
-    label: "Synthesizing",
-    status: "pending",
-    progress: 0,
-  },
-  {
-    id: "visualizing",
-    label: "Visualizing",
-    status: "pending",
-    progress: 0,
-  },
-];
 
-// Phase keyword to index mapping for O(1) lookup
-const PHASE_KEYWORDS: readonly [string, number][] = [
-  ["decompos", 0],
-  ["search", 1],
-  ["rank", 2],
-  ["extract", 3],
-  ["analyz", 4],
-  ["synth", 5],
-  ["visual", 6],
-] as const;
-
-function mapDeepResearchPhase(message: string): ResearchPhase | null {
-  const normalized = message.toLowerCase();
-  for (const [keyword, index] of PHASE_KEYWORDS) {
-    if (normalized.includes(keyword)) {
-      return DEEP_RESEARCH_PHASES[index] ?? null;
-    }
-  }
-  return null;
-}
-
-function normalizeDeepResearchProgress(
-  progress: number | undefined,
-): number | undefined {
-  if (typeof progress !== "number") return undefined;
-  const scaled = progress <= 1 ? progress * 100 : progress;
-  return Math.round(scaled);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// useUIStream Hook
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Hook for streaming UI generation
- */
 export function useUIStream({
-  api,
-  onComplete,
-  onError,
-  getHeaders,
-  getChatId,
-  onBackgroundComplete,
+  api, onComplete, onError, getHeaders, getChatId, onBackgroundComplete,
 }: UseUIStreamOptions): UseUIStreamReturn {
-  // Use Zustand store for tree state with shallow comparison
   const { storeTree, treeVersion } = useStore(
-    useShallow((s) => ({
-      storeTree: s.uiTree,
-      treeVersion: s.treeVersion,
-    }))
+    useShallow((s) => ({ storeTree: s.uiTree, treeVersion: s.treeVersion })),
   );
-  
-  // Get store refs from extracted hook
-  const { storeRef, planStoreRef, addProgressRef, storeSetUITreeRef, resetPlanExecution } = useStoreRefs();
-  const {
-    updateResearchProgress,
-    updateResearchPhase,
-    addResearchSource,
-    completeResearch,
-    failResearch,
-  } = useStore(
-    useShallow((s) => ({
-      updateResearchProgress: s.updateResearchProgress,
-      updateResearchPhase: s.updateResearchPhase,
-      addResearchSource: s.addResearchSource,
-      completeResearch: s.completeResearch,
-      failResearch: s.failResearch,
-    })),
-  );
-  const deepResearchSettings = useStore((s) => s.deepResearchSettings);
-  const deepResearchActiveRef = useRef(false);
-  useEffect(() => {
-    deepResearchActiveRef.current = deepResearchSettings.enabled;
-  }, [deepResearchSettings.enabled]);
+  const { planStoreRef, addProgressRef, resetPlanExecution } = useStoreRefs();
+  const bridge = useMemo(() => createTreeStoreBridge(), []);
 
-  const updateResearchProgressRef = useRef(updateResearchProgress);
-  const updateResearchPhaseRef = useRef(updateResearchPhase);
-  const addResearchSourceRef = useRef(addResearchSource);
-  const completeResearchRef = useRef(completeResearch);
-  const failResearchRef = useRef(failResearch);
-  useEffect(() => {
-    updateResearchProgressRef.current = updateResearchProgress;
-    updateResearchPhaseRef.current = updateResearchPhase;
-    addResearchSourceRef.current = addResearchSource;
-    completeResearchRef.current = completeResearch;
-    failResearchRef.current = failResearch;
-  }, [
-    updateResearchProgress,
-    updateResearchPhase,
-    addResearchSource,
-    completeResearch,
-    failResearch,
-  ]);
-
-  const deepResearchToolCallIdRef = useRef<string | null>(null);
-  
-  // CRITICAL: Create new tree reference when version changes to force re-renders
   const tree = useMemo(() => {
     if (!storeTree) return null;
     return { ...storeTree, elements: { ...storeTree.elements } };
   }, [storeTree, treeVersion]);
-  
-  // Conversation state and tree ref
-  const [conversation, setConversation] = useState<ConversationTurn[]>([]);
-  const treeRef = useRef<UITree | null>(null);
-  
-  // Sync treeRef when store changes
-  useEffect(() => {
-    treeRef.current = tree;
-  }, [tree, treeVersion]);
-  
-  // Update store (treeRef syncs automatically via effect)
-  const setTree = useCallback((newTree: UITree | null | ((prev: UITree | null) => UITree | null)) => {
-    log.debug("[useUIStream] setTree called", { isFunction: typeof newTree === "function" });
-    if (typeof newTree === "function") {
-      const updatedTree = newTree(treeRef.current);
-      log.debug("[useUIStream] setTree functional update", { 
-        hasResult: !!updatedTree,
-        elementsCount: updatedTree?.elements ? Object.keys(updatedTree.elements).length : 0
+
+  const setTree = useCallback(
+    (newTree: UITree | null | ((prev: UITree | null) => UITree | null)) => {
+      const finalTree = typeof newTree === "function" ? newTree(bridge.getTree()) : newTree;
+      log.debug("[useUIStream] setTree", {
+        hasTree: !!finalTree,
+        elementsCount: finalTree?.elements ? Object.keys(finalTree.elements).length : 0,
       });
-      treeRef.current = updatedTree;
-      storeSetUITreeRef.current(updatedTree);
-    } else {
-      log.debug("[useUIStream] setTree direct value", { 
-        hasTree: !!newTree,
-        elementsCount: newTree?.elements ? Object.keys(newTree.elements).length : 0
+      bridge.setTree(finalTree);
+    },
+    [bridge],
+  );
+
+  const session = useStreamSession(bridge, resetPlanExecution);
+  const connection = useStreamConnection();
+  const { processStream } = useStreamEventLoop();
+  const pipelineHook = usePatchPipelineHook(bridge);
+  const deepResearch = useDeepResearchTracker();
+  const { pushHistory, undo, redo, canUndo, canRedo, setHistory, setHistoryIndex } =
+    useHistory(tree, session.conversation, setTree, session.setConversation);
+
+  const removeElement = useCallback(
+    (key: string) => { pushHistory(); setTree((prev) => (prev ? removeElementFromTree(prev, key) : null)); },
+    [pushHistory, setTree],
+  );
+  const removeSubItems = useCallback(
+    (elementKey: string, identifiers: (number | string)[]) => {
+      if (identifiers.length === 0) return;
+      pushHistory();
+      setTree((prev) => (prev ? removeSubItemsFromTree(prev, elementKey, identifiers) : null));
+    },
+    [pushHistory, setTree],
+  );
+  const updateElement = useCallback(
+    (elementKey: string, updates: Record<string, unknown>) => {
+      setTree((prev) => (prev ? updateElementInTree(prev, elementKey, updates) : null));
+    },
+    [setTree],
+  );
+  const updateElementLayout = useCallback(
+    (elementKey: string, layoutUpdates: LayoutUpdates) => {
+      pushHistory();
+      setTree((prev) => (prev ? updateElementLayoutInTree(prev, elementKey, layoutUpdates) : null));
+    },
+    [pushHistory, setTree],
+  );
+
+  // ── send() — main streaming entry point ─────────────────────────────────
+  const send = useCallback(
+    async (prompt: string, context?: Record<string, unknown>, attachments?: Attachment[]) => {
+      const chatId = (context?.chatId as string | undefined) ?? getChatId?.();
+      if (session.sendingRef.current) {
+        streamLog.warn("Ignoring concurrent send", { prompt: prompt.slice(0, 100) });
+        return;
+      }
+      session.sendingRef.current = true;
+      streamLog.info("Starting send", { promptLength: prompt.length, hasContext: !!context, attachmentCount: attachments?.length ?? 0, chatId });
+
+      const { signal } = connection.setupAbort(chatId);
+      session.setIsStreaming(true);
+      session.setError(null);
+      bridge.setStreaming(true);
+
+      if (!bridge.getTree()) {
+        streamLog.debug("Initializing empty tree");
+        bridge.setTree({ root: "", elements: {} });
+      }
+
+      const isProactive = context?.hideUserMessage === true;
+      const pendingTurn = createPendingTurn(prompt, { isProactive, attachments });
+      const turnId = pendingTurn.id;
+      streamLog.debug("Creating turn", { turnId, isProactive, userMessage: prompt.slice(0, 50) });
+      deepResearch.initializeResearch(context, prompt);
+      session.setConversation((prev) => {
+        const updated = [...prev, pendingTurn];
+        streamLog.debug("Conversation updated", { prevLength: prev.length, newLength: updated.length, pendingTurnId: pendingTurn.id, userMessage: pendingTurn.userMessage?.slice(0, 50) });
+        return updated;
       });
-      treeRef.current = newTree;
-      storeSetUITreeRef.current(newTree);
-    }
-  }, [storeSetUITreeRef]);
 
-  // History management
-  const {
-    pushHistory,
-    undo,
-    redo,
-    canUndo,
-    canRedo,
-    setHistory,
-    setHistoryIndex,
-  } = useHistory(tree, conversation, setTree, setConversation, treeRef);
+      const protectedTypes = context?.forceCanvasMode === true ? ["Canvas"] : [];
+      const pipeline = pipelineHook.create({ turnId, protectedTypes });
 
-  // Keep ref in sync
-  useEffect(() => {
-    treeRef.current = tree;
-  }, [tree]);
+      try {
+        const fileAtts = attachments?.filter(isFileAttachment) ?? [];
+        if (fileAtts.length > 0) {
+          streamLog.debug("Uploading attachments", { count: fileAtts.length, files: fileAtts.map((a) => ({ name: a.file.name, type: a.file.type, size: a.file.size })) });
+        }
+        const { body, headers } = buildRequest({ prompt, context, currentTree: bridge.getTree() ?? { root: "", elements: {} }, conversation: session.conversationRef.current, attachments, componentState: useStore.getState().componentState });
+        streamLog.info("Sending request to API", { api, hasAuth: !!getHeaders });
+        const reader = await connection.connect({ api, body, headers, signal, getHeaders });
 
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
-  const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
-  const sendingRef = useRef(false);
-  const patchFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+        const result = await processStream({
+          reader, turnId, setConversation: session.setConversation,
+          handlers: {
+            onPatch: (patches, atomic) => pipeline.push(patches, atomic),
+            onToolProgress: (progress) => {
+              addProgressRef.current({ toolCallId: progress.toolCallId, toolName: progress.toolName, status: progress.status, message: progress.message, data: progress.data, progress: normalizeDeepResearchProgress(progress.progress) });
+              deepResearch.handleDeepResearchToolProgress(progress);
+            },
+            onPlanEvent: (event) => processPlanEvent(event, planStoreRef.current),
+            onDocumentIndex: (uiComponent, current) => processDocumentIndex(uiComponent, current),
+            onCitations: (citations) => {
+              if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("onegenui:citations", { detail: { citations } }));
+            },
+          },
+        });
 
-  const clear = useCallback(() => {
-    setTree(null);
-    setConversation([]);
-    treeRef.current = null;
-    setError(null);
-    resetPlanExecution();
-    storeRef.current.clearUITree();
-  }, [resetPlanExecution, setTree, storeRef]);
+        // Flush remaining buffered patches to store BEFORE reading final state
+        pipeline.flush();
+        const finalTree = bridge.getTree() ?? { root: "", elements: {} };
+        streamLog.info("Stream completed", { totalPatches: result.patchCount, totalMessages: result.messageCount, treeElementCount: Object.keys(finalTree.elements).length });
+        if (signal.aborted) { streamLog.warn("Request aborted before finalization"); return; }
+
+        streamLog.debug("Finalizing turn", { turnId });
+        session.setConversation((prev) => finalizeTurn(prev, turnId, { messages: result.messages, questions: result.questions, suggestions: result.suggestions, treeSnapshot: finalTree, documentIndex: result.documentIndex }));
+        deepResearch.handleCompletion();
+        onComplete?.(finalTree);
+      } catch (err) {
+        pipeline.reset();
+        if ((err as Error).name === "AbortError") {
+          streamLog.info("Request aborted", { turnId });
+          deepResearch.handleAbort();
+          session.setConversation((prev) => removeTurn(prev, turnId));
+          return;
+        }
+        const error = err instanceof Error ? err : new Error(String(err));
+        streamLog.error("Stream error", { error: error.message, turnId });
+        session.setError(error);
+        onError?.(error);
+        deepResearch.handleError(error.message);
+        session.setConversation((prev) => markTurnFailed(prev, turnId, error.message));
+      } finally {
+        session.sendingRef.current = false;
+        connection.clearControllers();
+        session.setIsStreaming(false);
+        bridge.setStreaming(false);
+        streamLog.debug("Send completed");
+      }
+    },
+    [api, onComplete, onError, setTree, getChatId, getHeaders, bridge, connection, session, processStream, pipelineHook, deepResearch],
+  );
+
+  const answerQuestion = useCallback(
+    (turnId: string, questionId: string, answers: Record<string, unknown>) => {
+      const turn = session.conversation.find((t) => t.id === turnId);
+      const question = turn?.questions?.find((q) => q.id === questionId);
+      const allPrev = collectPreviousAnswers(session.conversation, turnId);
+      session.setConversation((prev) => addQuestionAnswer(prev, turnId, questionId, answers));
+      if (question) send(buildQuestionResponsePrompt(question.text, answers), buildQuestionResponseContext(question, turnId, answers, allPrev));
+    },
+    [session.conversation, send],
+  );
 
   const loadSession = useCallback(
-    (session: { tree: UITree; conversation: ConversationTurn[] }) => {
-      const rootElement = session.tree?.elements?.[session.tree?.root];
-      log.debug("[useUIStream] loadSession called", {
-        hasTree: !!session.tree,
-        rootKey: session.tree?.root,
-        rootChildrenCount: rootElement?.children?.length,
-        elementsCount: session.tree?.elements ? Object.keys(session.tree.elements).length : 0,
-        conversationLength: session.conversation?.length,
-      });
-      setTree(session.tree);
-      treeRef.current = session.tree;
-      setConversation(session.conversation);
-      setHistory([]);
-      setHistoryIndex(-1);
+    (sess: { tree: UITree; conversation: ConversationTurn[] }) => {
+      const rootEl = sess.tree?.elements?.[sess.tree?.root];
+      log.debug("[useUIStream] loadSession called", { hasTree: !!sess.tree, rootKey: sess.tree?.root, rootChildrenCount: rootEl?.children?.length, elementsCount: sess.tree?.elements ? Object.keys(sess.tree.elements).length : 0, conversationLength: sess.conversation?.length });
+      setTree(sess.tree);
+      session.setConversation(sess.conversation);
+      session.conversationRef.current = sess.conversation;
+      setHistory([]); setHistoryIndex(-1);
       log.debug("[useUIStream] loadSession complete, tree set");
     },
     [setTree, setHistory, setHistoryIndex],
   );
 
-  const removeElement = useCallback(
-    (key: string) => {
-      pushHistory();
-      setTree((prev) => (prev ? removeElementFromTree(prev, key) : null));
-    },
-    [pushHistory, setTree],
-  );
-
-  const removeSubItems = useCallback(
-    (elementKey: string, identifiers: (number | string)[]) => {
-      if (identifiers.length === 0) return;
-      pushHistory();
-      setTree((prev) =>
-        prev ? removeSubItemsFromTree(prev, elementKey, identifiers) : null,
-      );
-    },
-    [pushHistory, setTree],
-  );
-
-  const updateElement = useCallback(
-    (elementKey: string, updates: Record<string, unknown>) => {
-      setTree((prev) =>
-        prev ? updateElementInTree(prev, elementKey, updates) : null,
-      );
-    },
-    [setTree],
-  );
-
-  const updateElementLayout = useCallback(
-    (elementKey: string, layoutUpdates: LayoutUpdates) => {
-      pushHistory();
-      setTree((prev) =>
-        prev
-          ? updateElementLayoutInTree(prev, elementKey, layoutUpdates)
-          : null,
-      );
-    },
-    [pushHistory, setTree],
-  );
-
-  const send = useCallback(
-    async (
-      prompt: string,
-      context?: Record<string, unknown>,
-      attachments?: Attachment[],
-    ) => {
-      // Get chatId from context (set by handleChatSend)
-      const chatId = (context?.chatId as string | undefined) ?? getChatId?.();
-      
-      // Prevent concurrent sends
-      if (sendingRef.current) {
-        streamLog.warn("Ignoring concurrent send", { 
-          prompt: prompt.slice(0, 100),
-        });
-        return;
-      }
-      sendingRef.current = true;
-      
-      streamLog.info("Starting send", { 
-        promptLength: prompt.length, 
-        hasContext: !!context,
-        attachmentCount: attachments?.length ?? 0,
-        chatId,
-      });
-
-      // Abort any existing request
-      if (abortControllersRef.current.size > 0) {
-        abortControllersRef.current.forEach((controller) => controller.abort());
-        abortControllersRef.current.clear();
-      }
-      const abortController = new AbortController();
-      const abortKey = chatId ?? "default";
-      abortControllersRef.current.set(abortKey, abortController);
-      const signal = abortController.signal;
-
-      setIsStreaming(true);
-      setError(null);
-
-      // Start with existing tree or empty
-      let currentTree: UITree = treeRef.current
-        ? JSON.parse(JSON.stringify(treeRef.current))
-        : { root: "", elements: {} };
-
-      // If no tree existed, initialize it and sync ref immediately
-      if (!treeRef.current) {
-        streamLog.debug("Initializing empty tree");
-        setTree(currentTree);
-        treeRef.current = currentTree;
-      }
-
-      // Create pending turn using turn manager
-      const isProactive = context?.hideUserMessage === true;
-      const pendingTurn = createPendingTurn(prompt, { isProactive, attachments });
-      const turnId = pendingTurn.id;
-      streamLog.debug("Creating turn", { turnId, isProactive, userMessage: prompt.slice(0, 50) });
-      deepResearchToolCallIdRef.current = null;
-      if (context?.deepResearch && deepResearchActiveRef.current) {
-        const effort =
-          (context.deepResearch as { effort?: DeepResearchEffortLevel })
-            .effort ?? "standard";
-        useStore.getState().setDeepResearchEffortLevel(effort);
-        useStore.getState().startResearch(prompt);
-        updateResearchProgressRef.current({
-          effortLevel: effort,
-          status: "searching",
-          currentPhase: "Decomposing",
-          phases: DEEP_RESEARCH_PHASES.map((phase, index) => ({
-            ...phase,
-            status: index === 0 ? "running" : "pending",
-            progress: 0,
-            startTime: index === 0 ? Date.now() : undefined,
-          })),
-        });
-      }
-      
-      // Add turn to conversation
-      setConversation((prev) => {
-        const updated = [...prev, pendingTurn];
-        streamLog.debug("Conversation updated", { 
-          prevLength: prev.length, 
-          newLength: updated.length,
-          pendingTurnId: pendingTurn.id,
-          userMessage: pendingTurn.userMessage?.slice(0, 50),
-        });
-        return updated;
-      });
-
-      // Batch processing variables
-      let patchBuffer: JsonPatch[] = [];
-      
-      // Clear any existing timer
-      if (patchFlushTimerRef.current) {
-        clearTimeout(patchFlushTimerRef.current);
-        patchFlushTimerRef.current = null;
-      }
-
-      try {
-        // Build request body and headers
-        const fileAttachments = attachments?.filter(isFileAttachment) ?? [];
-        if (fileAttachments.length > 0) {
-          streamLog.debug("Uploading attachments", {
-            count: fileAttachments.length,
-            files: fileAttachments.map((att) => ({
-              name: att.file.name,
-              type: att.file.type,
-              size: att.file.size,
-            })),
-          });
-        }
-
-        const { body, headers } = buildRequest({
-          prompt,
-          context,
-          currentTree,
-          conversation,
-          attachments,
-          componentState: useStore.getState().componentState,
-        });
-
-        // Add dynamic headers (e.g. auth)
-        if (getHeaders) {
-          const dynamicHeaders = await getHeaders();
-          Object.assign(headers, dynamicHeaders);
-        }
-
-        streamLog.info("Sending request to API", { api, hasAuth: !!getHeaders });
-
-        const response = await fetch(api, {
-          method: "POST",
-          headers,
-          body,
-          signal,
-        });
-
-        streamLog.debug("Response received", { status: response.status, ok: response.ok });
-
-        if (!response.ok) {
-          throw new Error(`HTTP error: ${response.status}`);
-        }
-
-        if (!response.body) {
-          throw new Error("No response body");
-        }
-
-        const reader = response.body.getReader();
-
-        const currentMessages: ChatMessage[] = [];
-        const currentQuestions: QuestionPayload[] = [];
-        const currentSuggestions: SuggestionChip[] = [];
-        const currentToolProgress: ToolProgress[] = [];
-        const currentPersistedAttachments: PersistedAttachment[] = [];
-        let currentDocumentIndex: DocumentIndex | undefined = undefined;
-        let patchCount = 0;
-        let messageCount = 0;
-
-        // Update status to streaming
-        setConversation((prev) =>
-          prev.map((t) =>
-            t.id === turnId ? { ...t, status: "streaming" as const } : t,
-          ),
-        );
-
-        // Helper to update the pending turn
-        const updateTurnData = () => {
-          setConversation((prev) =>
-            prev.map((t) =>
-              t.id === turnId
-                ? ({
-                    ...t,
-                    assistantMessages: [...currentMessages],
-                    questions: [...currentQuestions],
-                    suggestions: [...currentSuggestions],
-                    toolProgress: [...currentToolProgress],
-                    persistedAttachments:
-                      currentPersistedAttachments.length > 0
-                        ? [...currentPersistedAttachments]
-                        : t.persistedAttachments,
-                    documentIndex: currentDocumentIndex ?? t.documentIndex,
-                  } as ConversationTurn)
-                : t,
-            ),
-          );
-        };
-
-        streamLog.debug("Starting stream processing");
-
-        // Process stream events using async iterator
-        for await (const event of readStreamWithTimeout(reader)) {
-          try {
-            if (event.type === "done" || event.type === "text-delta") {
-              continue;
-            }
-
-            if (event.type === "error") {
-              throw new Error(`[${event.error.code}] ${event.error.message}`);
-            }
-            
-            if (event.type === "message") {
-              messageCount++;
-              streamLog.debug("Message received", { messageCount, contentLength: event.message.content?.length ?? 0 });
-              currentMessages.push(event.message);
-              updateTurnData();
-            } else if (event.type === "question") {
-              currentQuestions.push(event.question);
-              updateTurnData();
-            } else if (event.type === "suggestion") {
-              currentSuggestions.push(...event.suggestions);
-              updateTurnData();
-            } else if (event.type === "tool-progress") {
-              currentToolProgress.push(event.progress);
-              updateTurnData();
-              addProgressRef.current({
-                toolCallId: event.progress.toolCallId,
-                toolName: event.progress.toolName,
-                status: event.progress.status,
-                message: event.progress.message,
-                data: event.progress.data,
-                progress: normalizeDeepResearchProgress(event.progress.progress),
-              });
-
-              if (event.progress.toolName === "deep-research") {
-                deepResearchToolCallIdRef.current =
-                  deepResearchToolCallIdRef.current ?? event.progress.toolCallId;
-                const progressValue = normalizeDeepResearchProgress(
-                  event.progress.progress,
-                );
-                if (typeof progressValue === "number") {
-                  updateResearchProgressRef.current({
-                    progress: progressValue,
-                    status:
-                      event.progress.status === "error" ? "error" : "searching",
-                  });
-                }
-
-                const message = event.progress.message?.trim();
-                if (message) {
-                  const phase = mapDeepResearchPhase(message);
-                  if (phase) {
-                    updateResearchProgressRef.current({
-                      currentPhase: phase.label,
-                    });
-                    updateResearchPhaseRef.current(phase.id, {
-                      status: "running",
-                      startTime: Date.now(),
-                    });
-                  }
-
-                  const sourceMatch = message.match(/\bhttps?:\/\/\S+/i);
-                  if (sourceMatch) {
-                    const url = sourceMatch[0] ?? "";
-                    if (url) {
-                      try {
-                        const urlObj = new URL(url);
-                        addResearchSourceRef.current({
-                          id: `src-${Date.now()}`,
-                          url,
-                          title: urlObj.hostname,
-                          domain: urlObj.hostname.replace("www.", ""),
-                          credibility: 0.5,
-                          status: "analyzing",
-                        });
-                      } catch {
-                        // ignore invalid URL
-                      }
-                    }
-                  }
-                }
-
-                if (event.progress.status === "complete") {
-                  for (const phase of DEEP_RESEARCH_PHASES) {
-                    updateResearchPhaseRef.current(phase.id, {
-                      status: "complete",
-                      progress: 100,
-                      endTime: Date.now(),
-                    });
-                  }
-                  completeResearchRef.current(0.8);
-                  updateResearchProgressRef.current({
-                    status: "complete",
-                    progress: 100,
-                    currentPhase: "Completed",
-                  });
-                } else if (event.progress.status === "error") {
-                  const errorMessage =
-                    event.progress.message ?? "Deep research failed";
-                  failResearchRef.current(errorMessage);
-                }
-              }
-            } else if (event.type === "patch") {
-              patchCount += event.patches.length;
-              patchBuffer.push(...event.patches);
-
-              // Schedule batch application with short delay
-              if (!patchFlushTimerRef.current) {
-                patchFlushTimerRef.current = setTimeout(() => {
-                  patchFlushTimerRef.current = null;
-                  if (patchBuffer.length > 0) {
-                    streamLog.debug("Flushing patches", { count: patchBuffer.length });
-                    
-                    const baseTree = treeRef.current ?? currentTree;
-                    const protectedTypes =
-                      context?.forceCanvasMode === true ? ["Canvas"] : [];
-                    
-                    const updatedTree = applyPatchesBatch(
-                      baseTree,
-                      patchBuffer,
-                      { turnId, protectedTypes },
-                    );
-                    patchBuffer = [];
-                    
-                    // Update local tracking state and UI store
-                    treeRef.current = updatedTree;
-                    currentTree = updatedTree;
-                    
-                    // Save selection before DOM changes
-                    const savedSel = saveSelection();
-                    
-                    const store = storeRef.current;
-                    store.setUITree({
-                      root: updatedTree.root,
-                      elements: { ...updatedTree.elements },
-                    });
-                    store.bumpTreeVersion();
-                    
-                    // Restore selection after DOM update
-                    if (savedSel) {
-                      requestAnimationFrame(() => restoreSelection(savedSel));
-                    }
-                    
-                    streamLog.debug("Tree updated", { 
-                      elementCount: Object.keys(updatedTree.elements).length 
-                    });
-                  }
-                }, PATCH_FLUSH_INTERVAL_MS);
-              }
-            } else if (event.type === "plan-created" || event.type === "step-started" ||
-                       event.type === "step-done" || event.type === "subtask-started" ||
-                       event.type === "subtask-done" || event.type === "level-started" ||
-                       event.type === "level-completed" || event.type === "orchestration-done") {
-              processPlanEvent(event as unknown as Record<string, unknown>, planStoreRef.current);
-            } else if (event.type === "persisted-attachments") {
-              currentPersistedAttachments.push(...(event.attachments as PersistedAttachment[]));
-              updateTurnData();
-            } else if (event.type === "document-index-ui") {
-              const uiComponent = event.uiComponent as { type: string; props: DocumentIndex };
-              const updated = processDocumentIndex(uiComponent, currentDocumentIndex);
-              if (updated) {
-                currentDocumentIndex = updated;
-                updateTurnData();
-              }
-            } else if (event.type === "citations") {
-              if (Array.isArray(event.citations) && typeof window !== "undefined") {
-                window.dispatchEvent(
-                  new CustomEvent("onegenui:citations", {
-                    detail: { citations: event.citations },
-                  }),
-                );
-              }
-            }
-          } catch (e) {
-            streamLog.warn("Event processing error", { 
-              error: e instanceof Error ? e.message : String(e),
-              eventType: event.type 
-            });
-          }
-        }
-
-        // Final setTree with fresh reference and sync ref
-        streamLog.info("Stream completed", { 
-          totalPatches: patchCount, 
-          totalMessages: messageCount,
-          treeElementCount: Object.keys(currentTree.elements).length 
-        });
-        treeRef.current = currentTree;
-        
-        // Create a shallow copy with new elements reference to ensure React detects change
-        setTree({
-          root: currentTree.root,
-          elements: { ...currentTree.elements },
-        });
-
-        // Clear flush timer if pending
-        if (patchFlushTimerRef.current) {
-          clearTimeout(patchFlushTimerRef.current);
-          patchFlushTimerRef.current = null;
-        }
-
-        // Flush any remaining patches before finalization
-        if (patchBuffer.length > 0) {
-          streamLog.debug("Final patch flush", { count: patchBuffer.length });
-          // Use treeRef for consistency
-          const baseTree = treeRef.current ?? currentTree;
-          
-          // Protect Canvas from removal when forceCanvasMode is enabled
-          const protectedTypes =
-            context?.forceCanvasMode === true ? ["Canvas"] : [];
-          
-          currentTree = applyPatchesBatch(baseTree, patchBuffer, { turnId, protectedTypes });
-          patchBuffer = [];
-          treeRef.current = currentTree;
-          
-          const store = storeRef.current;
-          store.setUITree({
-            root: currentTree.root,
-            elements: { ...currentTree.elements },
-          });
-          store.bumpTreeVersion();
-          
-          streamLog.debug("Final tree state", { 
-            elementCount: Object.keys(currentTree.elements).length,
-          });
-        }
-
-        // Check abort before final state updates
-        if (signal.aborted) {
-          streamLog.warn("Request aborted before finalization");
-          return;
-        }
-
-        // Finalize turn using turn manager
-        streamLog.debug("Finalizing turn", { turnId });
-        setConversation((prev) =>
-          finalizeTurn(prev, turnId, {
-            messages: currentMessages,
-            questions: currentQuestions,
-            suggestions: currentSuggestions,
-            treeSnapshot: currentTree,
-            documentIndex: currentDocumentIndex,
-          }),
-        );
-
-        if (deepResearchToolCallIdRef.current) {
-          updateResearchProgressRef.current({
-            status: "complete",
-            progress: 100,
-          });
-        }
-
-        onComplete?.(currentTree);
-      } catch (err) {
-        // Clear buffer and timer on any error
-        if (patchFlushTimerRef.current) {
-          clearTimeout(patchFlushTimerRef.current);
-          patchFlushTimerRef.current = null;
-        }
-        patchBuffer = [];
-
-        if ((err as Error).name === "AbortError") {
-          streamLog.info("Request aborted", { turnId });
-          if (deepResearchToolCallIdRef.current) {
-            updateResearchProgressRef.current({ status: "stopped" });
-          }
-          setConversation((prev) => removeTurn(prev, turnId));
-          return;
-        }
-        const error = err instanceof Error ? err : new Error(String(err));
-        streamLog.error("Stream error", { error: error.message, turnId });
-        setError(error);
-        onError?.(error);
-        if (deepResearchToolCallIdRef.current) {
-          failResearchRef.current(error.message);
-        }
-        // Mark turn as failed using turn manager
-        setConversation((prev) => markTurnFailed(prev, turnId, error.message));
-      } finally {
-        // Cleanup
-        sendingRef.current = false;
-        abortControllersRef.current.clear();
-        setIsStreaming(false);
-        streamLog.debug("Send completed");
-      }
-    },
-    [api, onComplete, onError, setTree, getChatId],
-  );
-
-  const answerQuestion = useCallback(
-    (turnId: string, questionId: string, answers: Record<string, unknown>) => {
-      const turn = conversation.find((t) => t.id === turnId);
-      const question = turn?.questions?.find((q) => q.id === questionId);
-
-      // Collect all previous answers using extracted helper
-      const allPreviousAnswers = collectPreviousAnswers(conversation, turnId);
-
-      // Update conversation with answer
-      setConversation((prev) => addQuestionAnswer(prev, turnId, questionId, answers));
-
-      // Send question response if question found
-      if (question) {
-        const prompt = buildQuestionResponsePrompt(question.text, answers);
-        const context = buildQuestionResponseContext(
-          question,
-          turnId,
-          answers,
-          allPreviousAnswers,
-        );
-        send(prompt, context);
-      }
-    },
-    [conversation, send],
-  );
-
-  // Cleanup on unmount - abort all active streams and clear timers
-  useEffect(() => {
-    return () => {
-      // Clear any pending patch flush timer
-      if (patchFlushTimerRef.current) {
-        clearTimeout(patchFlushTimerRef.current);
-        patchFlushTimerRef.current = null;
-      }
-      // Abort all active streams
-      for (const controller of abortControllersRef.current.values()) {
-        controller.abort();
-      }
-      abortControllersRef.current.clear();
-    };
-  }, []);
-
-  // Delete a turn and rollback to previous state
   const deleteTurn = useCallback(
     (turnId: string) => {
       pushHistory();
-      const result = rollbackToTurn(conversation, turnId);
+      const result = rollbackToTurn(session.conversation, turnId);
       if (!result) return;
-      
-      // Use restored tree or empty tree if first turn deleted
-      const treeToRestore = result.restoredTree ?? { root: "", elements: {} };
-      setTree(treeToRestore);
-      treeRef.current = treeToRestore;
-      setConversation(result.newConversation);
+      setTree(result.restoredTree ?? { root: "", elements: {} });
+      session.setConversation(result.newConversation);
     },
-    [conversation, pushHistory, setTree],
+    [session.conversation, pushHistory, setTree],
   );
 
-  // Edit a turn message and regenerate
   const editTurn = useCallback(
     async (turnId: string, newMessage: string) => {
       pushHistory();
-      const result = rollbackToTurn(conversation, turnId);
+      const result = rollbackToTurn(session.conversation, turnId);
       if (!result) return;
-      
       setTree(result.restoredTree);
-      treeRef.current = result.restoredTree;
-      setConversation(result.newConversation);
-
+      session.setConversation(result.newConversation);
       await send(newMessage, result.restoredTree ? { tree: result.restoredTree } : undefined);
     },
-    [conversation, send, pushHistory, setTree],
+    [session.conversation, send, pushHistory, setTree],
   );
 
-  // Abort the current streaming request
   const abort = useCallback(() => {
-    abortControllersRef.current.forEach((controller) => controller.abort());
-    abortControllersRef.current.clear();
-    sendingRef.current = false;
-    setIsStreaming(false);
+    connection.abort(); session.sendingRef.current = false; session.setIsStreaming(false);
   }, []);
 
+  useEffect(() => () => { pipelineHook.cleanup(); connection.abort(); }, []);
+
   return {
-    tree,
-    conversation,
-    isStreaming,
-    error,
-    send,
-    clear,
-    loadSession,
-    removeElement,
-    removeSubItems,
-    updateElement,
-    updateElementLayout,
-    deleteTurn,
-    editTurn,
-    undo,
-    redo,
-    canUndo,
-    canRedo,
-    answerQuestion,
-    abort,
+    tree, conversation: session.conversation, isStreaming: session.isStreaming,
+    error: session.error, send, clear: session.clear, loadSession,
+    removeElement, removeSubItems, updateElement, updateElementLayout,
+    deleteTurn, editTurn, undo, redo, canUndo, canRedo, answerQuestion, abort,
   };
 }
