@@ -6,6 +6,13 @@
  * 2. Synced to UI tree (optional, default: true)
  * 3. Sent to AI in API requests
  *
+ * Merge strategy:
+ * - `initialProps` (from tree) is always the base — reflects latest patches
+ *   during streaming without stale overrides.
+ * - Only fields explicitly modified by the user via `updateState` ("dirty
+ *   fields") are read from `componentState` and applied on top, so user
+ *   edits survive tree updates.
+ *
  * @example
  * ```tsx
  * function Workout({ element }: ComponentRenderProps) {
@@ -53,18 +60,31 @@ export function useElementState<T extends Record<string, unknown>>(
   const updateComponentState = useStore((s) => s.updateComponentState);
   const updateUITree = useStore((s) => s.updateUITree);
 
-  // Refs for debounce and mount check
-  const mountedRef = useRef(false);
+  // Refs
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Merge initialProps with componentState
-  const mergedState = useMemo<T>(
-    () => ({
-      ...initialProps,
-      ...((componentState ?? {}) as Partial<T>),
-    }),
-    [initialProps, componentState],
-  );
+  // Track fields explicitly modified by user via updateState.
+  // Only these fields are read from componentState; everything else
+  // comes straight from initialProps (the tree), guaranteeing streaming
+  // patches are never masked by a stale componentState snapshot.
+  const dirtyFieldsRef = useRef<Set<string>>(new Set());
+
+  // Merge: tree props as base, user-modified ("dirty") fields from
+  // componentState layered on top.
+  const mergedState = useMemo<T>(() => {
+    const base = { ...initialProps };
+    if (componentState) {
+      for (const field of dirtyFieldsRef.current) {
+        if (field in componentState) {
+          (base as Record<string, unknown>)[field] = componentState[field];
+        }
+      }
+    }
+    return base as T;
+    // componentState is in deps so the memo re-runs when updateState writes
+    // to Zustand, even though we only read dirty fields from it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialProps, componentState]);
 
   // Cleanup timer on unmount
   useEffect(() => {
@@ -75,9 +95,15 @@ export function useElementState<T extends Record<string, unknown>>(
     };
   }, []);
 
-  // Update function
+  // Update function — marks touched fields as dirty so they survive
+  // future tree updates, writes to Zustand, and syncs to tree.
   const updateState = useCallback(
     (updates: Partial<T>) => {
+      // Mark fields as user-modified
+      for (const key of Object.keys(updates)) {
+        dirtyFieldsRef.current.add(key);
+      }
+
       // Update Zustand immediately
       updateComponentState(elementKey, updates as Record<string, unknown>);
 
@@ -112,18 +138,21 @@ export function useElementState<T extends Record<string, unknown>>(
     [elementKey, updateComponentState, updateUITree, syncToTree, debounceMs],
   );
 
-  // ALWAYS initialize componentState on mount with initialProps
-  // This ensures proactive AI has access to complete component data
+  // Keep componentState in sync for AI context (proactive AI reads this).
+  // Writes non-dirty fields from initialProps so the AI always sees the
+  // latest tree data; dirty fields are left untouched (already current
+  // from updateState calls).
   useEffect(() => {
-    if (!mountedRef.current) {
-      mountedRef.current = true;
-      // Always set initial state - proactive AI needs this data
-      if (Object.keys(initialProps).length > 0) {
-        updateComponentState(
-          elementKey,
-          initialProps as Record<string, unknown>,
-        );
+    if (Object.keys(initialProps).length === 0) return;
+
+    const nonDirtyUpdates: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(initialProps)) {
+      if (!dirtyFieldsRef.current.has(key)) {
+        nonDirtyUpdates[key] = value;
       }
+    }
+    if (Object.keys(nonDirtyUpdates).length > 0) {
+      updateComponentState(elementKey, nonDirtyUpdates);
     }
   }, [elementKey, initialProps, updateComponentState]);
 

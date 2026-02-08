@@ -4529,15 +4529,19 @@ function useElementState(elementKey, initialProps, options = {}) {
   const componentState = useStore((s) => s.componentState[elementKey]);
   const updateComponentState = useStore((s) => s.updateComponentState);
   const updateUITree = useStore((s) => s.updateUITree);
-  const mountedRef = useRef8(false);
   const timerRef = useRef8(null);
-  const mergedState = useMemo13(
-    () => ({
-      ...initialProps,
-      ...componentState ?? {}
-    }),
-    [initialProps, componentState]
-  );
+  const dirtyFieldsRef = useRef8(/* @__PURE__ */ new Set());
+  const mergedState = useMemo13(() => {
+    const base = { ...initialProps };
+    if (componentState) {
+      for (const field of dirtyFieldsRef.current) {
+        if (field in componentState) {
+          base[field] = componentState[field];
+        }
+      }
+    }
+    return base;
+  }, [initialProps, componentState]);
   useEffect10(() => {
     return () => {
       if (timerRef.current) {
@@ -4547,6 +4551,9 @@ function useElementState(elementKey, initialProps, options = {}) {
   }, []);
   const updateState = useCallback16(
     (updates) => {
+      for (const key of Object.keys(updates)) {
+        dirtyFieldsRef.current.add(key);
+      }
       updateComponentState(elementKey, updates);
       if (syncToTree) {
         if (timerRef.current) {
@@ -4577,14 +4584,15 @@ function useElementState(elementKey, initialProps, options = {}) {
     [elementKey, updateComponentState, updateUITree, syncToTree, debounceMs]
   );
   useEffect10(() => {
-    if (!mountedRef.current) {
-      mountedRef.current = true;
-      if (Object.keys(initialProps).length > 0) {
-        updateComponentState(
-          elementKey,
-          initialProps
-        );
+    if (Object.keys(initialProps).length === 0) return;
+    const nonDirtyUpdates = {};
+    for (const [key, value] of Object.entries(initialProps)) {
+      if (!dirtyFieldsRef.current.has(key)) {
+        nonDirtyUpdates[key] = value;
       }
+    }
+    if (Object.keys(nonDirtyUpdates).length > 0) {
+      updateComponentState(elementKey, nonDirtyUpdates);
     }
   }, [elementKey, initialProps, updateComponentState]);
   return [mergedState, updateState];
