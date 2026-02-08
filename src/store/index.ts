@@ -361,18 +361,15 @@ export const useCanvasActions = () =>
 
 // Component State selectors
 export const useComponentState = (elementKey: string) =>
-  useStore((s) => s.componentState[elementKey] ?? {});
+  useStore((s) => s.componentState[elementKey]);
 export const useAllComponentState = () =>
   useStore(useShallow((s) => s.componentState));
 export const useComponentStateActions = () =>
   useStore(
     useShallow((s) => ({
-      setComponentState: s.setComponentState,
       updateComponentState: s.updateComponentState,
-      mergeComponentState: s.mergeComponentState,
       clearComponentState: s.clearComponentState,
       clearAllComponentState: s.clearAllComponentState,
-      getElementState: s.getElementState,
     })),
   );
 

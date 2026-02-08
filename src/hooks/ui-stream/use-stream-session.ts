@@ -13,6 +13,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import type { ConversationTurn } from "../types";
 import type { TreeStoreBridge } from "./tree-store-bridge";
+import { useStore } from "../../store";
 
 export interface UseStreamSessionReturn {
   conversation: ConversationTurn[];
@@ -42,6 +43,7 @@ export function useStreamSession(
 
   const clear = useCallback(() => {
     bridge.clear();
+    useStore.getState().clearAllComponentState();
     setConversation([]);
     conversationRef.current = [];
     setError(null);

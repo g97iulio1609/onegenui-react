@@ -1453,28 +1453,18 @@ var createCanvasSlice = (set, get) => ({
 });
 
 // src/store/slices/component-state.ts
-var createComponentStateSlice = (set, get) => ({
+var createComponentStateSlice = (set) => ({
   componentState: {},
-  setComponentState: (elementKey, state) => set((s) => {
-    s.componentState[elementKey] = state;
-  }),
   updateComponentState: (elementKey, updates) => set((s) => {
     if (!s.componentState[elementKey]) {
       s.componentState[elementKey] = {};
     }
     Object.assign(s.componentState[elementKey], updates);
   }),
-  mergeComponentState: (elementKey, updates) => set((s) => {
-    s.componentState[elementKey] = {
-      ...s.componentState[elementKey] ?? {},
-      ...updates
-    };
-  }),
   clearComponentState: (elementKey) => set((s) => {
     delete s.componentState[elementKey];
   }),
-  clearAllComponentState: () => set({ componentState: {} }),
-  getElementState: (elementKey) => get().componentState[elementKey] ?? {}
+  clearAllComponentState: () => set({ componentState: {} })
 });
 
 // src/store/slices/mcp.ts
@@ -1760,16 +1750,13 @@ var useCanvasActions = () => useStore(
     clearCanvasPendingUpdates: s.clearCanvasPendingUpdates
   }))
 );
-var useComponentState = (elementKey) => useStore((s) => s.componentState[elementKey] ?? {});
+var useComponentState = (elementKey) => useStore((s) => s.componentState[elementKey]);
 var useAllComponentState = () => useStore((0, import_shallow.useShallow)((s) => s.componentState));
 var useComponentStateActions = () => useStore(
   (0, import_shallow.useShallow)((s) => ({
-    setComponentState: s.setComponentState,
     updateComponentState: s.updateComponentState,
-    mergeComponentState: s.mergeComponentState,
     clearComponentState: s.clearComponentState,
-    clearAllComponentState: s.clearAllComponentState,
-    getElementState: s.getElementState
+    clearAllComponentState: s.clearAllComponentState
   }))
 );
 var useMcpServers = () => useStore((0, import_shallow.useShallow)((s) => s.servers));
@@ -4649,51 +4636,36 @@ var import_utils11 = require("@onegenui/utils");
 var log2 = import_utils11.loggers.react;
 function useElementState(elementKey, initialProps, options = {}) {
   const { syncToTree = true, debounceMs = 300 } = options;
-  const componentState = useStore((s) => s.componentState[elementKey]);
+  const overrides = useStore((s) => s.componentState[elementKey]);
   const updateComponentState = useStore((s) => s.updateComponentState);
   const updateUITree = useStore((s) => s.updateUITree);
   const timerRef = (0, import_react21.useRef)(null);
-  const dirtyFieldsRef = (0, import_react21.useRef)(/* @__PURE__ */ new Set());
-  const mergedState = (0, import_react21.useMemo)(() => {
-    const base = { ...initialProps };
-    if (componentState) {
-      for (const field of dirtyFieldsRef.current) {
-        if (field in componentState) {
-          base[field] = componentState[field];
-        }
-      }
-    }
-    return base;
-  }, [initialProps, componentState]);
+  const mergedState = (0, import_react21.useMemo)(
+    () => overrides ? { ...initialProps, ...overrides } : initialProps,
+    [initialProps, overrides]
+  );
   (0, import_react21.useEffect)(() => {
     return () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-      }
+      if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, []);
   const updateState = (0, import_react21.useCallback)(
     (updates) => {
-      for (const key of Object.keys(updates)) {
-        dirtyFieldsRef.current.add(key);
-      }
       updateComponentState(elementKey, updates);
       if (syncToTree) {
-        if (timerRef.current) {
-          clearTimeout(timerRef.current);
-        }
+        if (timerRef.current) clearTimeout(timerRef.current);
         timerRef.current = setTimeout(() => {
-          log2.debug("[useElementState] Syncing to tree", { elementKey });
+          log2.debug("[useElementState] syncing to tree", { elementKey });
           updateUITree((tree) => {
-            const element = tree.elements[elementKey];
-            if (element) {
+            const el = tree.elements[elementKey];
+            if (el) {
               return {
                 ...tree,
                 elements: {
                   ...tree.elements,
                   [elementKey]: {
-                    ...element,
-                    props: { ...element.props, ...updates }
+                    ...el,
+                    props: { ...el.props, ...updates }
                   }
                 }
               };
@@ -4706,18 +4678,6 @@ function useElementState(elementKey, initialProps, options = {}) {
     },
     [elementKey, updateComponentState, updateUITree, syncToTree, debounceMs]
   );
-  (0, import_react21.useEffect)(() => {
-    if (Object.keys(initialProps).length === 0) return;
-    const nonDirtyUpdates = {};
-    for (const [key, value] of Object.entries(initialProps)) {
-      if (!dirtyFieldsRef.current.has(key)) {
-        nonDirtyUpdates[key] = value;
-      }
-    }
-    if (Object.keys(nonDirtyUpdates).length > 0) {
-      updateComponentState(elementKey, nonDirtyUpdates);
-    }
-  }, [elementKey, initialProps, updateComponentState]);
   return [mergedState, updateState];
 }
 
@@ -6965,6 +6925,7 @@ function useStreamSession(bridge, resetPlanExecution) {
   }, [conversation]);
   const clear = (0, import_react32.useCallback)(() => {
     bridge.clear();
+    useStore.getState().clearAllComponentState();
     setConversation([]);
     conversationRef.current = [];
     setError(null);

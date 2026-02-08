@@ -1,29 +1,26 @@
 /**
- * useElementState - Hook for component state management via Zustand
+ * useElementState — Framework hook for streaming-safe component state.
  *
- * Replaces useState in domain components. State is automatically:
- * 1. Stored in Zustand (ComponentStateSlice)
- * 2. Synced to UI tree (optional, default: true)
- * 3. Sent to AI in API requests
+ * Provides a React-like `[state, update]` tuple where:
  *
- * Merge strategy:
- * - `initialProps` (from tree) is always the base — reflects latest patches
- *   during streaming without stale overrides.
- * - Only fields explicitly modified by the user via `updateState` ("dirty
- *   fields") are read from `componentState` and applied on top, so user
- *   edits survive tree updates.
+ * - **`state`** = tree props (always fresh from streaming patches)
+ *   overlaid with user overrides stored in Zustand.
+ * - **`update(partial)`** writes ONLY to the Zustand override layer,
+ *   then debounce-syncs back to the UI tree for snapshot consistency.
  *
- * @example
- * ```tsx
- * function Workout({ element }: ComponentRenderProps) {
- *   const [state, updateState] = useElementState(element.key, {
- *     items: element.props.items,
- *   });
+ * ### Why this works during streaming
  *
- *   // state.items contains updated data
- *   // updateState({ items: newItems }) syncs automatically
- * }
- * ```
+ * `componentState[key]` is populated exclusively by `updateState` calls
+ * (user interactions). It is never pre-seeded with tree data.
+ * Therefore every field in `componentState[key]` is — by construction —
+ * a user override, and the spread `{ ...initialProps, ...overrides }`
+ * always yields the correct merge without any dirty-field tracking.
+ *
+ * ### Data sent to AI
+ *
+ * At request time the full UI tree is sent alongside `componentState`.
+ * The tree carries streaming-generated data; `componentState` carries
+ * user modifications. The AI sees both, no duplication.
  *
  * @module hooks/useElementState
  */
@@ -34,19 +31,20 @@ import { useStore } from "../store";
 const log = loggers.react;
 
 export interface UseElementStateOptions {
-  /** Auto-sync to UI tree (default: true) */
+  /** Auto-sync user overrides back to the UI tree (default: true) */
   syncToTree?: boolean;
-  /** Debounce ms for tree sync (default: 300) */
+  /** Debounce interval in ms for tree sync (default: 300) */
   debounceMs?: number;
 }
 
 /**
- * Hook to manage component state via Zustand with automatic tree sync
+ * Manages per-element component state with automatic Zustand persistence
+ * and debounced tree synchronisation.
  *
- * @param elementKey - Unique key of the element
- * @param initialProps - Initial props from tree
- * @param options - Configuration options
- * @returns Tuple of [mergedState, updateFunction]
+ * @param elementKey  Unique element identifier in the UI tree
+ * @param initialProps  Current props from the tree (reactive to streaming patches)
+ * @param options  Optional configuration
+ * @returns `[mergedState, updateState]` tuple
  */
 export function useElementState<T extends Record<string, unknown>>(
   elementKey: string,
@@ -55,76 +53,55 @@ export function useElementState<T extends Record<string, unknown>>(
 ): [T, (updates: Partial<T>) => void] {
   const { syncToTree = true, debounceMs = 300 } = options;
 
-  // Zustand selectors
-  const componentState = useStore((s) => s.componentState[elementKey]);
+  // Zustand selectors — stable references from the store
+  const overrides = useStore((s) => s.componentState[elementKey]);
   const updateComponentState = useStore((s) => s.updateComponentState);
   const updateUITree = useStore((s) => s.updateUITree);
 
-  // Refs
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Track fields explicitly modified by user via updateState.
-  // Only these fields are read from componentState; everything else
-  // comes straight from initialProps (the tree), guaranteeing streaming
-  // patches are never masked by a stale componentState snapshot.
-  const dirtyFieldsRef = useRef<Set<string>>(new Set());
+  // ── Merge ────────────────────────────────────────────────────────────────
+  // Tree props as base, user overrides on top.
+  // `overrides` is `undefined` until the first `updateState` call,
+  // so during pure streaming the component sees tree data verbatim.
+  const mergedState = useMemo<T>(
+    () =>
+      overrides
+        ? ({ ...initialProps, ...(overrides as Partial<T>) } as T)
+        : initialProps,
+    [initialProps, overrides],
+  );
 
-  // Merge: tree props as base, user-modified ("dirty") fields from
-  // componentState layered on top.
-  const mergedState = useMemo<T>(() => {
-    const base = { ...initialProps };
-    if (componentState) {
-      for (const field of dirtyFieldsRef.current) {
-        if (field in componentState) {
-          (base as Record<string, unknown>)[field] = componentState[field];
-        }
-      }
-    }
-    return base as T;
-    // componentState is in deps so the memo re-runs when updateState writes
-    // to Zustand, even though we only read dirty fields from it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialProps, componentState]);
-
-  // Cleanup timer on unmount
+  // ── Cleanup ──────────────────────────────────────────────────────────────
   useEffect(() => {
     return () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-      }
+      if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, []);
 
-  // Update function — marks touched fields as dirty so they survive
-  // future tree updates, writes to Zustand, and syncs to tree.
+  // ── Update ───────────────────────────────────────────────────────────────
+  // Writes to Zustand immediately (reactive), then debounce-syncs to the
+  // UI tree so that turn snapshots and subsequent AI requests include the
+  // user's changes.
   const updateState = useCallback(
     (updates: Partial<T>) => {
-      // Mark fields as user-modified
-      for (const key of Object.keys(updates)) {
-        dirtyFieldsRef.current.add(key);
-      }
-
-      // Update Zustand immediately
       updateComponentState(elementKey, updates as Record<string, unknown>);
 
-      // Sync to tree (debounced)
       if (syncToTree) {
-        if (timerRef.current) {
-          clearTimeout(timerRef.current);
-        }
+        if (timerRef.current) clearTimeout(timerRef.current);
 
         timerRef.current = setTimeout(() => {
-          log.debug("[useElementState] Syncing to tree", { elementKey });
+          log.debug("[useElementState] syncing to tree", { elementKey });
           updateUITree((tree) => {
-            const element = tree.elements[elementKey];
-            if (element) {
+            const el = tree.elements[elementKey];
+            if (el) {
               return {
                 ...tree,
                 elements: {
                   ...tree.elements,
                   [elementKey]: {
-                    ...element,
-                    props: { ...element.props, ...updates },
+                    ...el,
+                    props: { ...el.props, ...updates },
                   },
                 },
               };
@@ -137,24 +114,6 @@ export function useElementState<T extends Record<string, unknown>>(
     },
     [elementKey, updateComponentState, updateUITree, syncToTree, debounceMs],
   );
-
-  // Keep componentState in sync for AI context (proactive AI reads this).
-  // Writes non-dirty fields from initialProps so the AI always sees the
-  // latest tree data; dirty fields are left untouched (already current
-  // from updateState calls).
-  useEffect(() => {
-    if (Object.keys(initialProps).length === 0) return;
-
-    const nonDirtyUpdates: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(initialProps)) {
-      if (!dirtyFieldsRef.current.has(key)) {
-        nonDirtyUpdates[key] = value;
-      }
-    }
-    if (Object.keys(nonDirtyUpdates).length > 0) {
-      updateComponentState(elementKey, nonDirtyUpdates);
-    }
-  }, [elementKey, initialProps, updateComponentState]);
 
   return [mergedState, updateState];
 }

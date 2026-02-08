@@ -1,58 +1,38 @@
 /**
- * ComponentStateSlice - Centralized component state management
+ * ComponentStateSlice — User-override layer for domain components.
  *
- * Each component can register its state here via useElementState hook.
- * This state is automatically:
- * 1. Stored in Zustand (reactive)
- * 2. Synced to UI tree (for AI context)
- * 3. Included in API requests
+ * Stores ONLY fields that were explicitly modified by the user
+ * (via `useElementState.updateState`). Tree-sourced data is NOT
+ * duplicated here — it lives in the UITree slice.
+ *
+ * At request time both the tree and this slice are sent to the AI,
+ * giving it the complete picture without redundancy.
  *
  * @module store/slices/component-state
  */
 import type { SliceCreator } from "../types";
 
 export interface ComponentStateSlice {
-  /** State for each element, indexed by elementKey */
+  /** Per-element user overrides, indexed by elementKey */
   componentState: Record<string, Record<string, unknown>>;
 
-  /** Set entire state for an element */
-  setComponentState: (
-    elementKey: string,
-    state: Record<string, unknown>,
-  ) => void;
-
-  /** Update specific fields in element state (shallow merge) */
+  /** Shallow-merge updates into an element's overrides */
   updateComponentState: (
     elementKey: string,
     updates: Record<string, unknown>,
   ) => void;
 
-  /** Deep merge updates into element state */
-  mergeComponentState: (
-    elementKey: string,
-    updates: Record<string, unknown>,
-  ) => void;
-
-  /** Clear state for a specific element */
+  /** Remove all overrides for a specific element */
   clearComponentState: (elementKey: string) => void;
 
-  /** Clear all component state (e.g., on chat clear) */
+  /** Remove all overrides (e.g. on chat clear) */
   clearAllComponentState: () => void;
-
-  /** Get state for an element (returns empty object if not found) */
-  getElementState: (elementKey: string) => Record<string, unknown>;
 }
 
 export const createComponentStateSlice: SliceCreator<ComponentStateSlice> = (
   set,
-  get,
 ) => ({
   componentState: {},
-
-  setComponentState: (elementKey, state) =>
-    set((s) => {
-      s.componentState[elementKey] = state;
-    }),
 
   updateComponentState: (elementKey, updates) =>
     set((s) => {
@@ -62,20 +42,10 @@ export const createComponentStateSlice: SliceCreator<ComponentStateSlice> = (
       Object.assign(s.componentState[elementKey], updates);
     }),
 
-  mergeComponentState: (elementKey, updates) =>
-    set((s) => {
-      s.componentState[elementKey] = {
-        ...(s.componentState[elementKey] ?? {}),
-        ...updates,
-      };
-    }),
-
   clearComponentState: (elementKey) =>
     set((s) => {
       delete s.componentState[elementKey];
     }),
 
   clearAllComponentState: () => set({ componentState: {} }),
-
-  getElementState: (elementKey) => get().componentState[elementKey] ?? {},
 });
