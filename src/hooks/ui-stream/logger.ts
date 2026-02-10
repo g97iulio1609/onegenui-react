@@ -9,8 +9,9 @@
 
 const DEBUG =
   typeof window !== "undefined" &&
-  process.env.NODE_ENV === "development" &&
-  process.env.NEXT_PUBLIC_DEBUG === "true";
+  typeof process !== "undefined" &&
+  process.env?.NODE_ENV === "development" &&
+  process.env?.NEXT_PUBLIC_DEBUG === "true";
 
 function formatLog(level: string, message: string, data?: unknown): string {
   const timestamp = new Date().toISOString();

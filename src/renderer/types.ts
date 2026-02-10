@@ -58,6 +58,7 @@ export type ComponentRenderer<P = Record<string, unknown>> = ComponentType<
 /**
  * Registry of component renderers
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- ComponentRenderer is generic, registry values accept any props
 export type ComponentRegistry = Record<string, ComponentRenderer<any>>;
 
 /**

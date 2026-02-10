@@ -138,16 +138,18 @@ export function ErrorFallback({
 export function withErrorBoundary<P extends object>(
   WrappedComponent: React.ComponentType<P>,
   options: Omit<ErrorBoundaryProps, "children"> = {},
-): React.FC<P> {
+): (props: P) => ReactNode {
   const displayName = WrappedComponent.displayName || WrappedComponent.name || "Component";
-  
-  const WithErrorBoundary: React.FC<P> = (props) => (
-    <ErrorBoundary {...options} name={displayName}>
-      <WrappedComponent {...props} />
-    </ErrorBoundary>
-  );
-  
+
+  function WithErrorBoundary(props: P): ReactNode {
+    return (
+      <ErrorBoundary {...options} name={displayName}>
+        <WrappedComponent {...props} />
+      </ErrorBoundary>
+    );
+  }
+
   WithErrorBoundary.displayName = `withErrorBoundary(${displayName})`;
-  
+
   return WithErrorBoundary;
 }

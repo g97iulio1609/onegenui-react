@@ -99,7 +99,7 @@ export const useStore: OneGenUIStore = create<StoreState>()(
     ),
     {
       name: "onegenui-store",
-      enabled: process.env.NODE_ENV !== "production",
+      enabled: typeof process !== "undefined" && process.env?.NODE_ENV !== "production",
     },
   ),
 ) as OneGenUIStore;

@@ -44,7 +44,7 @@ export function createPlaceholder(key: string, turnId?: string): UIElement {
 export function isPlaceholder(element: UIElement): boolean {
   return (
     element.type === PLACEHOLDER_TYPE ||
-    (element._meta as any)?.isPlaceholder === true
+    element._meta?.isPlaceholder === true
   );
 }
 

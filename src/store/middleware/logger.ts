@@ -23,7 +23,7 @@ const loggerImpl: LoggerImpl = (f, name) => (set, get, store) => {
     set(...(args as Parameters<typeof set>));
     const nextState = get();
 
-    if (process.env.NODE_ENV !== "production") {
+    if (typeof process !== "undefined" && process.env?.NODE_ENV !== "production") {
       console.groupCollapsed(
         `%c${name || "store"} %caction`,
         "color: #9e9e9e; font-weight: bold",
